@@ -359,15 +359,27 @@ Run against all 5 HEIC test images with --debug. For each, print:
 
 ---
 
-## Phase 5: Multi-Shot Glare Compositing (Priority 1c)
+## Phase 5: Multi-Shot Glare Compositing (Priority 1c) — **DEFERRED**
+
+> **⚠️ NOTE:** This phase is deferred until we have appropriate test images. We need 3-4 photos of the SAME album page taken at different angles to properly test multi-shot compositing.
+>
+> **Why deferred:** The current test image set doesn't include multiple shots of the same page at different angles, which is essential for developing and validating this feature.
+>
+> **What's needed before implementing:**
+> - Take 3-4 photos of the same album page (e.g., three_pics) at different tilt angles (±15-20° variations)
+> - Each shot should have glare in different positions while the photos underneath remain in the same location
+> - Save these in `test-images/multi_shot/` directory
+> - Minimum: 2 different album pages, each with 3-4 angle variations
+>
+> **Current plan:** Moving to Phase 6 (Photo Detection & Splitting - Priority 2) to continue building the core pipeline.
 
 **Goal:** Best-quality glare removal using multiple shots of the same page at different angles.
 
 **Prerequisites — Test Images:**
 ```bash
-# Ensure test images are downloaded before starting this phase
-bash scripts/fetch-test-images.sh
-ls test-images/  # Should show 10 files (5 HEIC + 5 DNG)
+# REQUIRED: Multi-angle test images not yet available
+# Need to capture 3-4 photos of the same album page at different angles
+# Save in test-images/multi_shot/ before implementing this phase
 ```
 
 **Before this phase:** Take 3-4 photos of the SAME album page (e.g., the three_pics page) at slightly different tilt angles. Save them in `test-images/multi_shot/`.
@@ -676,12 +688,12 @@ on a downscaled image then applying the mask at full resolution?"
 ## Milestone Checklist
 
 ```
-[ ] Phase 1:  Project scaffold, HEIC + DNG loading, CLI skeleton
-[ ] Phase 2:  Page detection, perspective correction
-[ ] Phase 3:  Glare detection (detection only — critical, take your time)
-[ ] Phase 4:  Single-shot glare removal
-[ ] Phase 5:  Multi-shot glare compositing
-[ ] Phase 6:  Photo detection & splitting
+[✓] Phase 1:  Project scaffold, HEIC + DNG loading, CLI skeleton
+[✓] Phase 2:  Page detection, perspective correction
+[✓] Phase 3:  Glare detection (detection only — critical, take your time)
+[✓] Phase 4:  Single-shot glare removal
+[⏸] Phase 5:  Multi-shot glare compositing — DEFERRED (need multi-angle test images)
+[ ] Phase 6:  Photo detection & splitting — IN PROGRESS
 [ ] Phase 7:  Geometry correction (keystone, rotation, dewarp)
 [ ] Phase 8:  Color restoration (white balance, deyellow, restore, enhance)
 [ ] Phase 9:  Full pipeline, AI quality check, output naming
