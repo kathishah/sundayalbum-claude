@@ -237,6 +237,34 @@ def _detect_photos_contour(
     # Limit to max_count
     detections = detections[:max_count]
 
+    # Filter out small decorations that are significantly smaller than real photos
+    # Use adaptive threshold based on number of detections
+    if len(detections) > 1:
+        areas = [d.area_ratio * total_area for d in detections]
+        max_area = max(areas)
+
+        # Adaptive threshold:
+        # - If we have many detections (> 3), use stricter filter (50%)
+        # - If we have few detections (2-3), use looser filter (35%)
+        threshold = 0.50 if len(detections) > 3 else 0.35
+
+        logger.debug(
+            f"Decoration filter check: {len(detections)} detections, "
+            f"max_area={max_area:.0f}px, threshold={threshold*100:.0f}%"
+        )
+
+        filtered_detections = []
+        for i, (detection, area) in enumerate(zip(detections, areas), 1):
+            ratio = area / max_area
+            if ratio >= threshold:
+                filtered_detections.append(detection)
+                logger.debug(f"  Detection {i}: {area:.0f}px ({ratio*100:.1f}%) -> KEEP")
+            else:
+                logger.debug(f"  Detection {i}: {area:.0f}px ({ratio*100:.1f}%) -> FILTER")
+
+        logger.debug(f"After decoration filter: {len(filtered_detections)} remaining")
+        detections = filtered_detections
+
     # Re-sort by position (top-to-bottom, left-to-right) for user-friendly ordering
     detections.sort(key=lambda d: (d.bbox[1], d.bbox[0]))
 
