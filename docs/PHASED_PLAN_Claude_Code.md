@@ -13,6 +13,10 @@ Before starting Phase 1, do this manually:
 ```bash
 cd sundayalbum-claude
 
+# Download test images (required for all phases)
+# This fetches 10 test images (5 HEIC + 5 DNG) from GitHub releases
+bash scripts/fetch-test-images.sh
+
 # Verify CLAUDE.md and test images are in place
 ls CLAUDE.md
 ls test-images/
@@ -56,6 +60,13 @@ EOF
 ## Phase 1: Project Scaffold + Image Loading (HEIC & DNG)
 
 **Goal:** Project structure, dependencies, CLI skeleton, and — critically — reliable loading of HEIC and DNG files from your iPhone 17 Pro.
+
+**Prerequisites — Test Images:**
+```bash
+# Ensure test images are downloaded before starting this phase
+bash scripts/fetch-test-images.sh
+ls test-images/  # Should show 10 files (5 HEIC + 5 DNG)
+```
 
 **Claude Code prompt:**
 ```
@@ -131,6 +142,13 @@ Read CLAUDE.md for project context. Set up the Sunday Album project:
 
 **Goal:** Detect album page boundaries and correct perspective. This matters most for the album page shots (three_pics, two_pics) which were likely photographed at a slight angle.
 
+**Prerequisites — Test Images:**
+```bash
+# Ensure test images are downloaded before starting this phase
+bash scripts/fetch-test-images.sh
+ls test-images/  # Should show 10 files (5 HEIC + 5 DNG)
+```
+
 **Claude Code prompt:**
 ```
 Read CLAUDE.md for context. Implement page detection and perspective correction for Sunday Album.
@@ -173,6 +191,13 @@ Run against ALL 5 HEIC test images with --debug. Show results summary.
 ## Phase 3: Glare Detection (Priority 1a)
 
 **Goal:** Accurately detect glare regions. Detection only — no removal yet. This is the most important step to get right.
+
+**Prerequisites — Test Images:**
+```bash
+# Ensure test images are downloaded before starting this phase
+bash scripts/fetch-test-images.sh
+ls test-images/  # Should show 10 files (5 HEIC + 5 DNG)
+```
 
 **Claude Code prompt:**
 ```
@@ -264,6 +289,13 @@ closing kernel size and increase the minimum region area filter."
 
 **Goal:** Remove detected glare from a single image using inpainting.
 
+**Prerequisites — Test Images:**
+```bash
+# Ensure test images are downloaded before starting this phase
+bash scripts/fetch-test-images.sh
+ls test-images/  # Should show 10 files (5 HEIC + 5 DNG)
+```
+
 **Claude Code prompt:**
 ```
 Read CLAUDE.md for context. Implement single-shot glare removal for Sunday Album.
@@ -331,6 +363,13 @@ Run against all 5 HEIC test images with --debug. For each, print:
 
 **Goal:** Best-quality glare removal using multiple shots of the same page at different angles.
 
+**Prerequisites — Test Images:**
+```bash
+# Ensure test images are downloaded before starting this phase
+bash scripts/fetch-test-images.sh
+ls test-images/  # Should show 10 files (5 HEIC + 5 DNG)
+```
+
 **Before this phase:** Take 3-4 photos of the SAME album page (e.g., the three_pics page) at slightly different tilt angles. Save them in `test-images/multi_shot/`.
 
 **Claude Code prompt:**
@@ -387,6 +426,13 @@ Print: alignment_scores per image, per-image glare coverage%, composite confiden
 ## Phase 6: Photo Detection & Splitting (Priority 2)
 
 **Goal:** Detect individual photos on album pages and extract them.
+
+**Prerequisites — Test Images:**
+```bash
+# Ensure test images are downloaded before starting this phase
+bash scripts/fetch-test-images.sh
+ls test-images/  # Should show 10 files (5 HEIC + 5 DNG)
+```
 
 **Claude Code prompt:**
 ```
@@ -445,6 +491,13 @@ Run against ALL 5 HEIC test images with --debug. For each:
 
 ## Phase 7: Per-Photo Geometry Correction (Priority 3)
 
+**Prerequisites — Test Images:**
+```bash
+# Ensure test images are downloaded before starting this phase
+bash scripts/fetch-test-images.sh
+ls test-images/  # Should show 10 files (5 HEIC + 5 DNG)
+```
+
 **Claude Code prompt:**
 ```
 Read CLAUDE.md for context. Implement per-photo geometry correction.
@@ -480,6 +533,13 @@ Run against all HEIC samples. Print per photo: keystone_applied, rotation_angle,
 ---
 
 ## Phase 8: Color Restoration (Priority 4)
+
+**Prerequisites — Test Images:**
+```bash
+# Ensure test images are downloaded before starting this phase
+bash scripts/fetch-test-images.sh
+ls test-images/  # Should show 10 files (5 HEIC + 5 DNG)
+```
 
 **Claude Code prompt:**
 ```
@@ -522,6 +582,13 @@ Run against all HEIC samples. Print: yellowing_score, saturation_before/after, s
 
 ## Phase 9: End-to-End Pipeline & AI Quality Check
 
+**Prerequisites — Test Images:**
+```bash
+# Ensure test images are downloaded before starting this phase
+bash scripts/fetch-test-images.sh
+ls test-images/  # Should show 10 files (5 HEIC + 5 DNG)
+```
+
 **Claude Code prompt:**
 ```
 Read CLAUDE.md for context. Wire up the full end-to-end pipeline and add AI quality assessment.
@@ -562,6 +629,13 @@ Print a final table:
 ---
 
 ## Phase 10: Iteration & Edge Cases
+
+**Prerequisites — Test Images:**
+```bash
+# Ensure test images are downloaded before starting this phase
+bash scripts/fetch-test-images.sh
+ls test-images/  # Should show 10 files (5 HEIC + 5 DNG)
+```
 
 At this point you have a working pipeline. Use your real album pages to find and fix issues.
 
