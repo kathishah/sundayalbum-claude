@@ -12,6 +12,8 @@ from src.preprocessing.loader import load_image, ImageMetadata
 from src.preprocessing.normalizer import normalize, NormalizationResult
 from src.page_detection.detector import detect_page, draw_page_detection, PageDetection
 from src.page_detection.perspective import correct_perspective
+from src.glare.detector import detect_glare, draw_glare_overlay, GlareDetection
+from src.glare.confidence import compute_glare_confidence
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +74,8 @@ class PipelineResult:
     processing_time: float
     steps_completed: List[str]
     page_detection: Optional[PageDetection] = None
+    glare_detection: Optional[GlareDetection] = None
+    glare_confidence: Optional[float] = None
 
 
 class Pipeline:
@@ -187,6 +191,69 @@ class Pipeline:
                 logger.warning(f"Page detection failed, passing through: {e}")
                 self.step_times['page_detect'] = time.time() - step_start
 
+        # Step 4: Glare detection
+        glare_detection_result: Optional[GlareDetection] = None
+        glare_confidence_score: Optional[float] = None
+        should_run_glare_detect = steps_filter is None or 'glare' in steps_filter
+
+        if should_run_glare_detect:
+            step_start = time.time()
+            try:
+                glare_detection_result = detect_glare(
+                    working_image,
+                    intensity_threshold=self.config.glare_intensity_threshold,
+                    saturation_threshold=self.config.glare_saturation_threshold,
+                    min_area=self.config.glare_min_area,
+                    glare_type=self.config.glare_type,
+                )
+
+                # Compute confidence
+                glare_confidence_score = compute_glare_confidence(
+                    working_image, glare_detection_result.mask
+                )
+
+                # Save debug outputs
+                if debug_dir:
+                    from src.utils.debug import save_debug_image, save_debug_text
+                    import cv2
+
+                    # 04_glare_mask.png — binary mask (white = detected glare)
+                    save_debug_image(
+                        glare_detection_result.mask,
+                        debug_dir / "04_glare_mask.png",
+                        "Detected glare regions (binary mask)"
+                    )
+
+                    # 05_glare_overlay.jpg — original with semi-transparent overlay
+                    overlay = draw_glare_overlay(working_image, glare_detection_result)
+                    save_debug_image(
+                        overlay,
+                        debug_dir / "05_glare_overlay.jpg",
+                        f"Glare overlay (type={glare_detection_result.glare_type}, "
+                        f"area={glare_detection_result.total_glare_area_ratio:.3f})"
+                    )
+
+                    # 05_glare_type.txt — classified glare type
+                    save_debug_text(
+                        f"Detected glare type: {glare_detection_result.glare_type}\n"
+                        f"Total glare area ratio: {glare_detection_result.total_glare_area_ratio:.4f}\n"
+                        f"Number of regions: {len(glare_detection_result.regions)}\n"
+                        f"Confidence score: {glare_confidence_score:.4f}\n",
+                        debug_dir / "05_glare_type.txt"
+                    )
+
+                self.step_times['glare_detect'] = time.time() - step_start
+                steps_completed.append('glare_detect')
+                logger.info(
+                    f"Glare detection time: {self.step_times['glare_detect']:.3f}s, "
+                    f"type={glare_detection_result.glare_type}, "
+                    f"confidence={glare_confidence_score:.3f}"
+                )
+
+            except Exception as e:
+                logger.warning(f"Glare detection failed, passing through: {e}")
+                self.step_times['glare_detect'] = time.time() - step_start
+
         # Current output is the working image (after page detection + perspective correction)
         output_images = [working_image]
 
@@ -199,6 +266,8 @@ class Pipeline:
             processing_time=total_time,
             steps_completed=steps_completed,
             page_detection=page_detection_result,
+            glare_detection=glare_detection_result,
+            glare_confidence=glare_confidence_score,
         )
 
     def process_batch(
