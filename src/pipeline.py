@@ -10,6 +10,8 @@ import numpy as np
 
 from src.preprocessing.loader import load_image, ImageMetadata
 from src.preprocessing.normalizer import normalize, NormalizationResult
+from src.page_detection.detector import detect_page, draw_page_detection, PageDetection
+from src.page_detection.perspective import correct_perspective
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +71,7 @@ class PipelineResult:
     metadata: ImageMetadata
     processing_time: float
     steps_completed: List[str]
+    page_detection: Optional[PageDetection] = None
 
 
 class Pipeline:
@@ -100,7 +103,12 @@ class Pipeline:
             PipelineResult with processed images and metadata
         """
         start_time = time.time()
-        steps_completed = []
+        steps_completed: List[str] = []
+        debug_dir: Optional[Path] = None
+
+        if debug_output_dir:
+            debug_dir = Path(debug_output_dir)
+            debug_dir.mkdir(parents=True, exist_ok=True)
 
         logger.info(f"Processing: {input_path}")
 
@@ -111,11 +119,8 @@ class Pipeline:
         steps_completed.append('load')
         logger.info(f"Load time: {self.step_times['load']:.3f}s")
 
-        # Save debug output if requested
-        if debug_output_dir:
+        if debug_dir:
             from src.utils.debug import save_debug_image
-            debug_dir = Path(debug_output_dir)
-            debug_dir.mkdir(parents=True, exist_ok=True)
             save_debug_image(
                 image,
                 debug_dir / "01_loaded.jpg",
@@ -129,24 +134,61 @@ class Pipeline:
         steps_completed.append('normalize')
         logger.info(f"Normalize time: {self.step_times['normalize']:.3f}s")
 
-        # Save debug output if requested
-        if debug_output_dir:
-            from src.utils.debug import save_debug_image
-            debug_dir = Path(debug_output_dir)
-            save_debug_image(
-                norm_result.image,
-                debug_dir / "02_normalized.jpg",
-                f"Normalized to {norm_result.image.shape[1]}x{norm_result.image.shape[0]}"
-            )
-            save_debug_image(
-                norm_result.thumbnail,
-                debug_dir / "02_thumbnail.jpg",
-                f"Thumbnail {norm_result.thumbnail.shape[1]}x{norm_result.thumbnail.shape[0]}"
-            )
+        working_image = norm_result.image
 
-        # For Phase 1, we just return the normalized image
-        # Future phases will add more steps here
-        output_images = [norm_result.image]
+        # Step 3: Page detection & perspective correction
+        page_detection_result: Optional[PageDetection] = None
+        should_run_page_detect = steps_filter is None or 'page_detect' in steps_filter
+
+        if should_run_page_detect:
+            step_start = time.time()
+            try:
+                page_detection_result = detect_page(
+                    working_image,
+                    blur_kernel=self.config.page_detect_blur_kernel,
+                    canny_low=self.config.page_detect_canny_low,
+                    canny_high=self.config.page_detect_canny_high,
+                    min_area_ratio=self.config.page_detect_min_area_ratio,
+                )
+
+                # Save debug: page boundary overlay
+                if debug_dir:
+                    from src.utils.debug import save_debug_image
+                    overlay = draw_page_detection(working_image, page_detection_result)
+                    save_debug_image(
+                        overlay,
+                        debug_dir / "02_page_detected.jpg",
+                        f"Page detection (confidence={page_detection_result.confidence:.2f}, "
+                        f"full_frame={page_detection_result.is_full_frame})"
+                    )
+
+                # Apply perspective correction if a boundary was found
+                if not page_detection_result.is_full_frame:
+                    working_image = correct_perspective(
+                        working_image,
+                        page_detection_result.corners,
+                    )
+
+                    if debug_dir:
+                        from src.utils.debug import save_debug_image
+                        save_debug_image(
+                            working_image,
+                            debug_dir / "03_page_warped.jpg",
+                            "After perspective correction"
+                        )
+                else:
+                    logger.info("Full frame detected, skipping perspective correction")
+
+                self.step_times['page_detect'] = time.time() - step_start
+                steps_completed.append('page_detect')
+                logger.info(f"Page detection time: {self.step_times['page_detect']:.3f}s")
+
+            except Exception as e:
+                logger.warning(f"Page detection failed, passing through: {e}")
+                self.step_times['page_detect'] = time.time() - step_start
+
+        # Current output is the working image (after page detection + perspective correction)
+        output_images = [working_image]
 
         total_time = time.time() - start_time
         logger.info(f"Total processing time: {total_time:.3f}s")
@@ -155,7 +197,8 @@ class Pipeline:
             output_images=output_images,
             metadata=metadata,
             processing_time=total_time,
-            steps_completed=steps_completed
+            steps_completed=steps_completed,
+            page_detection=page_detection_result,
         )
 
     def process_batch(
