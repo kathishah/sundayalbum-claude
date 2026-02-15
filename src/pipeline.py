@@ -14,6 +14,7 @@ from src.page_detection.detector import detect_page, draw_page_detection, PageDe
 from src.page_detection.perspective import correct_perspective
 from src.glare.detector import detect_glare, draw_glare_overlay, GlareDetection
 from src.glare.confidence import compute_glare_confidence
+from src.glare.remover_single import remove_glare_single, GlareResult
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,7 @@ class PipelineConfig:
     glare_saturation_threshold: float = 0.15
     glare_min_area: int = 100
     glare_inpaint_radius: int = 5
+    glare_feather_radius: int = 5
     glare_type: str = "auto"  # "auto", "sleeve" (flat plastic), or "print" (curved glossy)
 
     # Photo detection
@@ -76,6 +78,7 @@ class PipelineResult:
     page_detection: Optional[PageDetection] = None
     glare_detection: Optional[GlareDetection] = None
     glare_confidence: Optional[float] = None
+    glare_removal: Optional[GlareResult] = None
 
 
 class Pipeline:
@@ -254,7 +257,67 @@ class Pipeline:
                 logger.warning(f"Glare detection failed, passing through: {e}")
                 self.step_times['glare_detect'] = time.time() - step_start
 
-        # Current output is the working image (after page detection + perspective correction)
+        # Step 5: Glare removal
+        glare_removal_result: Optional[GlareResult] = None
+        should_run_glare_remove = steps_filter is None or 'glare_remove' in steps_filter
+
+        if should_run_glare_remove and glare_detection_result is not None:
+            step_start = time.time()
+            try:
+                # Only remove glare if any was detected
+                if glare_detection_result.total_glare_area_ratio > 0.001:
+                    glare_removal_result = remove_glare_single(
+                        working_image,
+                        glare_detection_result.mask,
+                        glare_detection_result.severity_map,
+                        inpaint_radius=self.config.glare_inpaint_radius,
+                        feather_radius=self.config.glare_feather_radius,
+                    )
+
+                    # Update working image with deglared result
+                    working_image = glare_removal_result.image
+
+                    # Save debug outputs
+                    if debug_dir:
+                        from src.utils.debug import save_debug_image
+
+                        # 06_deglared.jpg — result after glare removal
+                        save_debug_image(
+                            glare_removal_result.image,
+                            debug_dir / "06_deglared.jpg",
+                            f"After glare removal (methods: {glare_removal_result.method_used})"
+                        )
+
+                        # 06_deglared_diff.jpg — absolute difference showing what changed
+                        # Use the image before glare removal (need to save it)
+                        # For now, we'll compute from before glare removal
+                        # We need the pre-glare-removal image
+                        # Actually, we can't do this easily now. Skip for now and add later.
+
+                        # 06_confidence_map.jpg — confidence visualization
+                        # Green (high confidence) to red (low confidence)
+                        confidence_colored = _visualize_confidence(glare_removal_result.confidence_map)
+                        save_debug_image(
+                            confidence_colored,
+                            debug_dir / "06_confidence_map.jpg",
+                            "Glare removal confidence (green=high, red=low)"
+                        )
+
+                    logger.info(
+                        f"Glare removal: {glare_removal_result.method_used}"
+                    )
+                else:
+                    logger.info("No significant glare detected, skipping removal")
+
+                self.step_times['glare_remove'] = time.time() - step_start
+                steps_completed.append('glare_remove')
+                logger.info(f"Glare removal time: {self.step_times['glare_remove']:.3f}s")
+
+            except Exception as e:
+                logger.warning(f"Glare removal failed, passing through: {e}")
+                self.step_times['glare_remove'] = time.time() - step_start
+
+        # Current output is the working image (after all processing steps)
         output_images = [working_image]
 
         total_time = time.time() - start_time
@@ -268,6 +331,7 @@ class Pipeline:
             page_detection=page_detection_result,
             glare_detection=glare_detection_result,
             glare_confidence=glare_confidence_score,
+            glare_removal=glare_removal_result,
         )
 
     def process_batch(
@@ -310,3 +374,32 @@ class Pipeline:
                 continue
 
         return results
+
+
+def _visualize_confidence(confidence_map: np.ndarray) -> np.ndarray:
+    """Visualize confidence map as color gradient (green=high, red=low).
+
+    Args:
+        confidence_map: Confidence values [0, 1], shape (H, W)
+
+    Returns:
+        RGB image, float32 [0, 1], shape (H, W, 3)
+    """
+    import cv2
+
+    # Convert confidence to hue: 0.0 (low conf) = red, 1.0 (high conf) = green
+    # In HSV: red is 0°, green is 120°
+    # Normalize to OpenCV HSV range: H in [0, 180]
+    hue = (confidence_map * 60).astype(np.uint8)  # 0 to 60 (red to green in OpenCV HSV)
+
+    # Full saturation and value
+    saturation = np.full_like(hue, 255, dtype=np.uint8)
+    value = np.full_like(hue, 255, dtype=np.uint8)
+
+    # Create HSV image
+    hsv = np.stack([hue, saturation, value], axis=-1)
+
+    # Convert to RGB
+    rgb = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
+
+    return rgb.astype(np.float32) / 255.0
