@@ -161,8 +161,18 @@ def process(
             )
 
             # Save output images
+            # Naming convention: SundayAlbum_Page{XX}_Photo{YY}.jpg
+            # For single output, just use Photo{YY}
+            num_outputs = len(result.output_images)
+
             for i, output_image in enumerate(result.output_images, 1):
-                output_filename = f"{input_file.stem}_processed_{i:02d}.jpg"
+                if num_outputs > 1:
+                    # Multiple photos extracted from one page
+                    output_filename = f"SundayAlbum_{input_file.stem}_Photo{i:02d}.jpg"
+                else:
+                    # Single photo (either single print or full page if splitting failed)
+                    output_filename = f"SundayAlbum_{input_file.stem}.jpg"
+
                 output_file_path = output_path / output_filename
 
                 save_debug_image(
@@ -172,7 +182,7 @@ def process(
                     quality=config.jpeg_quality
                 )
 
-                logger.info(f"Saved output: {output_file_path}")
+                logger.info(f"Saved: {output_file_path.name}")
 
             results.append(result)
 
@@ -180,6 +190,7 @@ def process(
             logger.info(f"\nProcessing Summary:")
             logger.info(f"  Format: {result.metadata.format}")
             logger.info(f"  Original size: {result.metadata.original_size[0]}x{result.metadata.original_size[1]}")
+            logger.info(f"  Photos extracted: {result.num_photos_extracted}")
             logger.info(f"  Processing time: {result.processing_time:.3f}s")
             logger.info(f"  Steps completed: {', '.join(result.steps_completed)}")
 

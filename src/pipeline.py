@@ -15,6 +15,8 @@ from src.page_detection.perspective import correct_perspective
 from src.glare.detector import detect_glare, draw_glare_overlay, GlareDetection
 from src.glare.confidence import compute_glare_confidence
 from src.glare.remover_single import remove_glare_single, GlareResult
+from src.photo_detection.detector import detect_photos, draw_photo_detections, PhotoDetection
+from src.photo_detection.splitter import split_photos
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +45,7 @@ class PipelineConfig:
 
     # Photo detection
     photo_detect_method: str = "contour"  # "contour", "yolo", or "claude"
-    photo_detect_min_area_ratio: float = 0.05
+    photo_detect_min_area_ratio: float = 0.02  # 2% of page area (was 0.05)
     photo_detect_max_count: int = 8
 
     # Geometry
@@ -79,6 +81,8 @@ class PipelineResult:
     glare_detection: Optional[GlareDetection] = None
     glare_confidence: Optional[float] = None
     glare_removal: Optional[GlareResult] = None
+    photo_detections: Optional[List[PhotoDetection]] = None
+    num_photos_extracted: int = 0
 
 
 class Pipeline:
@@ -317,8 +321,62 @@ class Pipeline:
                 logger.warning(f"Glare removal failed, passing through: {e}")
                 self.step_times['glare_remove'] = time.time() - step_start
 
-        # Current output is the working image (after all processing steps)
-        output_images = [working_image]
+        # Step 6: Photo detection & splitting
+        photo_detections_result: Optional[List[PhotoDetection]] = None
+        extracted_photos: List[np.ndarray] = []
+        should_run_photo_detect = steps_filter is None or 'photo_detect' in steps_filter
+
+        if should_run_photo_detect:
+            step_start = time.time()
+            try:
+                # Detect individual photos on the page
+                photo_detections_result = detect_photos(
+                    working_image,
+                    min_area_ratio=self.config.photo_detect_min_area_ratio,
+                    max_count=self.config.photo_detect_max_count,
+                    method=self.config.photo_detect_method,
+                )
+
+                # Save debug: photo boundaries overlay
+                if debug_dir:
+                    from src.utils.debug import save_debug_image
+                    overlay = draw_photo_detections(working_image, photo_detections_result)
+                    save_debug_image(
+                        overlay,
+                        debug_dir / "07_photo_boundaries.jpg",
+                        f"Detected {len(photo_detections_result)} photos"
+                    )
+
+                # Extract individual photos
+                if photo_detections_result:
+                    extracted_photos = split_photos(working_image, photo_detections_result)
+
+                    # Save debug: each extracted photo
+                    if debug_dir:
+                        from src.utils.debug import save_debug_image
+                        for i, photo in enumerate(extracted_photos, 1):
+                            save_debug_image(
+                                photo,
+                                debug_dir / f"08_photo_{i:02d}_raw.jpg",
+                                f"Extracted photo {i} ({photo.shape[1]}x{photo.shape[0]})"
+                            )
+
+                self.step_times['photo_detect'] = time.time() - step_start
+                steps_completed.append('photo_detect')
+                logger.info(
+                    f"Photo detection time: {self.step_times['photo_detect']:.3f}s, "
+                    f"detected={len(photo_detections_result)}, extracted={len(extracted_photos)}"
+                )
+
+            except Exception as e:
+                logger.warning(f"Photo detection failed, passing through: {e}")
+                self.step_times['photo_detect'] = time.time() - step_start
+
+        # Output images: if photos were extracted, use them; otherwise use the full working image
+        if extracted_photos:
+            output_images = extracted_photos
+        else:
+            output_images = [working_image]
 
         total_time = time.time() - start_time
         logger.info(f"Total processing time: {total_time:.3f}s")
@@ -332,6 +390,8 @@ class Pipeline:
             glare_detection=glare_detection_result,
             glare_confidence=glare_confidence_score,
             glare_removal=glare_removal_result,
+            photo_detections=photo_detections_result,
+            num_photos_extracted=len(extracted_photos),
         )
 
     def process_batch(
