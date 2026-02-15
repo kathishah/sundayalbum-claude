@@ -15,6 +15,8 @@ from src.page_detection.perspective import correct_perspective
 from src.glare.detector import detect_glare, draw_glare_overlay, GlareDetection
 from src.glare.confidence import compute_glare_confidence
 from src.glare.remover_single import remove_glare_single, GlareResult
+from src.photo_detection.detector import detect_photos, draw_photo_detections, PhotoDetection
+from src.photo_detection.splitter import split_photos
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +45,7 @@ class PipelineConfig:
 
     # Photo detection
     photo_detect_method: str = "contour"  # "contour", "yolo", or "claude"
-    photo_detect_min_area_ratio: float = 0.05
+    photo_detect_min_area_ratio: float = 0.02  # 2% of page area (was 0.05)
     photo_detect_max_count: int = 8
 
     # Geometry
@@ -79,6 +81,8 @@ class PipelineResult:
     glare_detection: Optional[GlareDetection] = None
     glare_confidence: Optional[float] = None
     glare_removal: Optional[GlareResult] = None
+    photo_detections: Optional[List[PhotoDetection]] = None
+    num_photos_extracted: int = 0
 
 
 class Pipeline:
@@ -194,131 +198,163 @@ class Pipeline:
                 logger.warning(f"Page detection failed, passing through: {e}")
                 self.step_times['page_detect'] = time.time() - step_start
 
-        # Step 4: Glare detection
+        # Step 4: Photo detection & splitting (do this BEFORE glare removal)
+        # Rationale: Better to detect individual photos first, then apply glare removal
+        # to each photo separately. This gives better results than removing glare from
+        # the whole page and then splitting.
+        photo_detections_result: Optional[List[PhotoDetection]] = None
+        extracted_photos: List[np.ndarray] = []
+        should_run_photo_detect = steps_filter is None or 'photo_detect' in steps_filter
+
+        if should_run_photo_detect:
+            step_start = time.time()
+            try:
+                # Detect individual photos on the page
+                photo_detections_result = detect_photos(
+                    working_image,
+                    min_area_ratio=self.config.photo_detect_min_area_ratio,
+                    max_count=self.config.photo_detect_max_count,
+                    method=self.config.photo_detect_method,
+                )
+
+                # Save debug: photo boundaries overlay
+                if debug_dir:
+                    from src.utils.debug import save_debug_image
+                    overlay = draw_photo_detections(working_image, photo_detections_result)
+                    save_debug_image(
+                        overlay,
+                        debug_dir / "04_photo_boundaries.jpg",
+                        f"Detected {len(photo_detections_result)} photos"
+                    )
+
+                # Extract individual photos
+                if photo_detections_result:
+                    extracted_photos = split_photos(working_image, photo_detections_result)
+
+                    # Save debug: each extracted photo (before glare removal)
+                    if debug_dir:
+                        from src.utils.debug import save_debug_image
+                        for i, photo in enumerate(extracted_photos, 1):
+                            save_debug_image(
+                                photo,
+                                debug_dir / f"05_photo_{i:02d}_raw.jpg",
+                                f"Extracted photo {i} ({photo.shape[1]}x{photo.shape[0]})"
+                            )
+
+                self.step_times['photo_detect'] = time.time() - step_start
+                steps_completed.append('photo_detect')
+                logger.info(
+                    f"Photo detection time: {self.step_times['photo_detect']:.3f}s, "
+                    f"detected={len(photo_detections_result)}, extracted={len(extracted_photos)}"
+                )
+
+            except Exception as e:
+                logger.warning(f"Photo detection failed, passing through: {e}")
+                self.step_times['photo_detect'] = time.time() - step_start
+
+        # If no photos were extracted, treat the whole page as one photo
+        if not extracted_photos:
+            extracted_photos = [working_image]
+            logger.info("No photos detected, treating entire page as single photo")
+
+        # Step 5: Glare detection & removal (per photo)
+        # Now we process each extracted photo separately for glare
         glare_detection_result: Optional[GlareDetection] = None
         glare_confidence_score: Optional[float] = None
         should_run_glare_detect = steps_filter is None or 'glare' in steps_filter
 
         if should_run_glare_detect:
             step_start = time.time()
+            deglared_photos: List[np.ndarray] = []
+
             try:
-                glare_detection_result = detect_glare(
-                    working_image,
-                    intensity_threshold=self.config.glare_intensity_threshold,
-                    saturation_threshold=self.config.glare_saturation_threshold,
-                    min_area=self.config.glare_min_area,
-                    glare_type=self.config.glare_type,
-                )
+                # Process each photo separately for glare detection and removal
+                for photo_idx, photo in enumerate(extracted_photos, 1):
+                    logger.debug(f"Processing glare for photo {photo_idx}/{len(extracted_photos)}")
 
-                # Compute confidence
-                glare_confidence_score = compute_glare_confidence(
-                    working_image, glare_detection_result.mask
-                )
-
-                # Save debug outputs
-                if debug_dir:
-                    from src.utils.debug import save_debug_image, save_debug_text
-                    import cv2
-
-                    # 04_glare_mask.png — binary mask (white = detected glare)
-                    save_debug_image(
-                        glare_detection_result.mask,
-                        debug_dir / "04_glare_mask.png",
-                        "Detected glare regions (binary mask)"
+                    # Detect glare on this individual photo
+                    photo_glare = detect_glare(
+                        photo,
+                        intensity_threshold=self.config.glare_intensity_threshold,
+                        saturation_threshold=self.config.glare_saturation_threshold,
+                        min_area=self.config.glare_min_area,
+                        glare_type=self.config.glare_type,
                     )
 
-                    # 05_glare_overlay.jpg — original with semi-transparent overlay
-                    overlay = draw_glare_overlay(working_image, glare_detection_result)
-                    save_debug_image(
-                        overlay,
-                        debug_dir / "05_glare_overlay.jpg",
-                        f"Glare overlay (type={glare_detection_result.glare_type}, "
-                        f"area={glare_detection_result.total_glare_area_ratio:.3f})"
-                    )
+                    # Save debug for first photo (to avoid clutter)
+                    if debug_dir and photo_idx == 1:
+                        from src.utils.debug import save_debug_image, save_debug_text
 
-                    # 05_glare_type.txt — classified glare type
-                    save_debug_text(
-                        f"Detected glare type: {glare_detection_result.glare_type}\n"
-                        f"Total glare area ratio: {glare_detection_result.total_glare_area_ratio:.4f}\n"
-                        f"Number of regions: {len(glare_detection_result.regions)}\n"
-                        f"Confidence score: {glare_confidence_score:.4f}\n",
-                        debug_dir / "05_glare_type.txt"
+                        save_debug_image(
+                            photo_glare.mask,
+                            debug_dir / f"06_photo_{photo_idx:02d}_glare_mask.png",
+                            f"Photo {photo_idx} glare mask"
+                        )
+
+                        overlay = draw_glare_overlay(photo, photo_glare)
+                        save_debug_image(
+                            overlay,
+                            debug_dir / f"06_photo_{photo_idx:02d}_glare_overlay.jpg",
+                            f"Photo {photo_idx} glare (type={photo_glare.glare_type})"
+                        )
+
+                    # Remove glare if detected
+                    if photo_glare.total_glare_area_ratio > 0.001:
+                        glare_result = remove_glare_single(
+                            photo,
+                            photo_glare.mask,
+                            photo_glare.severity_map,
+                            inpaint_radius=self.config.glare_inpaint_radius,
+                            feather_radius=self.config.glare_feather_radius,
+                        )
+                        deglared_photo = glare_result.image
+
+                        # Save debug
+                        if debug_dir:
+                            from src.utils.debug import save_debug_image
+                            save_debug_image(
+                                deglared_photo,
+                                debug_dir / f"07_photo_{photo_idx:02d}_deglared.jpg",
+                                f"Photo {photo_idx} after glare removal"
+                            )
+
+                        logger.debug(f"Photo {photo_idx}: removed glare (type={photo_glare.glare_type})")
+                    else:
+                        deglared_photo = photo
+                        logger.debug(f"Photo {photo_idx}: no glare detected")
+
+                    deglared_photos.append(deglared_photo)
+
+                # Update extracted_photos with deglared versions
+                extracted_photos = deglared_photos
+
+                # Store overall stats (use first photo's glare detection for reporting)
+                if len(extracted_photos) > 0:
+                    glare_detection_result = detect_glare(
+                        extracted_photos[0],
+                        intensity_threshold=self.config.glare_intensity_threshold,
+                        saturation_threshold=self.config.glare_saturation_threshold,
+                        min_area=self.config.glare_min_area,
+                        glare_type=self.config.glare_type,
+                    )
+                    glare_confidence_score = compute_glare_confidence(
+                        extracted_photos[0], glare_detection_result.mask
                     )
 
                 self.step_times['glare_detect'] = time.time() - step_start
                 steps_completed.append('glare_detect')
                 logger.info(
-                    f"Glare detection time: {self.step_times['glare_detect']:.3f}s, "
-                    f"type={glare_detection_result.glare_type}, "
-                    f"confidence={glare_confidence_score:.3f}"
+                    f"Glare removal time: {self.step_times['glare_detect']:.3f}s "
+                    f"(processed {len(extracted_photos)} photos)"
                 )
 
             except Exception as e:
-                logger.warning(f"Glare detection failed, passing through: {e}")
-                self.step_times['glare_detect'] = time.time() - step_start
-
-        # Step 5: Glare removal
-        glare_removal_result: Optional[GlareResult] = None
-        should_run_glare_remove = steps_filter is None or 'glare_remove' in steps_filter
-
-        if should_run_glare_remove and glare_detection_result is not None:
-            step_start = time.time()
-            try:
-                # Only remove glare if any was detected
-                if glare_detection_result.total_glare_area_ratio > 0.001:
-                    glare_removal_result = remove_glare_single(
-                        working_image,
-                        glare_detection_result.mask,
-                        glare_detection_result.severity_map,
-                        inpaint_radius=self.config.glare_inpaint_radius,
-                        feather_radius=self.config.glare_feather_radius,
-                    )
-
-                    # Update working image with deglared result
-                    working_image = glare_removal_result.image
-
-                    # Save debug outputs
-                    if debug_dir:
-                        from src.utils.debug import save_debug_image
-
-                        # 06_deglared.jpg — result after glare removal
-                        save_debug_image(
-                            glare_removal_result.image,
-                            debug_dir / "06_deglared.jpg",
-                            f"After glare removal (methods: {glare_removal_result.method_used})"
-                        )
-
-                        # 06_deglared_diff.jpg — absolute difference showing what changed
-                        # Use the image before glare removal (need to save it)
-                        # For now, we'll compute from before glare removal
-                        # We need the pre-glare-removal image
-                        # Actually, we can't do this easily now. Skip for now and add later.
-
-                        # 06_confidence_map.jpg — confidence visualization
-                        # Green (high confidence) to red (low confidence)
-                        confidence_colored = _visualize_confidence(glare_removal_result.confidence_map)
-                        save_debug_image(
-                            confidence_colored,
-                            debug_dir / "06_confidence_map.jpg",
-                            "Glare removal confidence (green=high, red=low)"
-                        )
-
-                    logger.info(
-                        f"Glare removal: {glare_removal_result.method_used}"
-                    )
-                else:
-                    logger.info("No significant glare detected, skipping removal")
-
-                self.step_times['glare_remove'] = time.time() - step_start
-                steps_completed.append('glare_remove')
-                logger.info(f"Glare removal time: {self.step_times['glare_remove']:.3f}s")
-
-            except Exception as e:
                 logger.warning(f"Glare removal failed, passing through: {e}")
-                self.step_times['glare_remove'] = time.time() - step_start
+                self.step_times['glare_detect'] = time.time() - step_start
+                deglared_photos = extracted_photos  # Use originals
 
-        # Current output is the working image (after all processing steps)
-        output_images = [working_image]
+        # Output images are the deglared photos
+        output_images = extracted_photos
 
         total_time = time.time() - start_time
         logger.info(f"Total processing time: {total_time:.3f}s")
@@ -331,7 +367,9 @@ class Pipeline:
             page_detection=page_detection_result,
             glare_detection=glare_detection_result,
             glare_confidence=glare_confidence_score,
-            glare_removal=glare_removal_result,
+            glare_removal=None,  # Not tracked per-photo anymore
+            photo_detections=photo_detections_result,
+            num_photos_extracted=len(extracted_photos),
         )
 
     def process_batch(
