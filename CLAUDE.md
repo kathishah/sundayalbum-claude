@@ -55,6 +55,9 @@ These are photos of **album pages with glossy plastic sleeves** — the primary 
 - **Glare patterns differ**: Individual glossy prints have curved/contour glare (from the photo surface itself bowing). Album pages with plastic sleeves have flatter, broader glare patches (from the flat plastic surface).
 - **The two album page shots are the critical test cases** — multi-photo splitting + glare removal together. If these look great, the product works.
 
+### How to retrieve 
+Use `scripts/fetch-test-images.sh` which will download from github release
+
 ## Tech Stack
 
 - **Python 3.12+** (via venv)
@@ -106,7 +109,7 @@ sundayalbum-claude/
 ├── CLAUDE.md                    # This file
 ├── pyproject.toml               # Project config and dependencies
 ├── requirements.txt             # Pinned dependencies
-├── .env                         # API keys (gitignored)
+├── secrets.json                 # API keys for OPENAI and ANTHROPIC (gitignored)
 ├── .gitignore
 │
 ├── docs/
@@ -406,10 +409,10 @@ class PipelineConfig:
     anthropic_model: str = "claude-sonnet-4-5-20250929"
 ```
 
-## Environment Variables
+## secret.json
 
 ```bash
-# .env file (gitignored)
+# secrets.json file (gitignored)
 ANTHROPIC_API_KEY=sk-ant-...
 OPENAI_API_KEY=sk-...
 SUNDAY_ALBUM_DEBUG=1
