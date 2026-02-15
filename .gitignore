@@ -1,0 +1,13 @@
+.venv/
+secrets.json
+test-images/
+output/
+debug/
+__pycache__/
+*.pyc
+.mypy_cache/
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.DS_Store
