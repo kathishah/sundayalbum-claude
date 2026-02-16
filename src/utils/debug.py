@@ -95,6 +95,101 @@ def save_debug_text(
         logger.debug(f"Saved debug text: {output_path}")
 
 
+def draw_photo_detections(
+    image: np.ndarray,
+    detections: list,
+    line_thickness: int = 3
+) -> np.ndarray:
+    """Draw photo detection bounding boxes and labels on image.
+
+    Args:
+        image: Image array as float32 RGB [0,1]
+        detections: List of PhotoDetection objects
+        line_thickness: Thickness of bounding box lines
+
+    Returns:
+        Image with detections drawn as float32 RGB [0,1]
+    """
+    # Make a copy and convert to uint8 for OpenCV drawing
+    if image.max() <= 1.0:
+        img_viz = (image * 255).astype(np.uint8)
+    else:
+        img_viz = image.astype(np.uint8)
+
+    # Convert RGB to BGR for OpenCV
+    img_viz = cv2.cvtColor(img_viz, cv2.COLOR_RGB2BGR)
+
+    # Draw each detection
+    for i, det in enumerate(detections, 1):
+        # Get bounding box coordinates
+        x1, y1, x2, y2 = det.bbox
+
+        # Choose color based on region type
+        if det.region_type == "photo":
+            color = (0, 255, 0)  # Green for photos
+        elif det.region_type == "caption":
+            color = (255, 128, 0)  # Orange for captions
+        elif det.region_type == "decoration":
+            color = (128, 128, 128)  # Gray for decorations
+        else:
+            color = (0, 0, 255)  # Red for unknown
+
+        # Draw rectangle
+        cv2.rectangle(img_viz, (x1, y1), (x2, y2), color, line_thickness)
+
+        # Prepare label text
+        label = f"#{i} {det.region_type}"
+        if det.orientation != "unknown":
+            label += f" ({det.orientation})"
+
+        # Calculate text size for background
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.7
+        font_thickness = 2
+        (text_width, text_height), baseline = cv2.getTextSize(
+            label, font, font_scale, font_thickness
+        )
+
+        # Draw label background
+        label_y = max(y1 - 10, text_height + 10)
+        cv2.rectangle(
+            img_viz,
+            (x1, label_y - text_height - baseline - 5),
+            (x1 + text_width + 10, label_y + baseline),
+            color,
+            -1  # Filled
+        )
+
+        # Draw label text
+        cv2.putText(
+            img_viz,
+            label,
+            (x1 + 5, label_y - 5),
+            font,
+            font_scale,
+            (255, 255, 255),  # White text
+            font_thickness,
+            cv2.LINE_AA
+        )
+
+        # Draw confidence score
+        conf_label = f"conf: {det.confidence:.2f}"
+        cv2.putText(
+            img_viz,
+            conf_label,
+            (x1 + 5, y2 - 10),
+            font,
+            0.5,
+            color,
+            1,
+            cv2.LINE_AA
+        )
+
+    # Convert back to RGB and float32
+    img_viz = cv2.cvtColor(img_viz, cv2.COLOR_BGR2RGB)
+    return img_viz.astype(np.float32) / 255.0
+
+
 def create_comparison_image(
     images: list[np.ndarray],
     titles: Optional[list[str]] = None,
