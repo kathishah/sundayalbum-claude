@@ -47,8 +47,7 @@ class TestPhase6Integration:
         print("🔍 Detecting photos...")
         detections = detect_photos(
             image,
-            min_area_ratio=0.05,
-            max_count=5
+            max_count=5  # Use default min_area_ratio=0.02
         )
 
         print(f"✓ Found {len(detections)} photo(s)")
@@ -113,8 +112,7 @@ class TestPhase6Integration:
         print("🔍 Detecting photos...")
         detections = detect_photos(
             image,
-            min_area_ratio=0.05,
-            max_count=5
+            max_count=5  # Use default min_area_ratio=0.02
         )
 
         print(f"✓ Found {len(detections)} photo(s)")
@@ -179,8 +177,7 @@ class TestPhase6Integration:
         print("🔍 Detecting photos...")
         detections = detect_photos(
             image,
-            min_area_ratio=0.05,
-            max_count=5
+            max_count=5  # Use default min_area_ratio=0.02
         )
 
         print(f"✓ Found {len(detections)} photo(s)")

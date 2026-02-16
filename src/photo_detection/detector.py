@@ -24,7 +24,7 @@ class PhotoDetection:
 
 def detect_photos(
     page_image: np.ndarray,
-    min_area_ratio: float = 0.05,
+    min_area_ratio: float = 0.02,  # Lowered from 0.05 to 0.02 (2%) to handle album pages with visible background
     max_count: int = 8,
     method: str = "contour",
 ) -> List[PhotoDetection]:
@@ -103,16 +103,19 @@ def _detect_photos_contour(
         C=15,  # Constant to subtract
     )
 
-    # Morphological operations to clean up and connect photo regions
-    kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (21, 21))
+    # Morphological operations to clean up photo regions
+    # Balance: kernels must be large enough to connect fragmented photos,
+    # but small enough to NOT merge separate photos together
+    kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (31, 31))  # Connect fragments
     binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel_close)
 
     # Remove small noise
-    kernel_open = cv2.getStructuringElement(cv2.MORPH_RECT, (11, 11))
+    kernel_open = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))  # Clean noise
     binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel_open)
 
-    # Find contours
-    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # Find contours - use RETR_LIST to get ALL contours, not just external ones
+    # This is critical for album pages where individual photos are INSIDE the page boundary
+    contours, _ = cv2.findContours(binary, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
 
     # If we found too few large contours, try the inverted threshold
     large_contours = [c for c in contours if cv2.contourArea(c) > min_area]
@@ -127,10 +130,13 @@ def _detect_photos_contour(
             blockSize=101,
             C=15,
         )
-        binary_alt = cv2.morphologyEx(binary_alt, cv2.MORPH_CLOSE, kernel_close)
-        binary_alt = cv2.morphologyEx(binary_alt, cv2.MORPH_OPEN, kernel_open)
+        # Use same balanced morphological operations
+        kernel_close_alt = cv2.getStructuringElement(cv2.MORPH_RECT, (31, 31))
+        kernel_open_alt = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
+        binary_alt = cv2.morphologyEx(binary_alt, cv2.MORPH_CLOSE, kernel_close_alt)
+        binary_alt = cv2.morphologyEx(binary_alt, cv2.MORPH_OPEN, kernel_open_alt)
 
-        contours_alt, _ = cv2.findContours(binary_alt, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours_alt, _ = cv2.findContours(binary_alt, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
         large_contours_alt = [c for c in contours_alt if cv2.contourArea(c) > min_area]
 
         if len(large_contours_alt) > 0:
@@ -152,9 +158,19 @@ def _detect_photos_contour(
     for idx, contour in enumerate(contours):
         # Filter by area
         area = cv2.contourArea(contour)
+        area_ratio = area / total_area
+
+        # Too small: likely noise/decoration
         if area < min_area:
-            area_ratio = area / total_area
             filtered_reasons.append(f"Contour {idx}: area too small ({area:.0f} px, {area_ratio:.3f} ratio)")
+            continue
+
+        # Too large: likely the page boundary or merged photos, not an individual photo
+        # For album pages, individual photos are typically < 20% of total image
+        # Use 20% threshold for multi-photo pages, but allow larger for single-print detection
+        max_area_threshold = 0.90  # Conservative: filter obvious page boundaries
+        if area_ratio > max_area_threshold:
+            filtered_reasons.append(f"Contour {idx}: area too large ({area:.0f} px, {area_ratio:.3f} ratio) - likely page boundary")
             continue
 
         # Filter by shape — photos should be roughly rectangular
@@ -182,14 +198,10 @@ def _detect_photos_contour(
         # Reject extremely elongated shapes (likely not photos)
         aspect_ratio = max(bw, bh) / (min(bw, bh) + 1e-6)
         if aspect_ratio > 6.0:  # Too elongated (relaxed from 5.0)
-            area_ratio_check = area / total_area
             filtered_reasons.append(
-                f"Contour {idx}: aspect ratio too high ({aspect_ratio:.2f}, area={area:.0f}, ratio={area_ratio_check:.3f})"
+                f"Contour {idx}: aspect ratio too high ({aspect_ratio:.2f}, area={area:.0f}, ratio={area_ratio:.3f})"
             )
             continue
-
-        # Compute area ratio relative to page
-        area_ratio = area / total_area
 
         # If we have more than 4 vertices, find best-fit quadrilateral
         if num_vertices > 4:
@@ -243,10 +255,12 @@ def _detect_photos_contour(
         areas = [d.area_ratio * total_area for d in detections]
         max_area = max(areas)
 
-        # Adaptive threshold:
-        # - If we have many detections (> 3), use stricter filter (50%)
-        # - If we have few detections (2-3), use looser filter (35%)
-        threshold = 0.50 if len(detections) > 3 else 0.35
+        # Adaptive threshold for decoration filtering:
+        # Album pages can have photos of varying sizes (e.g., 3×5 mixed with 4×6)
+        # Use relaxed threshold to avoid filtering out legitimately smaller photos
+        # - If we have many detections (> 4), use moderate filter (30%)
+        # - If we have few detections (2-4), use very loose filter (20%)
+        threshold = 0.30 if len(detections) > 4 else 0.20
 
         logger.debug(
             f"Decoration filter check: {len(detections)} detections, "
@@ -265,6 +279,9 @@ def _detect_photos_contour(
         logger.debug(f"After decoration filter: {len(filtered_detections)} remaining")
         detections = filtered_detections
 
+    # Remove overlapping detections (keep higher confidence / larger ones)
+    detections = _remove_overlapping_detections(detections, iou_threshold=0.3)
+
     # Re-sort by position (top-to-bottom, left-to-right) for user-friendly ordering
     detections.sort(key=lambda d: (d.bbox[1], d.bbox[0]))
 
@@ -280,6 +297,78 @@ def _detect_photos_contour(
             logger.debug(f"  {reason}")
 
     return detections
+
+
+def _compute_iou(bbox1: Tuple[int, int, int, int], bbox2: Tuple[int, int, int, int]) -> float:
+    """Compute Intersection over Union (IoU) between two bounding boxes.
+
+    Args:
+        bbox1: First bbox as (x1, y1, x2, y2)
+        bbox2: Second bbox as (x1, y1, x2, y2)
+
+    Returns:
+        IoU value between 0.0 and 1.0
+    """
+    x1_1, y1_1, x2_1, y2_1 = bbox1
+    x1_2, y1_2, x2_2, y2_2 = bbox2
+
+    # Compute intersection
+    x1_i = max(x1_1, x1_2)
+    y1_i = max(y1_1, y1_2)
+    x2_i = min(x2_1, x2_2)
+    y2_i = min(y2_1, y2_2)
+
+    if x2_i < x1_i or y2_i < y1_i:
+        return 0.0  # No overlap
+
+    intersection = (x2_i - x1_i) * (y2_i - y1_i)
+
+    # Compute union
+    area1 = (x2_1 - x1_1) * (y2_1 - y1_1)
+    area2 = (x2_2 - x1_2) * (y2_2 - y1_2)
+    union = area1 + area2 - intersection
+
+    return intersection / union if union > 0 else 0.0
+
+
+def _remove_overlapping_detections(
+    detections: List[PhotoDetection],
+    iou_threshold: float = 0.3
+) -> List[PhotoDetection]:
+    """Remove overlapping detections using Non-Maximum Suppression.
+
+    Keep detections with higher confidence when IoU > threshold.
+
+    Args:
+        detections: List of detections (should be sorted by confidence desc)
+        iou_threshold: IoU threshold for considering detections as overlapping
+
+    Returns:
+        Filtered list with no significant overlaps
+    """
+    if len(detections) <= 1:
+        return detections
+
+    # Sort by confidence (descending) to prioritize keeping high-confidence detections
+    sorted_dets = sorted(detections, key=lambda d: d.confidence, reverse=True)
+
+    keep = []
+    for i, det1 in enumerate(sorted_dets):
+        # Check if det1 overlaps significantly with any already-kept detection
+        overlaps = False
+        for det2 in keep:
+            iou = _compute_iou(det1.bbox, det2.bbox)
+            if iou > iou_threshold:
+                overlaps = True
+                logger.debug(f"Removing overlapping detection (IoU={iou:.2f}): "
+                           f"area={det1.area_ratio:.2%}, conf={det1.confidence:.2f}")
+                break
+
+        if not overlaps:
+            keep.append(det1)
+
+    logger.debug(f"Non-maximum suppression: {len(detections)} -> {len(keep)} detections")
+    return keep
 
 
 def _order_corners(corners: np.ndarray) -> np.ndarray:
