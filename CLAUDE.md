@@ -119,6 +119,16 @@ sundayalbum-claude/
 │   ├── UI_Design_Album_Digitizer.md        # UI Design for the full project
 │   ├── IMG_harbor_prores.DNG
 │
+├── journal/                     # Phase summaries and development journal
+│   ├── phase-1-summary.md       # Phase 1: Project Setup
+│   ├── phase-2-summary.md       # Phase 2: Image Loading
+│   ├── phase-3-summary.md       # Phase 3: Glare Detection
+│   ├── phase-4-summary.md       # Phase 4: Glare Removal
+│   └── phase-6-summary.md       # Phase 6: Photo Detection Improvements
+│
+├── scripts/
+│   └── fetch-test-images.sh     # Download test images from GitHub releases
+│
 ├── test-images/                 # Real test images (gitignored — large files)
 │   ├── IMG_cave_normal.HEIC
 │   ├── IMG_cave_prores.DNG
@@ -200,6 +210,34 @@ sundayalbum-claude/
 
 ## CLI Interface
 
+The CLI provides three main commands: `status`, `process`, and (planned) quality checking.
+
+### Status Command
+
+Check pipeline implementation progress:
+
+```bash
+# Show pipeline status and progress
+python -m src.cli status
+```
+
+**Shows:**
+- All 14 pipeline steps with implementation status
+- Progress by priority (Glare, Splitting, Geometry, Color)
+- Detailed descriptions of each step
+- Comprehensive usage examples
+
+**Current Progress (as of Phase 6):**
+- **Overall:** 6/14 steps complete (42.9%)
+- **Priority 1 (Glare):** 3/4 steps (75%)
+- **Priority 2 (Splitting):** 2/2 steps (100%)
+- **Priority 3 (Geometry):** 1/4 steps (25%)
+- **Priority 4 (Color):** 0/4 steps (0%)
+
+### Process Command
+
+Process album pages and extract individual photos:
+
 ```bash
 # Process a single album page (HEIC)
 python -m src.cli process test-images/IMG_three_pics_normal.HEIC --output ./output/
@@ -207,7 +245,10 @@ python -m src.cli process test-images/IMG_three_pics_normal.HEIC --output ./outp
 # Process the high-res DNG version
 python -m src.cli process test-images/IMG_three_pics_prores.DNG --output ./output/
 
-# Process all test images
+# Process with glob patterns (all HEIC files)
+python -m src.cli process test-images/*.HEIC --output ./output/
+
+# Process all test images in batch mode
 python -m src.cli process test-images/ --output ./output/ --batch
 
 # Process with debug visualizations
@@ -216,12 +257,21 @@ python -m src.cli process test-images/IMG_three_pics_normal.HEIC --output ./outp
 # Process only HEIC files (skip DNG for faster iteration)
 python -m src.cli process test-images/ --output ./output/ --batch --filter "*.HEIC"
 
-# Process with multi-shot glare removal
+# Process with multi-shot glare removal (planned)
 python -m src.cli process shot1.HEIC shot2.HEIC shot3.HEIC --multi-shot --output ./output/
 
 # Run only specific pipeline steps
-python -m src.cli process test-images/IMG_cave_normal.HEIC --output ./output/ --steps glare,color
+python -m src.cli process test-images/IMG_cave_normal.HEIC --output ./output/ --steps load,normalize,page_detect
+python -m src.cli process test-images/IMG_cave_normal.HEIC --output ./output/ --steps glare_detect,photo_detect
 
+# Available step IDs:
+# load, normalize, page_detect, glare_detect, glare_remove, photo_detect, photo_split,
+# keystone, dewarp, rotation, white_balance, color_restore, deyellow, sharpen
+```
+
+### Quality Check Commands (Planned)
+
+```bash
 # Quality check using AI vision
 python -m src.cli check output/photo_01.jpg --original test-images/IMG_cave_normal.HEIC
 
@@ -471,10 +521,38 @@ debug/
 
 Tests use images from `test-images/`. Prefer HEIC files for test speed.
 
+### Unit Tests
+
 ```bash
+# Run all tests
 pytest tests/ -v
+
+# Run specific test files
 pytest tests/test_loader.py -v
+pytest tests/test_glare.py -v
+pytest tests/test_photo_detection.py -v
 ```
+
+### Integration Tests with Debug Visualizations
+
+Integration tests process real images and generate debug visualizations in `debug/`:
+
+```bash
+# Run Phase 6 integration tests (photo detection)
+pytest tests/test_phase6_integration.py -v -s
+
+# View debug output
+ls -lh debug/
+open debug/IMG_three_pics_normal/phase6_02_detections.jpg
+```
+
+**Debug visualizations include:**
+- Original image
+- Detection overlays (bounding boxes, labels, confidence scores)
+- Individual extracted photos
+- Step-by-step pipeline results
+
+These are essential for algorithm development and quality verification.
 
 ## Important Notes
 

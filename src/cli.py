@@ -208,6 +208,71 @@ def process(
 
 
 @main.command()
+def status() -> None:
+    """Show pipeline implementation status and available steps."""
+    from src.pipeline import PIPELINE_STEPS, get_step_status
+
+    click.echo("\n" + "=" * 70)
+    click.echo("Sunday Album Processing Pipeline - Implementation Status")
+    click.echo("=" * 70 + "\n")
+
+    # Get status for each step
+    total_steps = len(PIPELINE_STEPS)
+    implemented_count = 0
+
+    for idx, step_info in enumerate(PIPELINE_STEPS, 1):
+        step_id = step_info['id']
+        step_name = step_info['name']
+        step_desc = step_info['description']
+        priority = step_info.get('priority', '-')
+
+        # Check implementation status
+        status_info = get_step_status(step_id)
+        is_implemented = status_info['implemented']
+        notes = status_info.get('notes', '')
+
+        if is_implemented:
+            implemented_count += 1
+            status_icon = "✅"
+            status_text = click.style("IMPLEMENTED", fg="green", bold=True)
+        else:
+            status_icon = "⏳"
+            status_text = click.style("NOT IMPLEMENTED", fg="yellow")
+
+        # Print step info
+        click.echo(f"{status_icon} Step {idx}: {step_name} (Priority {priority})")
+        click.echo(f"   ID: {step_id}")
+        click.echo(f"   Status: {status_text}")
+        click.echo(f"   Description: {step_desc}")
+        if notes:
+            click.echo(f"   Notes: {notes}")
+        click.echo()
+
+    # Print summary
+    progress_pct = (implemented_count / total_steps) * 100
+    click.echo("=" * 70)
+    click.echo(f"Progress: {implemented_count}/{total_steps} steps implemented ({progress_pct:.1f}%)")
+    click.echo("=" * 70)
+
+    click.echo("\n📋 Usage Examples:")
+    click.echo("  # Process a single file (all implemented steps)")
+    click.echo("  python -m src.cli process image.HEIC --output ./output/")
+    click.echo()
+    click.echo("  # Process with debug visualizations")
+    click.echo("  python -m src.cli process image.HEIC --output ./output/ --debug")
+    click.echo()
+    click.echo("  # Process multiple files with glob pattern")
+    click.echo("  python -m src.cli process test-images/*.HEIC --output ./output/")
+    click.echo()
+    click.echo("  # Process only specific steps")
+    click.echo("  python -m src.cli process image.HEIC --steps load,detect_photos,split --output ./output/")
+    click.echo()
+    click.echo("  # Process directory (batch mode)")
+    click.echo("  python -m src.cli process test-images/ --batch --filter \"*.HEIC\" --output ./output/")
+    click.echo()
+
+
+@main.command()
 @click.argument('output_file', type=click.Path(exists=True))
 @click.option('--original', type=click.Path(exists=True), help='Original input file for comparison')
 def check(output_file: str, original: Optional[str]) -> None:
