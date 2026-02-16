@@ -124,12 +124,13 @@ def draw_photo_detections(
         # Get bounding box coordinates
         x1, y1, x2, y2 = det.bbox
 
-        # Choose color based on region type
-        if det.region_type == "photo":
+        # Choose color based on region type (if available)
+        region_type = getattr(det, 'region_type', 'photo')
+        if region_type == "photo":
             color = (0, 255, 0)  # Green for photos
-        elif det.region_type == "caption":
+        elif region_type == "caption":
             color = (255, 128, 0)  # Orange for captions
-        elif det.region_type == "decoration":
+        elif region_type == "decoration":
             color = (128, 128, 128)  # Gray for decorations
         else:
             color = (0, 0, 255)  # Red for unknown
@@ -138,8 +139,8 @@ def draw_photo_detections(
         cv2.rectangle(img_viz, (x1, y1), (x2, y2), color, line_thickness)
 
         # Prepare label text
-        label = f"#{i} {det.region_type}"
-        if det.orientation != "unknown":
+        label = f"#{i} {region_type}"
+        if hasattr(det, 'orientation') and det.orientation != "unknown":
             label += f" ({det.orientation})"
 
         # Calculate text size for background

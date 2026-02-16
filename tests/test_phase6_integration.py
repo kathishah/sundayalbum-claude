@@ -34,7 +34,7 @@ class TestPhase6Integration:
 
         # Load image
         print(f"\n📸 Loading {test_image_path.name}...")
-        image = load_image(str(test_image_path))
+        image, metadata = load_image(str(test_image_path))
 
         # Save original
         save_debug_image(
@@ -55,7 +55,7 @@ class TestPhase6Integration:
         for i, det in enumerate(detections, 1):
             print(f"  Photo {i}: area_ratio={det.area_ratio:.2%}, "
                   f"confidence={det.confidence:.2f}, "
-                  f"type={det.region_type}")
+                  f"orientation={det.orientation}")
 
         # Draw detections
         detection_viz = draw_photo_detections(image, detections)
@@ -81,10 +81,10 @@ class TestPhase6Integration:
         assert len(detections) == 3, f"Expected 3 photos, got {len(detections)}"
         assert len(photos) == 3, f"Expected 3 extracted photos, got {len(photos)}"
 
-        # All photos should be classified as "photo" (not decoration/caption)
+        # All photos should have reasonable confidence
         for i, det in enumerate(detections, 1):
-            assert det.region_type == "photo", \
-                f"Photo {i} misclassified as {det.region_type}"
+            assert det.confidence > 0.5, \
+                f"Photo {i} has low confidence: {det.confidence:.2f}"
 
         print(f"\n✅ Debug output saved to {debug_dir}/")
         print("   Review the images to verify photo detection quality!")
@@ -100,7 +100,7 @@ class TestPhase6Integration:
 
         # Load image
         print(f"\n📸 Loading {test_image_path.name}...")
-        image = load_image(str(test_image_path))
+        image, metadata = load_image(str(test_image_path))
 
         # Save original
         save_debug_image(
@@ -166,7 +166,7 @@ class TestPhase6Integration:
 
         # Load image
         print(f"\n📸 Loading {test_image_path.name}...")
-        image = load_image(str(test_image_path))
+        image, metadata = load_image(str(test_image_path))
 
         # Save original
         save_debug_image(
