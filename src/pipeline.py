@@ -17,6 +17,7 @@ from src.glare.confidence import compute_glare_confidence
 from src.glare.remover_single import remove_glare_single, GlareResult
 from src.photo_detection.detector import detect_photos, draw_photo_detections, PhotoDetection
 from src.photo_detection.splitter import split_photos
+from src.geometry import correct_keystone, correct_rotation, correct_warp
 
 logger = logging.getLogger(__name__)
 
@@ -78,24 +79,21 @@ PIPELINE_STEPS = [
         'name': 'Keystone Correction',
         'description': 'Per-photo perspective correction for tilted shots',
         'priority': 3,
-        'implemented': False,
-        'notes': 'Planned for later phases',
+        'implemented': True,
     },
     {
         'id': 'dewarp',
         'name': 'Dewarping',
         'description': 'Correct bulge/curvature from bowed photo surfaces',
         'priority': 3,
-        'implemented': False,
-        'notes': 'Planned for later phases',
+        'implemented': True,
     },
     {
         'id': 'rotation_correct',
         'name': 'Rotation Correction',
         'description': 'Auto-detect and correct rotation angle',
         'priority': 3,
-        'implemented': False,
-        'notes': 'Planned for later phases',
+        'implemented': True,
     },
     {
         'id': 'white_balance',
@@ -181,6 +179,7 @@ class PipelineConfig:
     # Geometry
     keystone_max_angle: float = 40.0
     rotation_auto_correct_max: float = 15.0
+    dewarp_detection_threshold: float = 0.02  # Minimum curvature ratio (2%)
 
     # Color
     clahe_clip_limit: float = 2.0
@@ -483,7 +482,95 @@ class Pipeline:
                 self.step_times['glare_detect'] = time.time() - step_start
                 deglared_photos = extracted_photos  # Use originals
 
-        # Output images are the deglared photos
+        # Step 6: Geometry correction (per photo)
+        # Apply keystone correction, rotation correction, and dewarping
+        should_run_geometry = (
+            steps_filter is None or
+            'keystone_correct' in steps_filter or
+            'rotation_correct' in steps_filter or
+            'dewarp' in steps_filter
+        )
+
+        if should_run_geometry:
+            step_start = time.time()
+            geometry_corrected_photos: List[np.ndarray] = []
+
+            try:
+                for photo_idx, photo in enumerate(extracted_photos, 1):
+                    logger.debug(f"Processing geometry for photo {photo_idx}/{len(extracted_photos)}")
+
+                    corrected_photo = photo
+                    corrections_applied = []
+
+                    # 1. Rotation correction (do this first)
+                    if steps_filter is None or 'rotation_correct' in steps_filter:
+                        corrected_photo, rotation_angle = correct_rotation(
+                            corrected_photo,
+                            auto_correct_max=self.config.rotation_auto_correct_max,
+                        )
+                        if rotation_angle != 0:
+                            corrections_applied.append(f"rotation: {rotation_angle:.2f}°")
+                            logger.debug(f"Photo {photo_idx}: applied rotation {rotation_angle:.2f}°")
+
+                            if debug_dir:
+                                from src.utils.debug import save_debug_image
+                                save_debug_image(
+                                    corrected_photo,
+                                    debug_dir / f"08_photo_{photo_idx:02d}_rotated_{rotation_angle:.1f}deg.jpg",
+                                    f"Photo {photo_idx} after rotation correction ({rotation_angle:.2f}°)"
+                                )
+
+                    # 2. Keystone correction (after rotation)
+                    # Note: We don't have corners here since photos are already extracted
+                    # Keystone correction would primarily be useful if we had corner info
+                    # Skip for now since splitter.py already does perspective correction
+                    # This is here for potential future use with re-detection
+                    if steps_filter is None or 'keystone_correct' in steps_filter:
+                        # Keystone correction is already applied during photo extraction
+                        # in splitter.py, so we skip it here to avoid double-correction
+                        pass
+
+                    # 3. Dewarp correction (correct barrel distortion)
+                    if steps_filter is None or 'dewarp' in steps_filter:
+                        corrected_photo, warp_detected = correct_warp(corrected_photo)
+                        if warp_detected:
+                            corrections_applied.append("dewarp")
+                            logger.debug(f"Photo {photo_idx}: applied dewarp correction")
+
+                            if debug_dir:
+                                from src.utils.debug import save_debug_image
+                                save_debug_image(
+                                    corrected_photo,
+                                    debug_dir / f"09_photo_{photo_idx:02d}_dewarped.jpg",
+                                    f"Photo {photo_idx} after dewarp correction"
+                                )
+
+                    # Save final geometry-corrected photo
+                    if debug_dir and corrections_applied:
+                        from src.utils.debug import save_debug_image
+                        save_debug_image(
+                            corrected_photo,
+                            debug_dir / f"10_photo_{photo_idx:02d}_geometry_final.jpg",
+                            f"Photo {photo_idx} after geometry corrections: {', '.join(corrections_applied)}"
+                        )
+
+                    geometry_corrected_photos.append(corrected_photo)
+
+                # Update extracted_photos with geometry-corrected versions
+                extracted_photos = geometry_corrected_photos
+
+                self.step_times['geometry'] = time.time() - step_start
+                steps_completed.append('geometry')
+                logger.info(
+                    f"Geometry correction time: {self.step_times['geometry']:.3f}s "
+                    f"(processed {len(extracted_photos)} photos)"
+                )
+
+            except Exception as e:
+                logger.warning(f"Geometry correction failed, passing through: {e}")
+                self.step_times['geometry'] = time.time() - step_start
+
+        # Output images are the geometry-corrected photos
         output_images = extracted_photos
 
         total_time = time.time() - start_time
