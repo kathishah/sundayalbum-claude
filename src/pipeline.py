@@ -18,6 +18,12 @@ from src.glare.remover_single import remove_glare_single, GlareResult
 from src.photo_detection.detector import detect_photos, draw_photo_detections, PhotoDetection
 from src.photo_detection.splitter import split_photos
 from src.geometry import correct_keystone, correct_rotation, correct_warp
+from src.color import (
+    auto_white_balance,
+    remove_yellowing_adaptive,
+    restore_fading,
+    enhance_adaptive,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -100,32 +106,28 @@ PIPELINE_STEPS = [
         'name': 'White Balance',
         'description': 'Auto white balance correction',
         'priority': 4,
-        'implemented': False,
-        'notes': 'Planned for later phases',
+        'implemented': True,
     },
     {
         'id': 'color_restore',
         'name': 'Color Restoration',
         'description': 'Fade restoration with CLAHE, saturation boost',
         'priority': 4,
-        'implemented': False,
-        'notes': 'Planned for later phases',
+        'implemented': True,
     },
     {
         'id': 'deyellow',
         'name': 'Deyellowing',
         'description': 'Remove yellowing from aged photos',
         'priority': 4,
-        'implemented': False,
-        'notes': 'Planned for later phases',
+        'implemented': True,
     },
     {
         'id': 'sharpen',
         'name': 'Sharpening',
         'description': 'Unsharp mask and final enhancement',
         'priority': 4,
-        'implemented': False,
-        'notes': 'Planned for later phases',
+        'implemented': True,
     },
 ]
 
@@ -570,7 +572,143 @@ class Pipeline:
                 logger.warning(f"Geometry correction failed, passing through: {e}")
                 self.step_times['geometry'] = time.time() - step_start
 
-        # Output images are the geometry-corrected photos
+        # Step 7: Color restoration (per photo)
+        # Apply white balance, deyellowing, fade restoration, and sharpening
+        should_run_color = (
+            steps_filter is None or
+            'white_balance' in steps_filter or
+            'deyellow' in steps_filter or
+            'color_restore' in steps_filter or
+            'sharpen' in steps_filter
+        )
+
+        if should_run_color:
+            step_start = time.time()
+            color_restored_photos: List[np.ndarray] = []
+
+            try:
+                for photo_idx, photo in enumerate(extracted_photos, 1):
+                    logger.debug(f"Processing color restoration for photo {photo_idx}/{len(extracted_photos)}")
+
+                    restored_photo = photo
+                    restorations_applied = []
+
+                    # 1. White balance correction
+                    if steps_filter is None or 'white_balance' in steps_filter:
+                        restored_photo, wb_info = auto_white_balance(
+                            restored_photo,
+                            page_border=None,
+                            method="gray_world"
+                        )
+                        restorations_applied.append(f"white_balance ({wb_info['method_used']})")
+                        logger.debug(
+                            f"Photo {photo_idx}: white balance applied "
+                            f"(R={wb_info.get('gain_r', 1.0):.2f}, "
+                            f"G={wb_info.get('gain_g', 1.0):.2f}, "
+                            f"B={wb_info.get('gain_b', 1.0):.2f})"
+                        )
+
+                        if debug_dir:
+                            from src.utils.debug import save_debug_image
+                            save_debug_image(
+                                restored_photo,
+                                debug_dir / f"11_photo_{photo_idx:02d}_wb.jpg",
+                                f"Photo {photo_idx} after white balance"
+                            )
+
+                    # 2. Deyellowing (adaptive)
+                    if steps_filter is None or 'deyellow' in steps_filter:
+                        restored_photo, deyellow_info = remove_yellowing_adaptive(restored_photo)
+                        if deyellow_info['corrected']:
+                            restorations_applied.append(
+                                f"deyellow (score={deyellow_info['yellowing_score']:.2f}, "
+                                f"shift={deyellow_info['shift_applied']:.1f})"
+                            )
+                            logger.debug(
+                                f"Photo {photo_idx}: yellowing removed "
+                                f"(score={deyellow_info['yellowing_score']:.3f})"
+                            )
+
+                            if debug_dir:
+                                from src.utils.debug import save_debug_image
+                                save_debug_image(
+                                    restored_photo,
+                                    debug_dir / f"12_photo_{photo_idx:02d}_deyellow.jpg",
+                                    f"Photo {photo_idx} after deyellowing"
+                                )
+
+                    # 3. Fade restoration (CLAHE + saturation boost)
+                    if steps_filter is None or 'color_restore' in steps_filter:
+                        restored_photo, restore_info = restore_fading(
+                            restored_photo,
+                            clahe_clip_limit=self.config.clahe_clip_limit,
+                            clahe_grid_size=self.config.clahe_grid_size,
+                            saturation_boost=self.config.saturation_boost,
+                            auto_detect_fading=True
+                        )
+                        restorations_applied.append(
+                            f"fade_restore (contrast={restore_info['contrast_improvement']:.2f}x, "
+                            f"sat_boost={restore_info['saturation_boost_applied']:.2f})"
+                        )
+                        logger.debug(
+                            f"Photo {photo_idx}: fade restoration applied "
+                            f"(contrast improvement={restore_info['contrast_improvement']:.2f}x)"
+                        )
+
+                        if debug_dir:
+                            from src.utils.debug import save_debug_image
+                            save_debug_image(
+                                restored_photo,
+                                debug_dir / f"13_photo_{photo_idx:02d}_restored.jpg",
+                                f"Photo {photo_idx} after fade restoration"
+                            )
+
+                    # 4. Sharpening and final enhancement (adaptive)
+                    if steps_filter is None or 'sharpen' in steps_filter:
+                        restored_photo, enhance_info = enhance_adaptive(restored_photo)
+                        restorations_applied.append(
+                            f"sharpen (amount={enhance_info['sharpen_amount']:.2f}, "
+                            f"sharpness={enhance_info['sharpness_improvement']:.2f}x)"
+                        )
+                        logger.debug(
+                            f"Photo {photo_idx}: sharpening applied "
+                            f"(sharpness improvement={enhance_info['sharpness_improvement']:.2f}x)"
+                        )
+
+                        if debug_dir:
+                            from src.utils.debug import save_debug_image
+                            save_debug_image(
+                                restored_photo,
+                                debug_dir / f"14_photo_{photo_idx:02d}_enhanced.jpg",
+                                f"Photo {photo_idx} after enhancement"
+                            )
+
+                    # Save final color-restored photo
+                    if debug_dir and restorations_applied:
+                        from src.utils.debug import save_debug_image
+                        save_debug_image(
+                            restored_photo,
+                            debug_dir / f"15_photo_{photo_idx:02d}_final.jpg",
+                            f"Photo {photo_idx} final output: {', '.join(restorations_applied)}"
+                        )
+
+                    color_restored_photos.append(restored_photo)
+
+                # Update extracted_photos with color-restored versions
+                extracted_photos = color_restored_photos
+
+                self.step_times['color_restoration'] = time.time() - step_start
+                steps_completed.append('color_restoration')
+                logger.info(
+                    f"Color restoration time: {self.step_times['color_restoration']:.3f}s "
+                    f"(processed {len(extracted_photos)} photos)"
+                )
+
+            except Exception as e:
+                logger.warning(f"Color restoration failed, passing through: {e}")
+                self.step_times['color_restoration'] = time.time() - step_start
+
+        # Output images are the fully processed photos
         output_images = extracted_photos
 
         total_time = time.time() - start_time
