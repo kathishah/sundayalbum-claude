@@ -21,6 +21,136 @@ from src.photo_detection.splitter import split_photos
 logger = logging.getLogger(__name__)
 
 
+# Pipeline step definitions with implementation status
+PIPELINE_STEPS = [
+    {
+        'id': 'load',
+        'name': 'Load Image',
+        'description': 'Load HEIC, DNG, JPEG, or PNG image with format detection',
+        'priority': 1,
+        'implemented': True,
+    },
+    {
+        'id': 'normalize',
+        'name': 'Normalize & Preprocess',
+        'description': 'Resize, apply EXIF orientation, generate working copy',
+        'priority': 1,
+        'implemented': True,
+    },
+    {
+        'id': 'page_detect',
+        'name': 'Page Detection',
+        'description': 'Detect album page boundaries and apply perspective correction',
+        'priority': 3,
+        'implemented': True,
+    },
+    {
+        'id': 'glare_detect',
+        'name': 'Glare Detection',
+        'description': 'Detect specular highlights from plastic sleeves or glossy prints',
+        'priority': 1,
+        'implemented': True,
+    },
+    {
+        'id': 'glare_remove',
+        'name': 'Glare Removal',
+        'description': 'Inpaint or composite glare regions',
+        'priority': 1,
+        'implemented': False,
+        'notes': 'Detection complete, removal partially implemented (single-shot only)',
+    },
+    {
+        'id': 'photo_detect',
+        'name': 'Photo Detection',
+        'description': 'Detect individual photo boundaries on album pages',
+        'priority': 2,
+        'implemented': True,
+    },
+    {
+        'id': 'photo_split',
+        'name': 'Photo Splitting',
+        'description': 'Extract individual photos as separate images',
+        'priority': 2,
+        'implemented': True,
+    },
+    {
+        'id': 'keystone_correct',
+        'name': 'Keystone Correction',
+        'description': 'Per-photo perspective correction for tilted shots',
+        'priority': 3,
+        'implemented': False,
+        'notes': 'Planned for later phases',
+    },
+    {
+        'id': 'dewarp',
+        'name': 'Dewarping',
+        'description': 'Correct bulge/curvature from bowed photo surfaces',
+        'priority': 3,
+        'implemented': False,
+        'notes': 'Planned for later phases',
+    },
+    {
+        'id': 'rotation_correct',
+        'name': 'Rotation Correction',
+        'description': 'Auto-detect and correct rotation angle',
+        'priority': 3,
+        'implemented': False,
+        'notes': 'Planned for later phases',
+    },
+    {
+        'id': 'white_balance',
+        'name': 'White Balance',
+        'description': 'Auto white balance correction',
+        'priority': 4,
+        'implemented': False,
+        'notes': 'Planned for later phases',
+    },
+    {
+        'id': 'color_restore',
+        'name': 'Color Restoration',
+        'description': 'Fade restoration with CLAHE, saturation boost',
+        'priority': 4,
+        'implemented': False,
+        'notes': 'Planned for later phases',
+    },
+    {
+        'id': 'deyellow',
+        'name': 'Deyellowing',
+        'description': 'Remove yellowing from aged photos',
+        'priority': 4,
+        'implemented': False,
+        'notes': 'Planned for later phases',
+    },
+    {
+        'id': 'sharpen',
+        'name': 'Sharpening',
+        'description': 'Unsharp mask and final enhancement',
+        'priority': 4,
+        'implemented': False,
+        'notes': 'Planned for later phases',
+    },
+]
+
+
+def get_step_status(step_id: str) -> dict:
+    """Get implementation status for a pipeline step.
+
+    Args:
+        step_id: Step identifier (e.g., 'load', 'normalize', 'glare_detect')
+
+    Returns:
+        Dictionary with 'implemented' (bool) and optional 'notes' (str)
+    """
+    for step in PIPELINE_STEPS:
+        if step['id'] == step_id:
+            return {
+                'implemented': step['implemented'],
+                'notes': step.get('notes', '')
+            }
+
+    return {'implemented': False, 'notes': 'Unknown step'}
+
+
 @dataclass
 class PipelineConfig:
     """All tunable parameters in one place."""
