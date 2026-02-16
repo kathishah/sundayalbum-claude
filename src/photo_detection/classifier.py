@@ -30,20 +30,20 @@ def classify_region(
     Returns:
         Region type classification
     """
-    # Area ratio relative to page
-    area_ratio = bbox_area / page_area
-
-    # Very small regions (< 2% of page) are likely decorations or captions
-    if area_ratio < 0.02:
-        return "decoration"
-
-    # Check aspect ratio
+    # Check aspect ratio first — elongated regions are captions regardless of size
     h, w = region_image.shape[:2]
     aspect_ratio = max(w, h) / (min(w, h) + 1e-6)
 
     # Extremely elongated regions might be captions or borders
     if aspect_ratio > 8.0:
         return "caption"
+
+    # Area ratio relative to page
+    area_ratio = bbox_area / page_area
+
+    # Very small regions (< 2% of page) are likely decorations or captions
+    if area_ratio < 0.02:
+        return "decoration"
 
     # Color variance check — photos typically have varied colors
     # Decorations might be more uniform
