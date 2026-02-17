@@ -110,3 +110,85 @@ The algorithm now:
 2. ✅ Distinguishes single prints from page boundaries
 3. ✅ Maintains correct multi-photo detection
 4. ✅ Provides detailed debug logging for troubleshooting
+
+---
+
+## Follow-Up Fix: Threshold Increased to 98%
+
+### Problem Discovered
+After initial implementation, testing revealed that the fix still wasn't working for some single prints. The debug output showed **no bounding boxes** in `04_photo_boundaries.jpg`, meaning the detector was still returning 0 detections.
+
+**Root Cause of Remaining Issue:**
+- The 95% filter at line 173 ran **BEFORE** the adaptive logic at line 196
+- Single prints occupying 95-98% of the image were filtered out early
+- The adaptive logic never got a chance to identify them as valid single prints
+
+### Solution: Raised Thresholds to 98%
+
+**Three changes applied:**
+
+1. **Early Filter: 95% → 98%** (Line 173)
+   ```python
+   # Before: if area_ratio > 0.95
+   # After:  if area_ratio > 0.98
+   ```
+   Allows contours between 95-98% to pass through to adaptive logic.
+
+2. **Single-Print Threshold: 0.95 → 0.98** (Line 223)
+   ```python
+   # Before: max_area_threshold = 0.95
+   # After:  max_area_threshold = 0.98
+   ```
+   Single prints can now be up to 98% of the image (very close to edges).
+
+3. **Added Canny Edge Detection Fallback** (Line 150-170)
+   When both adaptive thresholds fail (weak contrast between photo and background):
+   - Apply Canny edge detection (50, 150 thresholds)
+   - Dilate edges to connect broken boundaries
+   - Fill holes with morphological closing
+   - Find contours in edge map
+
+### Why 98%?
+- Single glossy prints are often photographed very close to fill the frame
+- With perspective distortion and slight angles, the detected contour can be 96-98% of image
+- 98% threshold allows these while still filtering true full-frame captures (>98%)
+
+### Expected Debug Output
+
+**Before fix:**
+- `04_photo_boundaries.jpg`: No visible bounding boxes (0 detections)
+- `05_photo_01_raw.jpg`: Not created (no photos extracted)
+- Final output: Full uncropped image with background
+
+**After fix:**
+- `04_photo_boundaries.jpg`: **1 green bounding box** around the photo ✅
+- `05_photo_01_raw.jpg`: **Cropped photo without background** ✅
+- Final output: Just the photo, properly cropped ✅
+
+### Testing
+Run with debug mode to verify:
+```bash
+python -m src.cli process test-images/IMG_cave_normal.HEIC --output ./output/ --debug
+
+# Check debug output
+open debug/IMG_cave_normal/04_photo_boundaries.jpg  # Should show bounding box
+open debug/IMG_cave_normal/05_photo_01_raw.jpg      # Should show cropped photo
+```
+
+### Final Algorithm Flow
+
+1. **Adaptive Threshold** (inverted): Try detecting photos darker than background
+2. **Adaptive Threshold** (normal): Try detecting photos lighter than background
+3. **Canny Edge Fallback**: If both fail, use edge detection
+4. **First Pass Filter**: Remove contours < 2% or > 98%
+5. **Scenario Detection**: Count large (≥30%) and medium (10-30%) contours
+6. **Adaptive Max Area**:
+   - Single print (1 large, 0 medium): max = 98%
+   - Multi-photo page: max = 90%
+7. **Second Pass Filter**: Apply scenario-specific max area threshold
+8. **Shape Filtering**: Check rectangularity, aspect ratio
+9. **Return Detections**: Sorted by position (top-to-bottom, left-to-right)
+
+### Commits
+- `4128b2b`: Initial fix - adaptive threshold (95%)
+- `73d2ede`: Follow-up fix - raise threshold to 98% + Canny fallback
