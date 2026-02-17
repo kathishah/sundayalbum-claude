@@ -159,13 +159,10 @@ class PipelineConfig:
     max_working_resolution: int = 4000  # px, longest edge
     prefer_heic_for_iteration: bool = True
 
-    # Page detection
-    page_detect_blur_kernel: int = 5
-    page_detect_canny_low: int = 50
-    page_detect_canny_high: int = 150
+    # Page detection (GrabCut)
     page_detect_min_area_ratio: float = 0.3
-    page_detect_max_area_ratio: float = 0.95  # Reject full-frame false positives in edge method
-    page_detect_method: str = "auto"  # "edge", "color", "grabcut", or "auto"
+    page_detect_grabcut_iterations: int = 5
+    page_detect_grabcut_max_dimension: int = 800
     # If page detection finds a subject whose area_ratio is below this threshold,
     # the pipeline treats the corrected page as a single photo and skips photo
     # detection. Album pages typically fill ≥85% of the frame; single prints with
@@ -294,12 +291,9 @@ class Pipeline:
             try:
                 page_detection_result = detect_page(
                     working_image,
-                    blur_kernel=self.config.page_detect_blur_kernel,
-                    canny_low=self.config.page_detect_canny_low,
-                    canny_high=self.config.page_detect_canny_high,
                     min_area_ratio=self.config.page_detect_min_area_ratio,
-                    max_area_ratio=self.config.page_detect_max_area_ratio,
-                    method=self.config.page_detect_method,
+                    grabcut_iterations=self.config.page_detect_grabcut_iterations,
+                    grabcut_max_dimension=self.config.page_detect_grabcut_max_dimension,
                 )
 
                 # Save debug: page boundary overlay
