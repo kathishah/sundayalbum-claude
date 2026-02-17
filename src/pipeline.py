@@ -166,6 +166,11 @@ class PipelineConfig:
     page_detect_min_area_ratio: float = 0.3
     page_detect_max_area_ratio: float = 0.95  # Reject full-frame false positives in edge method
     page_detect_method: str = "auto"  # "edge", "color", "grabcut", or "auto"
+    # If page detection finds a subject whose area_ratio is below this threshold,
+    # the pipeline treats the corrected page as a single photo and skips photo
+    # detection. Album pages typically fill ≥85% of the frame; single prints with
+    # visible background are typically ≤75%. Default 0.80 sits in between.
+    page_detect_single_print_threshold: float = 0.80
 
     # Glare detection — two profiles for two glare types
     glare_intensity_threshold: float = 0.85
@@ -343,49 +348,80 @@ class Pipeline:
 
         if should_run_photo_detect:
             step_start = time.time()
-            try:
-                # Detect individual photos on the page
-                photo_detections_result = detect_photos(
-                    working_image,
-                    min_area_ratio=self.config.photo_detect_min_area_ratio,
-                    max_count=self.config.photo_detect_max_count,
-                    method=self.config.photo_detect_method,
-                )
 
-                # Save debug: photo boundaries overlay
-                if debug_dir:
-                    from src.utils.debug import save_debug_image
-                    overlay = draw_photo_detections(working_image, photo_detections_result)
-                    save_debug_image(
-                        overlay,
-                        debug_dir / "04_photo_boundaries.jpg",
-                        f"Detected {len(photo_detections_result)} photos"
-                    )
+            # Single-print bypass: if page detection already isolated a print
+            # that covers < single_print_threshold of the original frame, the
+            # corrected image IS the photo — skip detection to avoid false splits.
+            _is_isolated_print = (
+                page_detection_result is not None
+                and not page_detection_result.is_full_frame
+                and page_detection_result.area_ratio
+                    < self.config.page_detect_single_print_threshold
+            )
 
-                # Extract individual photos
-                if photo_detections_result:
-                    extracted_photos = split_photos(working_image, photo_detections_result)
-
-                    # Save debug: each extracted photo (before glare removal)
-                    if debug_dir:
-                        from src.utils.debug import save_debug_image
-                        for i, photo in enumerate(extracted_photos, 1):
-                            save_debug_image(
-                                photo,
-                                debug_dir / f"05_photo_{i:02d}_raw.jpg",
-                                f"Extracted photo {i} ({photo.shape[1]}x{photo.shape[0]})"
-                            )
-
+            if _is_isolated_print:
+                extracted_photos = [working_image]
+                photo_detections_result = None
                 self.step_times['photo_detect'] = time.time() - step_start
                 steps_completed.append('photo_detect')
                 logger.info(
-                    f"Photo detection time: {self.step_times['photo_detect']:.3f}s, "
-                    f"detected={len(photo_detections_result)}, extracted={len(extracted_photos)}"
+                    f"Single print isolated by page detection "
+                    f"(area_ratio={page_detection_result.area_ratio:.3f} < "
+                    f"{self.config.page_detect_single_print_threshold}), "
+                    f"skipping photo detection"
                 )
+                if debug_dir:
+                    from src.utils.debug import save_debug_image
+                    save_debug_image(
+                        working_image,
+                        debug_dir / "04_single_print_bypassed.jpg",
+                        "Single print (photo detection bypassed)"
+                    )
 
-            except Exception as e:
-                logger.warning(f"Photo detection failed, passing through: {e}")
-                self.step_times['photo_detect'] = time.time() - step_start
+            else:
+                try:
+                    # Detect individual photos on the page
+                    photo_detections_result = detect_photos(
+                        working_image,
+                        min_area_ratio=self.config.photo_detect_min_area_ratio,
+                        max_count=self.config.photo_detect_max_count,
+                        method=self.config.photo_detect_method,
+                    )
+
+                    # Save debug: photo boundaries overlay
+                    if debug_dir:
+                        from src.utils.debug import save_debug_image
+                        overlay = draw_photo_detections(working_image, photo_detections_result)
+                        save_debug_image(
+                            overlay,
+                            debug_dir / "04_photo_boundaries.jpg",
+                            f"Detected {len(photo_detections_result)} photos"
+                        )
+
+                    # Extract individual photos
+                    if photo_detections_result:
+                        extracted_photos = split_photos(working_image, photo_detections_result)
+
+                        # Save debug: each extracted photo (before glare removal)
+                        if debug_dir:
+                            from src.utils.debug import save_debug_image
+                            for i, photo in enumerate(extracted_photos, 1):
+                                save_debug_image(
+                                    photo,
+                                    debug_dir / f"05_photo_{i:02d}_raw.jpg",
+                                    f"Extracted photo {i} ({photo.shape[1]}x{photo.shape[0]})"
+                                )
+
+                    self.step_times['photo_detect'] = time.time() - step_start
+                    steps_completed.append('photo_detect')
+                    logger.info(
+                        f"Photo detection time: {self.step_times['photo_detect']:.3f}s, "
+                        f"detected={len(photo_detections_result)}, extracted={len(extracted_photos)}"
+                    )
+
+                except Exception as e:
+                    logger.warning(f"Photo detection failed, passing through: {e}")
+                    self.step_times['photo_detect'] = time.time() - step_start
 
         # If no photos were extracted, treat the whole page as one photo
         if not extracted_photos:

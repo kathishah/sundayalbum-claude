@@ -45,6 +45,7 @@ class PageDetection:
     confidence: float    # 0.0 to 1.0
     is_full_frame: bool  # True if no clear boundary found, using full image
     method_used: str = field(default="none")  # Which sub-strategy succeeded
+    area_ratio: float = field(default=0.0)    # Detected quad area / total image area
 
 
 def _order_corners(pts: np.ndarray) -> np.ndarray:
@@ -348,6 +349,7 @@ def _find_boundary_via_grabcut(
     min_area_ratio: float,
     max_area_ratio: float = _MASK_MAX_AREA_RATIO,
     iterations: int = 5,
+    max_dimension: int = 800,
 ) -> Optional[np.ndarray]:
     """Detect subject boundary using GrabCut iterative segmentation.
 
@@ -355,34 +357,57 @@ def _find_boundary_via_grabcut(
     GrabCut iteratively refines foreground/background using Gaussian Mixture
     Models. Most robust for prints on varied backgrounds.
 
+    Runs on a downsampled copy (longest side capped at max_dimension) to keep
+    runtime practical on high-resolution inputs (3000×4000 → 600×800 ≈ 25×
+    fewer pixels). Corner coordinates are scaled back to the original resolution.
+
     Args:
         image: Input image as float32 RGB [0, 1].
         min_area_ratio: Minimum valid subject area as fraction of total image area.
         max_area_ratio: Maximum valid subject area as fraction of total image area.
         iterations: Number of GrabCut EM iterations (default 5).
+        max_dimension: Longest side of the downsampled image fed to GrabCut.
 
     Returns:
-        Ordered corner points as (4, 2) float32 array, or None if not found.
+        Ordered corner points as (4, 2) float32 array in original image coordinates,
+        or None if not found.
     """
     h, w = image.shape[:2]
-    image_area = float(h * w)
 
-    img_uint8 = (image * 255).astype(np.uint8)
-    img_bgr = cv2.cvtColor(img_uint8, cv2.COLOR_RGB2BGR)
+    # Downsample before GrabCut — we only need coarse segmentation, so low
+    # resolution is sufficient and dramatically faster (time scales with pixels).
+    longest = max(h, w)
+    if longest > max_dimension:
+        scale = max_dimension / longest
+        gc_h = max(50, int(h * scale))
+        gc_w = max(50, int(w * scale))
+        gc_uint8 = cv2.resize(
+            (image * 255).astype(np.uint8),
+            (gc_w, gc_h),
+            interpolation=cv2.INTER_AREA,
+        )
+        scale_x = w / gc_w
+        scale_y = h / gc_h
+    else:
+        gc_h, gc_w = h, w
+        gc_uint8 = (image * 255).astype(np.uint8)
+        scale_x = scale_y = 1.0
+
+    gc_bgr = cv2.cvtColor(gc_uint8, cv2.COLOR_RGB2BGR)
 
     # Init rect: 2% inset from each edge. GrabCut treats everything inside
     # the rect as "probably foreground" for the first iteration.
-    margin_x = max(5, int(w * 0.02))
-    margin_y = max(5, int(h * 0.02))
-    rect = (margin_x, margin_y, w - 2 * margin_x, h - 2 * margin_y)
+    margin_x = max(2, int(gc_w * 0.02))
+    margin_y = max(2, int(gc_h * 0.02))
+    rect = (margin_x, margin_y, gc_w - 2 * margin_x, gc_h - 2 * margin_y)
 
-    gc_mask = np.zeros((h, w), dtype=np.uint8)
+    gc_mask = np.zeros((gc_h, gc_w), dtype=np.uint8)
     bg_model = np.zeros((1, 65), dtype=np.float64)
     fg_model = np.zeros((1, 65), dtype=np.float64)
 
     try:
         cv2.grabCut(
-            img_bgr, gc_mask, rect,
+            gc_bgr, gc_mask, rect,
             bg_model, fg_model,
             iterations, cv2.GC_INIT_WITH_RECT,
         )
@@ -397,10 +422,23 @@ def _find_boundary_via_grabcut(
         np.uint8(0),
     )
 
-    fg_ratio = np.count_nonzero(fg_mask) / image_area
-    logger.debug(f"GrabCut: foreground coverage = {fg_ratio:.3f}")
+    fg_ratio = np.count_nonzero(fg_mask) / (gc_h * gc_w)
+    logger.debug(
+        f"GrabCut: foreground coverage = {fg_ratio:.3f} "
+        f"(ran on {gc_w}×{gc_h}, scale={1/scale_x:.2f}×)"
+    )
 
-    return _mask_to_quad(fg_mask, h, w, image_area, min_area_ratio, max_area_ratio)
+    corners_small = _mask_to_quad(
+        fg_mask, gc_h, gc_w, float(gc_h * gc_w), min_area_ratio, max_area_ratio,
+    )
+    if corners_small is None:
+        return None
+
+    # Scale corners back to original image dimensions
+    corners_full = corners_small.copy()
+    corners_full[:, 0] = np.clip(corners_full[:, 0] * scale_x, 0, w - 1)
+    corners_full[:, 1] = np.clip(corners_full[:, 1] * scale_y, 0, h - 1)
+    return corners_full
 
 
 def detect_page(
@@ -544,6 +582,7 @@ def detect_page(
             confidence=0.0,
             is_full_frame=True,
             method_used="full_frame",
+            area_ratio=1.0,
         )
 
     # -------------------------------------------------------------------------
@@ -567,6 +606,7 @@ def detect_page(
         confidence=confidence,
         is_full_frame=False,
         method_used=method_used,
+        area_ratio=area_ratio,
     )
 
 
