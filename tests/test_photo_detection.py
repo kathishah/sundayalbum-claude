@@ -61,6 +61,23 @@ class TestPhotoDetection:
         # Should detect 2 photos (decoration filtered by 30% rule)
         assert len(detections) == 2, f"Should detect 2 photos, decoration filtered, got {len(detections)}"
 
+    def test_detect_single_print_on_background(self):
+        """Test detecting a single large photo print on a background (e.g., table).
+
+        This is the key test case for cave/harbor/skydiving images where a single
+        photo print takes up 60-80% of the image and should be detected and cropped.
+        """
+        # Create test image: large photo (70% of image) on background
+        image = np.full((1000, 1000, 3), 0.3, dtype=np.float32)  # Dark background (table)
+        image[100:900, 100:900] = 0.8  # Large photo print (64% of image, brighter)
+
+        detections = detect_photos(image, min_area_ratio=0.02, max_count=5)
+
+        # Should detect exactly 1 photo (the large print)
+        assert len(detections) == 1, f"Should detect 1 large photo print, got {len(detections)}"
+        assert detections[0].area_ratio > 0.5, f"Photo should be >50% of image, got {detections[0].area_ratio:.2%}"
+        assert detections[0].area_ratio < 0.95, f"Photo should be <95% of image (not full frame), got {detections[0].area_ratio:.2%}"
+
 
 class TestPhotoSplitting:
     """Tests for photo splitting."""
