@@ -63,6 +63,19 @@ def main() -> None:
     help='Comma-separated list of steps to run (e.g., "load,normalize,glare")'
 )
 @click.option(
+    '--page-detect-method',
+    type=click.Choice(['auto', 'edge', 'color', 'grabcut']),
+    default='auto',
+    show_default=True,
+    help=(
+        'Algorithm for page/print boundary detection. '
+        'edge=Canny+contour (fast, may miss prints with faint edges); '
+        'color=background color segmentation via corner sampling; '
+        'grabcut=GrabCut iterative segmentation (slowest, most robust); '
+        'auto=try edge → color → grabcut in sequence.'
+    )
+)
+@click.option(
     '--verbose',
     '-v',
     is_flag=True,
@@ -75,6 +88,7 @@ def process(
     batch: bool,
     filter_pattern: Optional[str],
     steps: Optional[str],
+    page_detect_method: str,
     verbose: bool
 ) -> None:
     """Process album page images through the digitization pipeline.
@@ -135,7 +149,7 @@ def process(
         logger.info(f"Debug output will be saved to: {debug_dir}")
 
     # Create pipeline
-    config = PipelineConfig()
+    config = PipelineConfig(page_detect_method=page_detect_method)
     pipeline = Pipeline(config)
 
     # Process each file
