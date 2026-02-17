@@ -155,6 +155,10 @@ def _detect_photos_contour(
     detections: List[PhotoDetection] = []
     filtered_reasons = []
 
+    # First pass: collect all potentially valid contours
+    # We'll apply different max_area thresholds based on whether this looks like a single print or album page
+    potential_detections = []
+
     for idx, contour in enumerate(contours):
         # Filter by area
         area = cv2.contourArea(contour)
@@ -165,12 +169,48 @@ def _detect_photos_contour(
             filtered_reasons.append(f"Contour {idx}: area too small ({area:.0f} px, {area_ratio:.3f} ratio)")
             continue
 
-        # Too large: likely the page boundary or merged photos, not an individual photo
-        # For album pages, individual photos are typically < 20% of total image
-        # Use 20% threshold for multi-photo pages, but allow larger for single-print detection
-        max_area_threshold = 0.90  # Conservative: filter obvious page boundaries
+        # Skip extremely large contours (>95%) - these are definitely full-frame/page boundaries
+        if area_ratio > 0.95:
+            filtered_reasons.append(f"Contour {idx}: area too large ({area:.0f} px, {area_ratio:.3f} ratio) - likely full frame")
+            continue
+
+        # Store for later analysis
+        potential_detections.append((idx, contour, area, area_ratio))
+
+    # Determine if this is a single print or multi-photo page
+    # Single print scenario: 1-2 large contours (30-95% of image)
+    # Multi-photo page: multiple smaller contours (each 2-30% of image)
+    large_contours = [d for d in potential_detections if d[3] >= 0.30]  # >= 30% area
+    medium_contours = [d for d in potential_detections if 0.10 <= d[3] < 0.30]
+
+    is_single_print = (len(large_contours) == 1 and len(medium_contours) == 0)
+
+    logger.debug(
+        f"Detection scenario analysis: large_contours={len(large_contours)}, "
+        f"medium_contours={len(medium_contours)}, "
+        f"total_potential={len(potential_detections)}, "
+        f"is_single_print={is_single_print}"
+    )
+
+    # Apply appropriate max_area threshold based on scenario
+    if is_single_print:
+        # Single print: allow contours up to 95% (we already filtered >95%)
+        max_area_threshold = 0.95
+        logger.debug("Using single-print mode: max_area_threshold=0.95")
+    else:
+        # Multi-photo page: individual photos typically < 40% of total image
+        # Page boundary would be >90%, so use 0.90 as max
+        max_area_threshold = 0.90
+        logger.debug("Using multi-photo mode: max_area_threshold=0.90")
+
+    # Second pass: apply max_area filter and shape analysis
+    for idx, contour, area, area_ratio in potential_detections:
+        # Apply max_area threshold
         if area_ratio > max_area_threshold:
-            filtered_reasons.append(f"Contour {idx}: area too large ({area:.0f} px, {area_ratio:.3f} ratio) - likely page boundary")
+            filtered_reasons.append(
+                f"Contour {idx}: area too large ({area:.0f} px, {area_ratio:.3f} ratio) - "
+                f"exceeds threshold {max_area_threshold}"
+            )
             continue
 
         # Filter by shape — photos should be roughly rectangular
