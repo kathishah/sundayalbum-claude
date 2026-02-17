@@ -137,7 +137,13 @@ def _detect_photos_contour(
         binary_alt = cv2.morphologyEx(binary_alt, cv2.MORPH_OPEN, kernel_open_alt)
 
         contours_alt, _ = cv2.findContours(binary_alt, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-        large_contours_alt = [c for c in contours_alt if cv2.contourArea(c) > min_area]
+        # Only count contours that survive the second-pass area filter (< 98% of image).
+        # A nearly-full-frame contour (e.g. 99.8%) means the threshold made the entire
+        # image white and is not a useful detection; fall through to Canny in that case.
+        large_contours_alt = [
+            c for c in contours_alt
+            if min_area < cv2.contourArea(c) <= total_area * 0.98
+        ]
 
         if len(large_contours_alt) > 0:
             contours = contours_alt
