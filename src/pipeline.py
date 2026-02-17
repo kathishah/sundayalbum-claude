@@ -164,6 +164,8 @@ class PipelineConfig:
     page_detect_canny_low: int = 50
     page_detect_canny_high: int = 150
     page_detect_min_area_ratio: float = 0.3
+    page_detect_max_area_ratio: float = 0.95  # Reject full-frame false positives in edge method
+    page_detect_method: str = "auto"  # "edge", "color", "grabcut", or "auto"
 
     # Glare detection — two profiles for two glare types
     glare_intensity_threshold: float = 0.85
@@ -291,6 +293,8 @@ class Pipeline:
                     canny_low=self.config.page_detect_canny_low,
                     canny_high=self.config.page_detect_canny_high,
                     min_area_ratio=self.config.page_detect_min_area_ratio,
+                    max_area_ratio=self.config.page_detect_max_area_ratio,
+                    method=self.config.page_detect_method,
                 )
 
                 # Save debug: page boundary overlay
