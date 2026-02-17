@@ -145,7 +145,30 @@ def _detect_photos_contour(
             large_contours = large_contours_alt
             logger.debug(f"Using non-inverted threshold ({len(large_contours_alt)} large contours)")
         else:
-            logger.debug(f"Both thresholds found 0 large contours - will treat as single photo")
+            # Both adaptive thresholds failed - try Canny edge detection as last resort
+            logger.debug(f"Both thresholds found 0 large contours - trying Canny edge detection fallback")
+
+            # Canny edge detection with moderate thresholds
+            edges = cv2.Canny(blurred, 50, 150)
+
+            # Dilate edges to connect broken boundaries
+            kernel_dilate = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
+            edges_dilated = cv2.dilate(edges, kernel_dilate, iterations=2)
+
+            # Fill holes to create solid regions
+            kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (21, 21))
+            binary_canny = cv2.morphologyEx(edges_dilated, cv2.MORPH_CLOSE, kernel_close)
+
+            contours_canny, _ = cv2.findContours(binary_canny, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+            large_contours_canny = [c for c in contours_canny if cv2.contourArea(c) > min_area]
+
+            if len(large_contours_canny) > 0:
+                contours = contours_canny
+                binary = binary_canny
+                large_contours = large_contours_canny
+                logger.debug(f"Canny fallback successful: {len(large_contours_canny)} large contours")
+            else:
+                logger.debug(f"Canny fallback also found 0 large contours - will return empty list")
     else:
         logger.debug(f"Using inverted threshold ({len(large_contours)} large contours)")
 
@@ -169,8 +192,9 @@ def _detect_photos_contour(
             filtered_reasons.append(f"Contour {idx}: area too small ({area:.0f} px, {area_ratio:.3f} ratio)")
             continue
 
-        # Skip extremely large contours (>95%) - these are definitely full-frame/page boundaries
-        if area_ratio > 0.95:
+        # Skip extremely large contours (>98%) - these are definitely full-frame/page boundaries
+        # Note: Single prints can be 95-98% of image, so we use 0.98 here and let adaptive logic handle it
+        if area_ratio > 0.98:
             filtered_reasons.append(f"Contour {idx}: area too large ({area:.0f} px, {area_ratio:.3f} ratio) - likely full frame")
             continue
 
@@ -194,9 +218,10 @@ def _detect_photos_contour(
 
     # Apply appropriate max_area threshold based on scenario
     if is_single_print:
-        # Single print: allow contours up to 95% (we already filtered >95%)
-        max_area_threshold = 0.95
-        logger.debug("Using single-print mode: max_area_threshold=0.95")
+        # Single print: allow contours up to 98% (we filtered >98% in first pass)
+        # Single prints can be very close to image edges, so we're generous here
+        max_area_threshold = 0.98
+        logger.debug("Using single-print mode: max_area_threshold=0.98")
     else:
         # Multi-photo page: individual photos typically < 40% of total image
         # Page boundary would be >90%, so use 0.90 as max
