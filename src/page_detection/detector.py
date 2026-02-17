@@ -51,6 +51,7 @@ def _find_largest_quadrilateral(
     edges: np.ndarray,
     image_area: float,
     min_area_ratio: float,
+    max_area_ratio: float = 0.95,
 ) -> Optional[np.ndarray]:
     """Find the largest quadrilateral contour in an edge image.
 
@@ -58,6 +59,11 @@ def _find_largest_quadrilateral(
         edges: Binary edge image from Canny.
         image_area: Total image area (height * width).
         min_area_ratio: Minimum contour area as fraction of image area.
+        max_area_ratio: Maximum contour area as fraction of image area.
+            Contours above this threshold are treated as the image border or
+            background blob (not a meaningful content boundary) and skipped.
+            Defaults to 0.95 — a print on a carpet typically covers 40–80% of
+            the frame, while the carpet edge wraps at ~98–99%.
 
     Returns:
         Ordered corner points as (4, 2) array, or None if not found.
@@ -72,18 +78,47 @@ def _find_largest_quadrilateral(
 
     for contour in contours:
         area = cv2.contourArea(contour)
+        area_ratio = area / image_area
 
         # Skip contours that are too small
-        if area < min_area_ratio * image_area:
+        if area_ratio < min_area_ratio:
             continue
 
-        # Approximate contour to polygon
-        peri = cv2.arcLength(contour, True)
-        approx = cv2.approxPolyDP(contour, 0.02 * peri, True)
+        # Skip contours that cover nearly the entire image — these are the
+        # image border or a large background blob (e.g. carpet surrounding a
+        # glossy print), not the actual subject boundary.
+        if area_ratio > max_area_ratio:
+            logger.debug(
+                f"Skipping near-full-frame contour: area_ratio={area_ratio:.3f} "
+                f"> max_area_ratio={max_area_ratio:.3f}"
+            )
+            continue
 
-        # We want a quadrilateral (4 vertices)
-        if len(approx) == 4:
+        # Approximate contour to polygon — try progressively looser epsilons
+        # so slightly noisy edges (e.g. carpet texture bleeding into the print
+        # boundary) still collapse to a clean quadrilateral.
+        peri = cv2.arcLength(contour, True)
+        approx = None
+        for eps_factor in [0.02, 0.04, 0.06]:
+            candidate = cv2.approxPolyDP(contour, eps_factor * peri, True)
+            if len(candidate) == 4:
+                approx = candidate
+                break
+
+        if approx is not None:
             corners = approx.reshape(4, 2).astype(np.float32)
+            return _order_corners(corners)
+
+        # If approxPolyDP never reached 4 vertices for this large contour,
+        # fall back to the minimum-area rectangle — always gives exactly 4
+        # corners and is a good proxy for a rectangular subject.
+        if area_ratio >= min_area_ratio * 2:
+            rect = cv2.minAreaRect(contour)
+            box = cv2.boxPoints(rect)
+            corners = np.array(box, dtype=np.float32)
+            logger.debug(
+                f"Used minAreaRect fallback for contour: area_ratio={area_ratio:.3f}"
+            )
             return _order_corners(corners)
 
     return None
@@ -253,6 +288,7 @@ def detect_page(
         method_used = "contour"
 
     # Strategy 2: If contour didn't work, try with stronger edge detection
+    edges_strong = None
     if corners is None:
         edges_strong = cv2.Canny(blurred, canny_low // 2, canny_high // 2)
         edges_strong = cv2.dilate(edges_strong, kernel, iterations=2)
@@ -260,9 +296,11 @@ def detect_page(
         if corners is not None:
             method_used = "contour_strong"
 
-    # Strategy 3: Hough lines fallback
+    # Strategy 3: Hough lines fallback — use the stronger edge image when
+    # available since it captures more line segments on low-contrast boundaries.
     if corners is None:
-        corners = _find_quad_via_hough(edges, image.shape, min_area_ratio)
+        hough_edges = edges_strong if edges_strong is not None else edges
+        corners = _find_quad_via_hough(hough_edges, image.shape, min_area_ratio)
         if corners is not None:
             method_used = "hough"
 
@@ -276,6 +314,20 @@ def detect_page(
         corners = _find_largest_quadrilateral(adaptive, image_area, min_area_ratio)
         if corners is not None:
             method_used = "adaptive"
+
+    # Validate: reject detections that cover nearly the entire frame.
+    # If all strategies found a quad but it spans >97% of the image, that quad
+    # is the background/carpet border (or the image edge itself), not a real
+    # subject boundary.  Treat it as full-frame rather than applying a useless
+    # perspective warp.
+    if corners is not None:
+        quad_area_check = cv2.contourArea(corners.astype(np.int32))
+        if quad_area_check / image_area > 0.97:
+            logger.info(
+                f"Detected quad area_ratio={quad_area_check / image_area:.3f} "
+                f"> 0.97 — treating as full frame (background/border detected, not subject)"
+            )
+            corners = None
 
     # If no boundary found, use full image
     if corners is None:
