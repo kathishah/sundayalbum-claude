@@ -361,6 +361,136 @@ def _detect_photos_contour(
         for reason in filtered_reasons[:10]:  # Limit to first 10
             logger.debug(f"  {reason}")
 
+    # Sanity check: if 2+ detections have badly disproportionate areas (one is >2.5x
+    # another), the contour method likely found wrong boundaries.  Fall back to the
+    # projection-profile approach which finds physical gaps between photos.
+    if len(detections) >= 2:
+        areas = [d.area_ratio for d in detections]
+        area_imbalance = max(areas) / (min(areas) + 1e-6)
+        if area_imbalance > 2.5:
+            logger.warning(
+                f"Contour detections are disproportionate (imbalance={area_imbalance:.1f}x). "
+                f"Falling back to projection-profile detection."
+            )
+            proj_detections = _detect_photos_by_projection(page_image, min_area_ratio)
+            if proj_detections:
+                detections = proj_detections
+
+    return detections
+
+
+def _detect_photos_by_projection(
+    page_image: np.ndarray,
+    min_area_ratio: float,
+) -> List[PhotoDetection]:
+    """Detect photo split lines using edge-density projection profiles.
+
+    For pages where contour detection produces badly disproportionate regions this
+    approach is more robust.  It computes Sobel-edge magnitude sums across every
+    row and column, then locates the deepest valley — the physical gap (album page
+    divider) between adjacent photos — and uses it as the split line.
+
+    Currently supports pages with exactly 2 photos separated by one dominant gap
+    (vertical side-by-side or horizontal stacked layout).
+
+    Args:
+        page_image: Album page image, float32 RGB [0, 1].
+        min_area_ratio: Minimum photo area as fraction of total image area.
+
+    Returns:
+        List of two PhotoDetection objects, or empty list if no clear gap found.
+    """
+    h, w = page_image.shape[:2]
+    total_area = float(h * w)
+
+    image_uint8 = (page_image * 255).astype(np.uint8)
+    gray = cv2.cvtColor(image_uint8, cv2.COLOR_RGB2GRAY)
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+
+    # Sobel edge magnitude captures structural boundaries between photos
+    sobelx = cv2.Sobel(blurred, cv2.CV_64F, 1, 0, ksize=3)
+    sobely = cv2.Sobel(blurred, cv2.CV_64F, 0, 1, ksize=3)
+    edge_mag = np.sqrt(sobelx ** 2 + sobely ** 2)
+
+    # Smooth projection profiles to find broad valleys (album dividers are wide)
+    smooth_k = max(11, min(h, w) // 30)
+
+    row_profile = edge_mag.sum(axis=1)  # (h,)  — rows with few edges = horizontal gap
+    col_profile = edge_mag.sum(axis=0)  # (w,)  — cols with few edges = vertical gap
+
+    row_smooth = np.convolve(row_profile, np.ones(smooth_k) / smooth_k, mode='same')
+    col_smooth = np.convolve(col_profile, np.ones(smooth_k) / smooth_k, mode='same')
+
+    # Search for the valley only in the central 20–80% of each axis to avoid borders
+    margin_h = int(h * 0.20)
+    margin_w = int(w * 0.20)
+
+    h_search = row_smooth[margin_h: h - margin_h]
+    v_search = col_smooth[margin_w: w - margin_w]
+
+    h_min_idx = int(np.argmin(h_search)) + margin_h
+    v_min_idx = int(np.argmin(v_search)) + margin_w
+
+    # Relative valley depth: lower ratio = cleaner / more definitive gap
+    mean_row = row_smooth.mean() + 1e-6
+    mean_col = col_smooth.mean() + 1e-6
+    h_relative = row_smooth[h_min_idx] / mean_row
+    v_relative = col_smooth[v_min_idx] / mean_col
+
+    logger.debug(
+        f"Projection valleys — horizontal at y={h_min_idx} (rel={h_relative:.3f}), "
+        f"vertical at x={v_min_idx} (rel={v_relative:.3f})"
+    )
+
+    # Choose the axis with the deeper (lower-relative) valley
+    if v_relative <= h_relative:
+        split_x = v_min_idx
+        regions: List[Tuple[int, int, int, int]] = [
+            (0, 0, split_x, h),
+            (split_x, 0, w, h),
+        ]
+        logger.debug(f"Projection: vertical split at x={split_x}")
+    else:
+        split_y = h_min_idx
+        regions = [
+            (0, 0, w, split_y),
+            (0, split_y, w, h),
+        ]
+        logger.debug(f"Projection: horizontal split at y={split_y}")
+
+    detections: List[PhotoDetection] = []
+    for x1, y1, x2, y2 in regions:
+        bw, bh = x2 - x1, y2 - y1
+        area_ratio = (bw * bh) / total_area
+
+        if area_ratio < min_area_ratio:
+            continue
+
+        corners = np.array(
+            [[x1, y1], [x2, y1], [x2, y2], [x1, y2]], dtype=np.float32
+        )
+
+        if bw > bh * 1.1:
+            orientation = "landscape"
+        elif bh > bw * 1.1:
+            orientation = "portrait"
+        else:
+            orientation = "square"
+
+        contour = np.array(
+            [[[x1, y1]], [[x2, y1]], [[x2, y2]], [[x1, y2]]], dtype=np.int32
+        )
+
+        detections.append(PhotoDetection(
+            bbox=(x1, y1, x2, y2),
+            corners=corners,
+            confidence=0.75,
+            orientation=orientation,
+            area_ratio=area_ratio,
+            contour=contour,
+        ))
+
+    logger.debug(f"Projection detection produced {len(detections)} regions")
     return detections
 
 
