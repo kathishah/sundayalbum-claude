@@ -439,7 +439,7 @@ Print: alignment_scores per image, per-image glare coverage%, composite confiden
 
 **Goal:** Detect individual photos on album pages and extract them.
 
-**Status:** ✅ Completed with 80% accuracy (4/5 test images passing)
+**Status:** ✅ Completed with 100% accuracy (5/5 test images passing after 2026-02-16/17 fixes)
 
 **IMPORTANT ARCHITECTURAL CHANGE:**
 During implementation, we discovered that the pipeline order needed to be changed. **Photo detection is now performed BEFORE glare removal** (not after as originally planned). This is more efficient and produces better results since glare removal can be applied to each individual photo separately.
@@ -481,22 +481,22 @@ During implementation, we discovered that the pipeline order needed to be change
 
 5. Unit tests: tests/test_photo_detection.py with 10 test cases
 
-**Test Results:**
+**Test Results (initial):**
 - IMG_cave_normal.HEIC: 1/1 ✅
 - IMG_harbor_normal.HEIC: 1/1 ✅
 - IMG_skydiving_normal.HEIC: 1/1 ✅
 - IMG_three_pics_normal.HEIC: 3/3 ✅
 - IMG_two_pics_vertical_horizontal.HEIC: 3/2 ⚠️ (minor over-detection)
 
-**Score:** 4/5 passing (80% accuracy)
+**Score:** 5/5 passing (100% accuracy) after post-Phase 6 fixes
 
-**Known Issues:**
-- two_pics occasionally detects a small decoration as a 3rd photo (42% of largest, just above filter threshold)
-- Can be tuned further if needed, but 80% is good for initial implementation
+**Post-Phase 6 Fixes (see journal/):**
+- `2026-02-16-single-print-fix.md`: Adaptive max-area threshold (now 98%) + Canny edge fallback for single prints on backgrounds
+- `2026-02-17-multi-photo-detection-fix.md`: Removed `_is_isolated_print` bypass; added projection-profile fallback for disproportionate splits (two_pics portrait+landscape case)
 
 ---
 
-## Phase 7: Per-Photo Geometry Correction (Priority 3)
+## Phase 7: Per-Photo Geometry Correction (Priority 3) ✅ COMPLETED
 
 **Prerequisites — Test Images:**
 ```bash
@@ -539,7 +539,7 @@ Run against all HEIC samples. Print per photo: keystone_applied, rotation_angle,
 
 ---
 
-## Phase 8: Color Restoration (Priority 4)
+## Phase 8: Color Restoration (Priority 4) ✅ COMPLETED
 
 **Prerequisites — Test Images:**
 ```bash
@@ -587,7 +587,7 @@ Run against all HEIC samples. Print: yellowing_score, saturation_before/after, s
 
 ---
 
-## Phase 9: End-to-End Pipeline & AI Quality Check
+## Phase 9: End-to-End Pipeline & AI Quality Check ✅ COMPLETED
 
 **Prerequisites — Test Images:**
 ```bash
@@ -688,10 +688,10 @@ on a downscaled image then applying the mask at full resolution?"
 [✓] Phase 3:  Glare detection (detection only — critical, take your time)
 [✓] Phase 4:  Single-shot glare removal
 [⏸] Phase 5:  Multi-shot glare compositing — DEFERRED (need multi-angle test images)
-[✓] Phase 6:  Photo detection & splitting — COMPLETED (80% accuracy, 4/5 tests passing)
-[ ] Phase 7:  Geometry correction (keystone, rotation, dewarp)
-[ ] Phase 8:  Color restoration (white balance, deyellow, restore, enhance)
-[ ] Phase 9:  Full pipeline, AI quality check, output naming
+[✓] Phase 6:  Photo detection & splitting — COMPLETED (100% accuracy after 2026-02-16/17 fixes)
+[✓] Phase 7:  Geometry correction (keystone, rotation, dewarp)
+[✓] Phase 8:  Color restoration (white balance, deyellow, restore, enhance)
+[✓] Phase 9:  Full pipeline, AI quality check, output naming
 [ ] Phase 10: Real-world iteration on your actual album
 
 Quality gates (must pass before moving to web UI / AWS):
@@ -699,9 +699,9 @@ Quality gates (must pass before moving to web UI / AWS):
 [✓] Glare removal works on sleeve glare (three_pics, two_pics)
 [✓] Glare removal works on print glare (cave, harbor, skydiving)
 [✓] IMG_three_pics correctly splits into 3 individual photos
-[~] IMG_two_pics correctly splits into 2 photos (detects 3, minor over-detection)
-[ ] Color restoration looks natural on all test images
-[ ] Full pipeline runs in < 15 seconds per HEIC image on M4
+[✓] IMG_two_pics correctly splits into 2 photos (fixed 2026-02-17: projection-profile fallback)
+[✓] Color restoration looks natural on all test images (validated in Phase 8)
+[ ] Full pipeline runs in < 15 seconds per HEIC image on M4 (validate on M4 hardware)
 [ ] You're happy with the output quality on YOUR actual album photos
 ```
 
