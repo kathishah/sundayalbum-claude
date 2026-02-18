@@ -1,27 +1,27 @@
 # Core image processing
-opencv-python-headless==4.10.0.84
-numpy==1.26.4
-scipy==1.13.1
-scikit-image==0.24.0
-Pillow==10.4.0
+opencv-python-headless>=4.10.0.84
+numpy>=1.26.4,<3
+scipy>=1.13.1
+scikit-image>=0.24.0
+Pillow>=10.4.0
 
 # Format support
-pillow-heif==0.18.0
-rawpy==0.21.0
+pillow-heif>=0.18.0
+rawpy>=0.21.0
 
 # CLI and utilities
-click==8.1.7
-python-dotenv==1.0.1
-matplotlib==3.9.2
+click>=8.1.0
+python-dotenv>=1.0.0
+matplotlib>=3.9.0
 
 # AI APIs
-anthropic==0.34.2
-openai==1.47.1
+anthropic>=0.34.2
+openai>=1.47.1
 
 # Development dependencies
-pytest==8.3.3
-mypy==1.11.2
-ruff==0.6.8
+pytest>=8.0.0
+mypy>=1.11.0
+ruff>=0.6.0
 
 # AI inpainting (diffusers)
 torch>=2.2
