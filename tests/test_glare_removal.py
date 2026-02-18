@@ -419,7 +419,7 @@ class TestGlareRemovalRealImages:
 
         # Load and normalize
         image, _ = load_image("test-images/IMG_cave_normal.HEIC")
-        norm_result = normalize(image, max_resolution=2000)
+        norm_result = normalize(image, max_working_resolution=2000)
 
         # Detect glare
         glare_detection = detect_glare(norm_result.image)
@@ -448,7 +448,7 @@ class TestGlareRemovalRealImages:
 
         # Load and normalize
         image, _ = load_image("test-images/IMG_three_pics_normal.HEIC")
-        norm_result = normalize(image, max_resolution=2000)
+        norm_result = normalize(image, max_working_resolution=2000)
 
         # Detect glare
         glare_detection = detect_glare(norm_result.image)

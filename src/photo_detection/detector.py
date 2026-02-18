@@ -27,6 +27,7 @@ def detect_photos(
     min_area_ratio: float = 0.02,  # Lowered from 0.05 to 0.02 (2%) to handle album pages with visible background
     max_count: int = 8,
     method: str = "contour",
+    page_was_corrected: bool = False,
 ) -> List[PhotoDetection]:
     """Detect individual photos on an album page or single print.
 
@@ -40,11 +41,43 @@ def detect_photos(
         min_area_ratio: Minimum photo area as ratio of total image area
         max_count: Maximum number of photos to detect
         method: Detection method ("contour", "claude", or "auto")
+        page_was_corrected: True when the image has already been perspective-corrected
+            by page detection (i.e. the image IS the isolated subject, not the full
+            camera frame).  When True, a pre-check determines whether the image
+            contains clear album-page borders between photos.  If no borders are
+            found the image is treated as a single print and returned whole, avoiding
+            false splits on rich photographic content (cave, harbor, skydiving).
 
     Returns:
         List of PhotoDetection objects, sorted top-to-bottom, left-to-right
     """
     if method == "contour" or method == "auto":
+        # Single-print guard: only applies after perspective correction has already
+        # isolated the subject.  Album pages have white/neutral paper borders between
+        # photos; single prints don't.  If no borders are detected, return the whole
+        # image as one detection rather than letting contour analysis fragment the
+        # photographic content into spurious sub-regions.
+        if page_was_corrected and not _has_album_page_borders(page_image):
+            h, w = page_image.shape[:2]
+            if w > h * 1.1:
+                orientation = "landscape"
+            elif h > w * 1.1:
+                orientation = "portrait"
+            else:
+                orientation = "square"
+            logger.info(
+                f"No album page borders detected on perspective-corrected image "
+                f"({w}×{h}) — treating as single print"
+            )
+            return [PhotoDetection(
+                bbox=(0, 0, w, h),
+                corners=np.array([[0, 0], [w, 0], [w, h], [0, h]], dtype=np.float32),
+                confidence=0.90,
+                orientation=orientation,
+                area_ratio=1.0,
+                contour=np.array([[[0, 0]], [[w, 0]], [[w, h]], [[0, h]]], dtype=np.int32),
+            )]
+
         detections = _detect_photos_contour(page_image, min_area_ratio, max_count)
     elif method == "claude":
         raise NotImplementedError("Claude Vision API fallback not yet implemented")
@@ -54,6 +87,99 @@ def detect_photos(
     logger.info(f"Detected {len(detections)} photos using method '{method}'")
 
     return detections
+
+
+def _has_album_page_borders(
+    image: np.ndarray,
+    pixel_threshold_ratio: float = 0.05,
+    row_low_fraction: float = 0.95,
+    min_consecutive: int = 3,
+    center_margin: float = 0.20,
+) -> bool:
+    """Detect whether a perspective-corrected image has clear borders between photos.
+
+    Album pages contain white/neutral paper strips between individual photos.
+    These appear as bands of near-zero Sobel-edge magnitude that span the full
+    width (horizontal borders) or full height (vertical borders) of the image.
+    Single prints have photographic content throughout — even smooth regions
+    retain enough texture/grain to stay above the low-edge threshold.
+
+    Args:
+        image: Float32 RGB [0, 1].
+        pixel_threshold_ratio: A pixel is "low-edge" when its Sobel magnitude is
+            below this fraction of the image-wide maximum Sobel magnitude.
+        row_low_fraction: Fraction of pixels in a row (or column) that must be
+            low-edge for that line to be classified as a border line.
+        min_consecutive: Minimum consecutive border lines required to confirm a
+            border band (guards against isolated quiet rows inside a photo).
+        center_margin: Ignore this fraction of rows/columns at the edges so that
+            image borders are not confused with album-page borders.
+
+    Returns:
+        True if at least one clear border band is found (album page).
+        False if no clear borders exist (single print).
+    """
+    h, w = image.shape[:2]
+
+    image_uint8 = (image * 255).astype(np.uint8)
+    gray = cv2.cvtColor(image_uint8, cv2.COLOR_RGB2GRAY)
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+
+    sobelx = cv2.Sobel(blurred, cv2.CV_64F, 1, 0, ksize=3)
+    sobely = cv2.Sobel(blurred, cv2.CV_64F, 0, 1, ksize=3)
+    edge_mag = np.sqrt(sobelx ** 2 + sobely ** 2)
+
+    max_edge = edge_mag.max()
+    if max_edge < 1.0:
+        return False  # Essentially blank image
+
+    pixel_threshold = max_edge * pixel_threshold_ratio
+    low_edge = edge_mag < pixel_threshold  # bool mask (H, W)
+
+    # Album page borders are near-neutral in color (white/cream paper), not just
+    # low-edge.  Photographic content that is also low-edge (e.g. dark cave walls,
+    # uniform blue sky) typically has higher color saturation.  Requiring low
+    # saturation as a second condition eliminates both dark neutral-ish photo areas
+    # and saturated sky, while correctly accepting the white/cream album paper.
+    hsv = cv2.cvtColor(image_uint8, cv2.COLOR_RGB2HSV)
+    saturation = hsv[:, :, 1].astype(np.float32) / 255.0
+    is_neutral = saturation < 0.30  # Album paper saturation is well below 0.30
+
+    border_mask = low_edge & is_neutral  # (H, W)
+
+    margin_h = max(1, int(h * center_margin))
+    margin_w = max(1, int(w * center_margin))
+
+    def _has_consecutive_run(bool_1d: np.ndarray, min_run: int) -> bool:
+        count = 0
+        for val in bool_1d:
+            if val:
+                count += 1
+                if count >= min_run:
+                    return True
+            else:
+                count = 0
+        return False
+
+    # Horizontal border bands (full-width rows of low-edge AND neutral-color).
+    # These indicate photos stacked vertically, separated by horizontal strips.
+    center_rows = border_mask[margin_h: h - margin_h, :]  # (center_h, W)
+    row_frac = center_rows.mean(axis=1)
+    has_h_border = _has_consecutive_run(row_frac >= row_low_fraction, min_consecutive)
+
+    # Vertical border bands (full-height columns of low-edge AND neutral-color).
+    # These indicate photos placed side-by-side, separated by vertical strips.
+    center_cols = border_mask[:, margin_w: w - margin_w]  # (H, center_w)
+    col_frac = center_cols.mean(axis=0)
+    has_v_border = _has_consecutive_run(col_frac >= row_low_fraction, min_consecutive)
+
+    result = has_h_border or has_v_border
+    logger.debug(
+        f"Album border check: max_edge={max_edge:.1f}, "
+        f"pixel_thresh={pixel_threshold:.2f}, "
+        f"has_h_border={has_h_border}, has_v_border={has_v_border}"
+    )
+    return result
 
 
 def _detect_photos_contour(
@@ -137,7 +263,13 @@ def _detect_photos_contour(
         binary_alt = cv2.morphologyEx(binary_alt, cv2.MORPH_OPEN, kernel_open_alt)
 
         contours_alt, _ = cv2.findContours(binary_alt, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-        large_contours_alt = [c for c in contours_alt if cv2.contourArea(c) > min_area]
+        # Only count contours that survive the second-pass area filter (< 98% of image).
+        # A nearly-full-frame contour (e.g. 99.8%) means the threshold made the entire
+        # image white and is not a useful detection; fall through to Canny in that case.
+        large_contours_alt = [
+            c for c in contours_alt
+            if min_area < cv2.contourArea(c) <= total_area * 0.98
+        ]
 
         if len(large_contours_alt) > 0:
             contours = contours_alt
@@ -322,10 +454,14 @@ def _detect_photos_contour(
 
         # Adaptive threshold for decoration filtering:
         # Album pages can have photos of varying sizes (e.g., 3×5 mixed with 4×6)
-        # Use relaxed threshold to avoid filtering out legitimately smaller photos
+        # Use relaxed threshold to avoid filtering out legitimately smaller photos.
         # - If we have many detections (> 4), use moderate filter (30%)
-        # - If we have few detections (2-4), use very loose filter (20%)
-        threshold = 0.30 if len(detections) > 4 else 0.20
+        # - If we have few detections (2-4), use tight filter (10%) so that a
+        #   portrait photo significantly smaller in pixel area than a landscape
+        #   photo (which can be as low as ~17% of the larger contour's area) is
+        #   kept rather than discarded.  Genuine decorative elements (captions,
+        #   stamps) are typically < 5% and will still be removed.
+        threshold = 0.30 if len(detections) > 4 else 0.10
 
         logger.debug(
             f"Decoration filter check: {len(detections)} detections, "
@@ -379,26 +515,106 @@ def _detect_photos_contour(
     return detections
 
 
+def _find_projection_gaps(
+    smooth_profile: np.ndarray,
+    start: int,
+    end: int,
+    primary_threshold_ratio: float = 0.55,
+    secondary_depth_multiplier: float = 1.20,
+    min_separation_ratio: float = 0.20,
+) -> List[int]:
+    """Find positions of physical gaps between photos in a projection profile.
+
+    Uses a primary + secondary approach:
+    1. The primary gap is the single deepest valley in the search range.
+       It must be below ``primary_threshold_ratio * mean`` to count.
+    2. Additional gaps are local minima that are:
+       a. Within ``secondary_depth_multiplier`` of the primary gap's depth.
+          Album-page dividers are all made of the same white paper, so real
+          secondary gaps should be nearly as quiet as the primary one.
+          Smooth photographic regions (uniform sky, background) are louder
+          relative to the primary, so they are rejected by this check.
+       b. Separated from every already-accepted gap by at least
+          ``min_separation_ratio * (end - start)`` positions.
+
+    Args:
+        smooth_profile: Smoothed 1-D projection (row or column edge sums).
+        start: First index of the search range (exclusive of image borders).
+        end: One-past-last index of the search range.
+        primary_threshold_ratio: The deepest valley must be below this
+            fraction of the search-range mean to count as a real gap.
+        secondary_depth_multiplier: Secondary gaps must have absolute depth
+            ≤ primary_depth × multiplier.  Use 1.20 — real album-page borders
+            are within 20% of each other; smooth photo areas are 30%+ louder.
+        min_separation_ratio: Minimum spacing between accepted gap positions,
+            as a fraction of ``end - start``.  Prevents double-counting a
+            single wide border band.
+
+    Returns:
+        Sorted list of gap positions (absolute indices into ``smooth_profile``).
+    """
+    search = smooth_profile[start:end]
+    n = len(search)
+    if n < 3:
+        return []
+
+    mean_val = search.mean() + 1e-6
+
+    # --- Primary gap: the single deepest valley -----------------------
+    primary_rel = int(np.argmin(search))
+    primary_abs = primary_rel + start
+    primary_depth = float(smooth_profile[primary_abs])
+    primary_depth_ratio = primary_depth / mean_val
+
+    if primary_depth_ratio >= primary_threshold_ratio:
+        # Even the deepest point is not deep enough to be a real gap
+        return []
+
+    gaps: List[int] = [primary_abs]
+
+    # --- Secondary gaps: similar-depth, well-separated local minima ---
+    min_separation = max(5, int((end - start) * min_separation_ratio))
+    # Secondary must be nearly as quiet as the primary (same white paper).
+    secondary_threshold = primary_depth * secondary_depth_multiplier
+
+    # Collect all local minima (both neighbours strictly higher)
+    local_minima: List[Tuple[float, int]] = []
+    for i in range(1, n - 1):
+        if search[i] < search[i - 1] and search[i] < search[i + 1]:
+            abs_i = i + start
+            if smooth_profile[abs_i] <= secondary_threshold:
+                local_minima.append((float(smooth_profile[abs_i]), abs_i))
+
+    # Sort by depth ascending so we try the deepest candidates first
+    local_minima.sort()
+
+    for _depth, idx in local_minima:
+        if all(abs(idx - g) >= min_separation for g in gaps):
+            gaps.append(idx)
+
+    return sorted(gaps)
+
+
 def _detect_photos_by_projection(
     page_image: np.ndarray,
     min_area_ratio: float,
 ) -> List[PhotoDetection]:
     """Detect photo split lines using edge-density projection profiles.
 
-    For pages where contour detection produces badly disproportionate regions this
-    approach is more robust.  It computes Sobel-edge magnitude sums across every
-    row and column, then locates the deepest valley — the physical gap (album page
-    divider) between adjacent photos — and uses it as the split line.
+    For pages where contour detection produces badly disproportionate regions
+    this approach is more robust.  It computes Sobel-edge magnitude sums across
+    every row and column, locates bands where the energy drops sharply (physical
+    gaps / album-page dividers between photos), and uses those as split lines.
 
-    Currently supports pages with exactly 2 photos separated by one dominant gap
-    (vertical side-by-side or horizontal stacked layout).
+    Supports any number of photos stacked vertically or placed side-by-side.
 
     Args:
         page_image: Album page image, float32 RGB [0, 1].
         min_area_ratio: Minimum photo area as fraction of total image area.
 
     Returns:
-        List of two PhotoDetection objects, or empty list if no clear gap found.
+        List of PhotoDetection objects (one per region), or empty list if no
+        clear gaps are found.
     """
     h, w = page_image.shape[:2]
     total_area = float(h * w)
@@ -421,42 +637,58 @@ def _detect_photos_by_projection(
     row_smooth = np.convolve(row_profile, np.ones(smooth_k) / smooth_k, mode='same')
     col_smooth = np.convolve(col_profile, np.ones(smooth_k) / smooth_k, mode='same')
 
-    # Search for the valley only in the central 20–80% of each axis to avoid borders
-    margin_h = int(h * 0.20)
-    margin_w = int(w * 0.20)
+    # Search only in the central 20–80% of each axis so that album-page outer
+    # borders (top/bottom/left/right) are not mistaken for photo dividers.
+    margin_h = max(1, int(h * 0.20))
+    margin_w = max(1, int(w * 0.20))
 
-    h_search = row_smooth[margin_h: h - margin_h]
-    v_search = col_smooth[margin_w: w - margin_w]
-
-    h_min_idx = int(np.argmin(h_search)) + margin_h
-    v_min_idx = int(np.argmin(v_search)) + margin_w
-
-    # Relative valley depth: lower ratio = cleaner / more definitive gap
-    mean_row = row_smooth.mean() + 1e-6
-    mean_col = col_smooth.mean() + 1e-6
-    h_relative = row_smooth[h_min_idx] / mean_row
-    v_relative = col_smooth[v_min_idx] / mean_col
+    h_gaps = _find_projection_gaps(row_smooth, margin_h, h - margin_h)
+    v_gaps = _find_projection_gaps(col_smooth, margin_w, w - margin_w)
 
     logger.debug(
-        f"Projection valleys — horizontal at y={h_min_idx} (rel={h_relative:.3f}), "
-        f"vertical at x={v_min_idx} (rel={v_relative:.3f})"
+        f"Projection gaps — horizontal (stacked): {h_gaps}, "
+        f"vertical (side-by-side): {v_gaps}"
     )
 
-    # Choose the axis with the deeper (lower-relative) valley
-    if v_relative <= h_relative:
-        split_x = v_min_idx
-        regions: List[Tuple[int, int, int, int]] = [
-            (0, 0, split_x, h),
-            (split_x, 0, w, h),
-        ]
-        logger.debug(f"Projection: vertical split at x={split_x}")
+    # Prefer the axis that yields more splits (more photos detected).
+    # Break ties by choosing the axis whose gaps are relatively deeper.
+    def _mean_relative_depth(gaps: List[int], profile: np.ndarray) -> float:
+        if not gaps:
+            return 1.0  # No gaps → no depth improvement
+        mean_val = profile.mean() + 1e-6
+        return float(np.mean([profile[g] / mean_val for g in gaps]))
+
+    if not h_gaps and not v_gaps:
+        logger.debug("Projection: no clear gaps found — returning empty")
+        return []
+
+    use_vertical: bool
+    if len(v_gaps) > len(h_gaps):
+        use_vertical = True
+    elif len(h_gaps) > len(v_gaps):
+        use_vertical = False
     else:
-        split_y = h_min_idx
-        regions = [
-            (0, 0, w, split_y),
-            (0, split_y, w, h),
+        # Equal number of gaps — pick the axis with deeper (lower-ratio) valleys
+        v_depth = _mean_relative_depth(v_gaps, col_smooth)
+        h_depth = _mean_relative_depth(h_gaps, row_smooth)
+        use_vertical = v_depth <= h_depth
+
+    if use_vertical:
+        splits = sorted(v_gaps)
+        boundaries = [0] + splits + [w]
+        regions: List[Tuple[int, int, int, int]] = [
+            (boundaries[i], 0, boundaries[i + 1], h)
+            for i in range(len(boundaries) - 1)
         ]
-        logger.debug(f"Projection: horizontal split at y={split_y}")
+        logger.debug(f"Projection: {len(splits)} vertical split(s) at x={splits}")
+    else:
+        splits = sorted(h_gaps)
+        boundaries = [0] + splits + [h]
+        regions = [
+            (0, boundaries[i], w, boundaries[i + 1])
+            for i in range(len(boundaries) - 1)
+        ]
+        logger.debug(f"Projection: {len(splits)} horizontal split(s) at y={splits}")
 
     detections: List[PhotoDetection] = []
     for x1, y1, x2, y2 in regions:
