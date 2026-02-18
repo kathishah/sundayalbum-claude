@@ -511,26 +511,106 @@ def _detect_photos_contour(
     return detections
 
 
+def _find_projection_gaps(
+    smooth_profile: np.ndarray,
+    start: int,
+    end: int,
+    primary_threshold_ratio: float = 0.55,
+    secondary_depth_multiplier: float = 1.20,
+    min_separation_ratio: float = 0.20,
+) -> List[int]:
+    """Find positions of physical gaps between photos in a projection profile.
+
+    Uses a primary + secondary approach:
+    1. The primary gap is the single deepest valley in the search range.
+       It must be below ``primary_threshold_ratio * mean`` to count.
+    2. Additional gaps are local minima that are:
+       a. Within ``secondary_depth_multiplier`` of the primary gap's depth.
+          Album-page dividers are all made of the same white paper, so real
+          secondary gaps should be nearly as quiet as the primary one.
+          Smooth photographic regions (uniform sky, background) are louder
+          relative to the primary, so they are rejected by this check.
+       b. Separated from every already-accepted gap by at least
+          ``min_separation_ratio * (end - start)`` positions.
+
+    Args:
+        smooth_profile: Smoothed 1-D projection (row or column edge sums).
+        start: First index of the search range (exclusive of image borders).
+        end: One-past-last index of the search range.
+        primary_threshold_ratio: The deepest valley must be below this
+            fraction of the search-range mean to count as a real gap.
+        secondary_depth_multiplier: Secondary gaps must have absolute depth
+            ≤ primary_depth × multiplier.  Use 1.20 — real album-page borders
+            are within 20% of each other; smooth photo areas are 30%+ louder.
+        min_separation_ratio: Minimum spacing between accepted gap positions,
+            as a fraction of ``end - start``.  Prevents double-counting a
+            single wide border band.
+
+    Returns:
+        Sorted list of gap positions (absolute indices into ``smooth_profile``).
+    """
+    search = smooth_profile[start:end]
+    n = len(search)
+    if n < 3:
+        return []
+
+    mean_val = search.mean() + 1e-6
+
+    # --- Primary gap: the single deepest valley -----------------------
+    primary_rel = int(np.argmin(search))
+    primary_abs = primary_rel + start
+    primary_depth = float(smooth_profile[primary_abs])
+    primary_depth_ratio = primary_depth / mean_val
+
+    if primary_depth_ratio >= primary_threshold_ratio:
+        # Even the deepest point is not deep enough to be a real gap
+        return []
+
+    gaps: List[int] = [primary_abs]
+
+    # --- Secondary gaps: similar-depth, well-separated local minima ---
+    min_separation = max(5, int((end - start) * min_separation_ratio))
+    # Secondary must be nearly as quiet as the primary (same white paper).
+    secondary_threshold = primary_depth * secondary_depth_multiplier
+
+    # Collect all local minima (both neighbours strictly higher)
+    local_minima: List[Tuple[float, int]] = []
+    for i in range(1, n - 1):
+        if search[i] < search[i - 1] and search[i] < search[i + 1]:
+            abs_i = i + start
+            if smooth_profile[abs_i] <= secondary_threshold:
+                local_minima.append((float(smooth_profile[abs_i]), abs_i))
+
+    # Sort by depth ascending so we try the deepest candidates first
+    local_minima.sort()
+
+    for _depth, idx in local_minima:
+        if all(abs(idx - g) >= min_separation for g in gaps):
+            gaps.append(idx)
+
+    return sorted(gaps)
+
+
 def _detect_photos_by_projection(
     page_image: np.ndarray,
     min_area_ratio: float,
 ) -> List[PhotoDetection]:
     """Detect photo split lines using edge-density projection profiles.
 
-    For pages where contour detection produces badly disproportionate regions this
-    approach is more robust.  It computes Sobel-edge magnitude sums across every
-    row and column, then locates the deepest valley — the physical gap (album page
-    divider) between adjacent photos — and uses it as the split line.
+    For pages where contour detection produces badly disproportionate regions
+    this approach is more robust.  It computes Sobel-edge magnitude sums across
+    every row and column, locates bands where the energy drops sharply (physical
+    gaps / album-page dividers between photos), and uses those as split lines.
 
-    Currently supports pages with exactly 2 photos separated by one dominant gap
-    (vertical side-by-side or horizontal stacked layout).
+    Supports any number of photos stacked vertically or placed side-by-side.
 
     Args:
         page_image: Album page image, float32 RGB [0, 1].
         min_area_ratio: Minimum photo area as fraction of total image area.
 
     Returns:
-        List of two PhotoDetection objects, or empty list if no clear gap found.
+        List of PhotoDetection objects (one per region), or empty list if no
+        clear gaps are found.
     """
     h, w = page_image.shape[:2]
     total_area = float(h * w)
@@ -553,42 +633,58 @@ def _detect_photos_by_projection(
     row_smooth = np.convolve(row_profile, np.ones(smooth_k) / smooth_k, mode='same')
     col_smooth = np.convolve(col_profile, np.ones(smooth_k) / smooth_k, mode='same')
 
-    # Search for the valley only in the central 20–80% of each axis to avoid borders
-    margin_h = int(h * 0.20)
-    margin_w = int(w * 0.20)
+    # Search only in the central 20–80% of each axis so that album-page outer
+    # borders (top/bottom/left/right) are not mistaken for photo dividers.
+    margin_h = max(1, int(h * 0.20))
+    margin_w = max(1, int(w * 0.20))
 
-    h_search = row_smooth[margin_h: h - margin_h]
-    v_search = col_smooth[margin_w: w - margin_w]
-
-    h_min_idx = int(np.argmin(h_search)) + margin_h
-    v_min_idx = int(np.argmin(v_search)) + margin_w
-
-    # Relative valley depth: lower ratio = cleaner / more definitive gap
-    mean_row = row_smooth.mean() + 1e-6
-    mean_col = col_smooth.mean() + 1e-6
-    h_relative = row_smooth[h_min_idx] / mean_row
-    v_relative = col_smooth[v_min_idx] / mean_col
+    h_gaps = _find_projection_gaps(row_smooth, margin_h, h - margin_h)
+    v_gaps = _find_projection_gaps(col_smooth, margin_w, w - margin_w)
 
     logger.debug(
-        f"Projection valleys — horizontal at y={h_min_idx} (rel={h_relative:.3f}), "
-        f"vertical at x={v_min_idx} (rel={v_relative:.3f})"
+        f"Projection gaps — horizontal (stacked): {h_gaps}, "
+        f"vertical (side-by-side): {v_gaps}"
     )
 
-    # Choose the axis with the deeper (lower-relative) valley
-    if v_relative <= h_relative:
-        split_x = v_min_idx
-        regions: List[Tuple[int, int, int, int]] = [
-            (0, 0, split_x, h),
-            (split_x, 0, w, h),
-        ]
-        logger.debug(f"Projection: vertical split at x={split_x}")
+    # Prefer the axis that yields more splits (more photos detected).
+    # Break ties by choosing the axis whose gaps are relatively deeper.
+    def _mean_relative_depth(gaps: List[int], profile: np.ndarray) -> float:
+        if not gaps:
+            return 1.0  # No gaps → no depth improvement
+        mean_val = profile.mean() + 1e-6
+        return float(np.mean([profile[g] / mean_val for g in gaps]))
+
+    if not h_gaps and not v_gaps:
+        logger.debug("Projection: no clear gaps found — returning empty")
+        return []
+
+    use_vertical: bool
+    if len(v_gaps) > len(h_gaps):
+        use_vertical = True
+    elif len(h_gaps) > len(v_gaps):
+        use_vertical = False
     else:
-        split_y = h_min_idx
-        regions = [
-            (0, 0, w, split_y),
-            (0, split_y, w, h),
+        # Equal number of gaps — pick the axis with deeper (lower-ratio) valleys
+        v_depth = _mean_relative_depth(v_gaps, col_smooth)
+        h_depth = _mean_relative_depth(h_gaps, row_smooth)
+        use_vertical = v_depth <= h_depth
+
+    if use_vertical:
+        splits = sorted(v_gaps)
+        boundaries = [0] + splits + [w]
+        regions: List[Tuple[int, int, int, int]] = [
+            (boundaries[i], 0, boundaries[i + 1], h)
+            for i in range(len(boundaries) - 1)
         ]
-        logger.debug(f"Projection: horizontal split at y={split_y}")
+        logger.debug(f"Projection: {len(splits)} vertical split(s) at x={splits}")
+    else:
+        splits = sorted(h_gaps)
+        boundaries = [0] + splits + [h]
+        regions = [
+            (0, boundaries[i], w, boundaries[i + 1])
+            for i in range(len(boundaries) - 1)
+        ]
+        logger.debug(f"Projection: {len(splits)} horizontal split(s) at y={splits}")
 
     detections: List[PhotoDetection] = []
     for x1, y1, x2, y2 in regions:
