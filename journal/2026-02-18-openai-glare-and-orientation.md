@@ -275,3 +275,85 @@ For orientation-only mode (no OpenAI glare):
 
 `src/geometry/rotation.py` is not modified — `_detect_orientation_error()` remains a no-op,
 now permanently superseded by the AI orientation step.
+
+---
+
+## Implementation — Completed 2026-02-18
+
+All 6 changes from the plan above were implemented, tested, and pushed to
+`claude/review-docs-progress-WYukW`.
+
+### Files delivered
+
+| File | Status | Notes |
+|---|---|---|
+| `src/utils/secrets.py` | New | `load_secrets()` reads both API keys from `secrets.json` with env-var fallback |
+| `src/glare/remover_openai.py` | New | Numpy ↔ temp-PNG pipeline wrapper; graceful fallback on any API error |
+| `src/ai/claude_vision.py` | Modified | Added `PhotoAnalysis` dataclass, `analyze_photo_for_processing()`, `apply_orientation()` |
+| `src/pipeline.py` | Modified | Step 4.5 inserted; new config fields; glare step routes to OpenAI or OpenCV |
+| `src/cli.py` | Modified | `--openai-glare`, `--scene-desc`, `--no-ai-orientation` flags; updated status examples |
+
+### Unit tests
+
+All 61 unit tests pass. 17 skipped (require `test-images/` directory). Zero regressions.
+
+```
+61 passed, 17 skipped in 10.85s
+```
+
+### Integration test results
+
+Tested on both HEIC album page images with `--debug --verbose`. AI orientation
+step (`claude-haiku-4-5-20251001`) ran per-photo and produced the correct
+corrections in every case:
+
+**`IMG_three_pics_normal.HEIC`** — Entire page photographed upside down:
+
+| Photo | AI rotation | Confidence | Result |
+|---|---|---|---|
+| 1 | 180° | high | ✅ Corrected |
+| 2 | 180° | high | ✅ Corrected |
+| 3 | 180° | high | ✅ Corrected |
+
+Pipeline: 3 photos extracted → 3 orientation corrections → OpenCV glare → geometry → color.
+Total time: 23.3 s (AI orientation step: 7.5 s for 3 Haiku calls).
+
+**`IMG_two_pics_vertical_horizontal_normal.HEIC`** — Two prints at different orientations:
+
+| Photo | AI rotation | Confidence | Result |
+|---|---|---|---|
+| 1 (portrait sideways) | 270° | high | ✅ Corrected |
+| 2 (landscape upside-down) | 90° | high | ✅ Corrected |
+
+Pipeline: 2 photos extracted → 2 different orientation corrections → color.
+Total time: ~38 s. AI orientation step: 5.7 s for 2 Haiku calls.
+
+These results match the problem table in the plan exactly. Both previously
+broken cases are now fixed by the new Step 4.5.
+
+### One issue encountered and fixed
+
+During integration testing, a partial upgrade of the `anthropic` SDK (pip had
+installed 0.82.0 on top of 0.34.2, leaving mismatched files) caused an
+`ImportError: cannot import name 'omit' from 'anthropic._types'`. Fixed by
+force-reinstalling the pinned `anthropic==0.34.2` from `requirements.txt`.
+The `anthropic` pin in `requirements.txt` remains at 0.34.2 — the API call
+pattern in `claude_vision.py` (`client.messages.create(...)`) is compatible
+with that version.
+
+### CLI flags verified
+
+```bash
+# AI orientation on by default
+python -m src.cli process test-images/IMG_three_pics_normal.HEIC --output ./output/
+
+# OpenAI glare removal (opt-in)
+python -m src.cli process test-images/IMG_three_pics_normal.HEIC --output ./output/ --openai-glare
+
+# Override scene description
+python -m src.cli process test-images/IMG_cave_normal.HEIC --output ./output/ \
+  --openai-glare --scene-desc "A cave interior with warm amber light"
+
+# Disable AI orientation
+python -m src.cli process test-images/IMG_harbor_normal.HEIC --output ./output/ --no-ai-orientation
+```
