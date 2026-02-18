@@ -454,10 +454,14 @@ def _detect_photos_contour(
 
         # Adaptive threshold for decoration filtering:
         # Album pages can have photos of varying sizes (e.g., 3×5 mixed with 4×6)
-        # Use relaxed threshold to avoid filtering out legitimately smaller photos
+        # Use relaxed threshold to avoid filtering out legitimately smaller photos.
         # - If we have many detections (> 4), use moderate filter (30%)
-        # - If we have few detections (2-4), use very loose filter (20%)
-        threshold = 0.30 if len(detections) > 4 else 0.20
+        # - If we have few detections (2-4), use tight filter (10%) so that a
+        #   portrait photo significantly smaller in pixel area than a landscape
+        #   photo (which can be as low as ~17% of the larger contour's area) is
+        #   kept rather than discarded.  Genuine decorative elements (captions,
+        #   stamps) are typically < 5% and will still be removed.
+        threshold = 0.30 if len(detections) > 4 else 0.10
 
         logger.debug(
             f"Decoration filter check: {len(detections)} detections, "
