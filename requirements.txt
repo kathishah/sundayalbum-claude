@@ -22,3 +22,10 @@ openai==1.47.1
 pytest==8.3.3
 mypy==1.11.2
 ruff==0.6.8
+
+# AI inpainting (diffusers)
+torch>=2.2
+diffusers>=0.27.0
+transformers>=4.40.0
+accelerate>=0.28.0
+safetensors>=0.4.0
