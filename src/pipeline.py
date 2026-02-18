@@ -198,6 +198,20 @@ class PipelineConfig:
     use_ai_fallback_detection: bool = False
     anthropic_model: str = "claude-sonnet-4-5-20250929"
 
+    # AI orientation correction (Step 4.5)
+    use_ai_orientation: bool = True
+    ai_orientation_model: str = "claude-haiku-4-5-20251001"
+    ai_orientation_min_confidence: str = "medium"  # ignore "low" confidence detections
+
+    # OpenAI glare removal (opt-in; OpenCV is still the default)
+    use_openai_glare_removal: bool = False
+    openai_model: str = "gpt-image-1.5"
+    openai_glare_quality: str = "high"
+    openai_glare_input_fidelity: str = "high"
+    # If set, overrides the Claude-generated scene description for the glare prompt.
+    # Orientation analysis still runs; only the description is replaced.
+    forced_scene_description: Optional[str] = None
+
 
 @dataclass
 class PipelineResult:
@@ -396,6 +410,73 @@ class Pipeline:
             extracted_photos = [working_image]
             logger.info("No photos detected, treating entire page as single photo")
 
+        # Step 4.5: AI orientation correction (per photo)
+        # Detects gross 90°/180°/270° errors that heuristic rotation cannot handle.
+        # Also produces a scene description used by the OpenAI glare step.
+        photo_analyses: list = []  # parallel to extracted_photos
+        should_run_ai_orientation = (
+            self.config.use_ai_orientation
+            and (steps_filter is None or 'ai_orientation' in steps_filter)
+        )
+
+        if should_run_ai_orientation:
+            step_start = time.time()
+            from src.ai.claude_vision import analyze_photo_for_processing, apply_orientation
+            from src.utils.secrets import load_secrets
+
+            secrets = load_secrets()
+            anthropic_key = secrets.anthropic_api_key
+
+            if not anthropic_key:
+                logger.warning("ANTHROPIC_API_KEY not set; skipping AI orientation step")
+                photo_analyses = [None] * len(extracted_photos)
+            else:
+                oriented_photos: List[np.ndarray] = []
+                for photo_idx, photo in enumerate(extracted_photos, 1):
+                    logger.debug(
+                        f"AI orientation: analysing photo {photo_idx}/{len(extracted_photos)}"
+                    )
+                    analysis = analyze_photo_for_processing(
+                        photo,
+                        api_key=anthropic_key,
+                        model=self.config.ai_orientation_model,
+                    )
+                    photo_analyses.append(analysis)
+
+                    # Apply correction only if confidence meets threshold
+                    if analysis.orientation_confidence in ("medium", "high"):
+                        corrected = apply_orientation(photo, analysis)
+                        logger.info(
+                            f"Photo {photo_idx}: orientation corrected "
+                            f"({analysis.rotation_degrees}°, "
+                            f"flip={analysis.flip_horizontal}, "
+                            f"confidence={analysis.orientation_confidence})"
+                        )
+                        if debug_dir:
+                            from src.utils.debug import save_debug_image
+                            save_debug_image(
+                                corrected,
+                                debug_dir / f"05b_photo_{photo_idx:02d}_oriented.jpg",
+                                f"Photo {photo_idx} after orientation correction "
+                                f"({analysis.rotation_degrees}°)"
+                            )
+                    else:
+                        corrected = photo
+                        logger.debug(
+                            f"Photo {photo_idx}: orientation confidence=low, skipping"
+                        )
+                    oriented_photos.append(corrected)
+
+                extracted_photos = oriented_photos
+                self.step_times['ai_orientation'] = time.time() - step_start
+                steps_completed.append('ai_orientation')
+                logger.info(
+                    f"AI orientation time: {self.step_times['ai_orientation']:.3f}s "
+                    f"({len(extracted_photos)} photos)"
+                )
+        else:
+            photo_analyses = [None] * len(extracted_photos)
+
         # Step 5: Glare detection & removal (per photo)
         # Now we process each extracted photo separately for glare
         glare_detection_result: Optional[GlareDetection] = None
@@ -439,14 +520,54 @@ class Pipeline:
 
                     # Remove glare if detected
                     if photo_glare.total_glare_area_ratio > 0.001:
-                        glare_result = remove_glare_single(
-                            photo,
-                            photo_glare.mask,
-                            photo_glare.severity_map,
-                            inpaint_radius=self.config.glare_inpaint_radius,
-                            feather_radius=self.config.glare_feather_radius,
-                        )
-                        deglared_photo = glare_result.image
+                        if self.config.use_openai_glare_removal:
+                            # Use OpenAI diffusion-based inpainting (opt-in)
+                            from src.glare.remover_openai import remove_glare_openai
+                            from src.utils.secrets import load_secrets
+                            secrets = load_secrets()
+                            openai_key = secrets.openai_api_key
+
+                            if openai_key:
+                                # Get scene description: forced override > orientation analysis > default
+                                analysis = photo_analyses[photo_idx - 1] if photo_analyses else None
+                                scene_desc = (
+                                    self.config.forced_scene_description
+                                    or (analysis.scene_description if analysis and analysis.scene_description else "")
+                                    or "A printed photograph."
+                                )
+                                deglared_photo = remove_glare_openai(
+                                    photo,
+                                    scene_desc=scene_desc,
+                                    api_key=openai_key,
+                                    model=self.config.openai_model,
+                                    quality=self.config.openai_glare_quality,
+                                    input_fidelity=self.config.openai_glare_input_fidelity,
+                                )
+                                logger.debug(
+                                    f"Photo {photo_idx}: OpenAI glare removal applied"
+                                )
+                            else:
+                                logger.warning(
+                                    "OPENAI_API_KEY not set; falling back to OpenCV inpainting"
+                                )
+                                glare_result = remove_glare_single(
+                                    photo,
+                                    photo_glare.mask,
+                                    photo_glare.severity_map,
+                                    inpaint_radius=self.config.glare_inpaint_radius,
+                                    feather_radius=self.config.glare_feather_radius,
+                                )
+                                deglared_photo = glare_result.image
+                        else:
+                            # Default: OpenCV inpainting
+                            glare_result = remove_glare_single(
+                                photo,
+                                photo_glare.mask,
+                                photo_glare.severity_map,
+                                inpaint_radius=self.config.glare_inpaint_radius,
+                                feather_radius=self.config.glare_feather_radius,
+                            )
+                            deglared_photo = glare_result.image
 
                         # Save debug
                         if debug_dir:

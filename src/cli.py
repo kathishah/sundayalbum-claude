@@ -63,6 +63,25 @@ def main() -> None:
     help='Comma-separated list of steps to run (e.g., "load,normalize,glare")'
 )
 @click.option(
+    '--openai-glare',
+    'openai_glare',
+    is_flag=True,
+    help='Use OpenAI diffusion-based glare removal instead of OpenCV inpainting (requires OPENAI_API_KEY)'
+)
+@click.option(
+    '--scene-desc',
+    'scene_desc',
+    type=str,
+    default=None,
+    help='Explicit scene description for OpenAI glare prompt (skips Claude description; orientation still runs)'
+)
+@click.option(
+    '--no-ai-orientation',
+    'no_ai_orientation',
+    is_flag=True,
+    help='Disable AI orientation correction (useful when images are known to be correctly oriented)'
+)
+@click.option(
     '--verbose',
     '-v',
     is_flag=True,
@@ -75,6 +94,9 @@ def process(
     batch: bool,
     filter_pattern: Optional[str],
     steps: Optional[str],
+    openai_glare: bool,
+    scene_desc: Optional[str],
+    no_ai_orientation: bool,
     verbose: bool
 ) -> None:
     """Process album page images through the digitization pipeline.
@@ -135,7 +157,11 @@ def process(
         logger.info(f"Debug output will be saved to: {debug_dir}")
 
     # Create pipeline
-    config = PipelineConfig()
+    config = PipelineConfig(
+        use_openai_glare_removal=openai_glare,
+        use_ai_orientation=not no_ai_orientation,
+        forced_scene_description=scene_desc,
+    )
     pipeline = Pipeline(config)
 
     # Process each file
@@ -269,6 +295,15 @@ def status() -> None:
     click.echo()
     click.echo("  # Process directory (batch mode)")
     click.echo("  python -m src.cli process test-images/ --batch --filter \"*.HEIC\" --output ./output/")
+    click.echo()
+    click.echo("  # Enable OpenAI diffusion-based glare removal (requires OPENAI_API_KEY)")
+    click.echo("  python -m src.cli process image.HEIC --output ./output/ --openai-glare")
+    click.echo()
+    click.echo("  # OpenAI glare with an explicit scene description")
+    click.echo("  python -m src.cli process image.HEIC --output ./output/ --openai-glare --scene-desc \"A cave interior\"")
+    click.echo()
+    click.echo("  # Disable AI orientation correction")
+    click.echo("  python -m src.cli process image.HEIC --output ./output/ --no-ai-orientation")
     click.echo()
 
 
