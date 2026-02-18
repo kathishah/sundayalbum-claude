@@ -27,6 +27,7 @@ def detect_photos(
     min_area_ratio: float = 0.02,  # Lowered from 0.05 to 0.02 (2%) to handle album pages with visible background
     max_count: int = 8,
     method: str = "contour",
+    page_was_corrected: bool = False,
 ) -> List[PhotoDetection]:
     """Detect individual photos on an album page or single print.
 
@@ -40,11 +41,43 @@ def detect_photos(
         min_area_ratio: Minimum photo area as ratio of total image area
         max_count: Maximum number of photos to detect
         method: Detection method ("contour", "claude", or "auto")
+        page_was_corrected: True when the image has already been perspective-corrected
+            by page detection (i.e. the image IS the isolated subject, not the full
+            camera frame).  When True, a pre-check determines whether the image
+            contains clear album-page borders between photos.  If no borders are
+            found the image is treated as a single print and returned whole, avoiding
+            false splits on rich photographic content (cave, harbor, skydiving).
 
     Returns:
         List of PhotoDetection objects, sorted top-to-bottom, left-to-right
     """
     if method == "contour" or method == "auto":
+        # Single-print guard: only applies after perspective correction has already
+        # isolated the subject.  Album pages have white/neutral paper borders between
+        # photos; single prints don't.  If no borders are detected, return the whole
+        # image as one detection rather than letting contour analysis fragment the
+        # photographic content into spurious sub-regions.
+        if page_was_corrected and not _has_album_page_borders(page_image):
+            h, w = page_image.shape[:2]
+            if w > h * 1.1:
+                orientation = "landscape"
+            elif h > w * 1.1:
+                orientation = "portrait"
+            else:
+                orientation = "square"
+            logger.info(
+                f"No album page borders detected on perspective-corrected image "
+                f"({w}×{h}) — treating as single print"
+            )
+            return [PhotoDetection(
+                bbox=(0, 0, w, h),
+                corners=np.array([[0, 0], [w, 0], [w, h], [0, h]], dtype=np.float32),
+                confidence=0.90,
+                orientation=orientation,
+                area_ratio=1.0,
+                contour=np.array([[[0, 0]], [[w, 0]], [[w, h]], [[0, h]]], dtype=np.int32),
+            )]
+
         detections = _detect_photos_contour(page_image, min_area_ratio, max_count)
     elif method == "claude":
         raise NotImplementedError("Claude Vision API fallback not yet implemented")
@@ -54,6 +87,99 @@ def detect_photos(
     logger.info(f"Detected {len(detections)} photos using method '{method}'")
 
     return detections
+
+
+def _has_album_page_borders(
+    image: np.ndarray,
+    pixel_threshold_ratio: float = 0.05,
+    row_low_fraction: float = 0.95,
+    min_consecutive: int = 3,
+    center_margin: float = 0.20,
+) -> bool:
+    """Detect whether a perspective-corrected image has clear borders between photos.
+
+    Album pages contain white/neutral paper strips between individual photos.
+    These appear as bands of near-zero Sobel-edge magnitude that span the full
+    width (horizontal borders) or full height (vertical borders) of the image.
+    Single prints have photographic content throughout — even smooth regions
+    retain enough texture/grain to stay above the low-edge threshold.
+
+    Args:
+        image: Float32 RGB [0, 1].
+        pixel_threshold_ratio: A pixel is "low-edge" when its Sobel magnitude is
+            below this fraction of the image-wide maximum Sobel magnitude.
+        row_low_fraction: Fraction of pixels in a row (or column) that must be
+            low-edge for that line to be classified as a border line.
+        min_consecutive: Minimum consecutive border lines required to confirm a
+            border band (guards against isolated quiet rows inside a photo).
+        center_margin: Ignore this fraction of rows/columns at the edges so that
+            image borders are not confused with album-page borders.
+
+    Returns:
+        True if at least one clear border band is found (album page).
+        False if no clear borders exist (single print).
+    """
+    h, w = image.shape[:2]
+
+    image_uint8 = (image * 255).astype(np.uint8)
+    gray = cv2.cvtColor(image_uint8, cv2.COLOR_RGB2GRAY)
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+
+    sobelx = cv2.Sobel(blurred, cv2.CV_64F, 1, 0, ksize=3)
+    sobely = cv2.Sobel(blurred, cv2.CV_64F, 0, 1, ksize=3)
+    edge_mag = np.sqrt(sobelx ** 2 + sobely ** 2)
+
+    max_edge = edge_mag.max()
+    if max_edge < 1.0:
+        return False  # Essentially blank image
+
+    pixel_threshold = max_edge * pixel_threshold_ratio
+    low_edge = edge_mag < pixel_threshold  # bool mask (H, W)
+
+    # Album page borders are near-neutral in color (white/cream paper), not just
+    # low-edge.  Photographic content that is also low-edge (e.g. dark cave walls,
+    # uniform blue sky) typically has higher color saturation.  Requiring low
+    # saturation as a second condition eliminates both dark neutral-ish photo areas
+    # and saturated sky, while correctly accepting the white/cream album paper.
+    hsv = cv2.cvtColor(image_uint8, cv2.COLOR_RGB2HSV)
+    saturation = hsv[:, :, 1].astype(np.float32) / 255.0
+    is_neutral = saturation < 0.30  # Album paper saturation is well below 0.30
+
+    border_mask = low_edge & is_neutral  # (H, W)
+
+    margin_h = max(1, int(h * center_margin))
+    margin_w = max(1, int(w * center_margin))
+
+    def _has_consecutive_run(bool_1d: np.ndarray, min_run: int) -> bool:
+        count = 0
+        for val in bool_1d:
+            if val:
+                count += 1
+                if count >= min_run:
+                    return True
+            else:
+                count = 0
+        return False
+
+    # Horizontal border bands (full-width rows of low-edge AND neutral-color).
+    # These indicate photos stacked vertically, separated by horizontal strips.
+    center_rows = border_mask[margin_h: h - margin_h, :]  # (center_h, W)
+    row_frac = center_rows.mean(axis=1)
+    has_h_border = _has_consecutive_run(row_frac >= row_low_fraction, min_consecutive)
+
+    # Vertical border bands (full-height columns of low-edge AND neutral-color).
+    # These indicate photos placed side-by-side, separated by vertical strips.
+    center_cols = border_mask[:, margin_w: w - margin_w]  # (H, center_w)
+    col_frac = center_cols.mean(axis=0)
+    has_v_border = _has_consecutive_run(col_frac >= row_low_fraction, min_consecutive)
+
+    result = has_h_border or has_v_border
+    logger.debug(
+        f"Album border check: max_edge={max_edge:.1f}, "
+        f"pixel_thresh={pixel_threshold:.2f}, "
+        f"has_h_border={has_h_border}, has_v_border={has_v_border}"
+    )
+    return result
 
 
 def _detect_photos_contour(

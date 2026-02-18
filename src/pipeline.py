@@ -339,12 +339,21 @@ class Pipeline:
             step_start = time.time()
 
             try:
-                # Detect individual photos on the page
+                # Detect individual photos on the page.
+                # page_was_corrected=True tells the detector that the image has
+                # already been perspective-corrected by GrabCut page detection,
+                # so it can apply the album-border pre-check to avoid false splits
+                # on single prints (cave/harbor/skydiving).
+                _page_was_corrected = (
+                    page_detection_result is not None
+                    and not page_detection_result.is_full_frame
+                )
                 photo_detections_result = detect_photos(
                     working_image,
                     min_area_ratio=self.config.photo_detect_min_area_ratio,
                     max_count=self.config.photo_detect_max_count,
                     method=self.config.photo_detect_method,
+                    page_was_corrected=_page_was_corrected,
                 )
 
                 # Save debug: photo boundaries overlay
