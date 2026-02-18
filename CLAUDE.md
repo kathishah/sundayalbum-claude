@@ -227,12 +227,12 @@ python -m src.cli status
 - Detailed descriptions of each step
 - Comprehensive usage examples
 
-**Current Progress (as of Phase 6):**
-- **Overall:** 6/14 steps complete (42.9%)
-- **Priority 1 (Glare):** 3/4 steps (75%)
+**Current Progress (as of Phase 9):**
+- **Overall:** 14/14 steps complete (100%)
+- **Priority 1 (Glare):** 3/4 steps (75%) — single-shot implemented; multi-shot deferred (needs multi-angle test images)
 - **Priority 2 (Splitting):** 2/2 steps (100%)
-- **Priority 3 (Geometry):** 1/4 steps (25%)
-- **Priority 4 (Color):** 0/4 steps (0%)
+- **Priority 3 (Geometry):** 4/4 steps (100%)
+- **Priority 4 (Color):** 4/4 steps (100%)
 
 ### Process Command
 
