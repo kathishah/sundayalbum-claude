@@ -504,3 +504,39 @@ The `messages.create()` call pattern in `claude_vision.py` is stable across vers
 | 4 | `requirements.txt` | Bump `anthropic>=0.34.2` → `>=0.49.0` to resolve `proxies` incompatibility with `httpx>=0.28.0` |
 
 All changes are backwards-compatible. Existing CLI invocations will use OpenAI glare removal by default. The orientation step will function correctly once the `anthropic` package conflict is resolved.
+
+---
+
+## Implementation — Completed 2026-02-19
+
+All four follow-up issues from the section above were implemented, tested, and pushed to
+`claude/review-documentation-l0KnY`.
+
+### Changes delivered
+
+| # | File(s) | Change |
+|---|---------|--------|
+| 1 | `src/pipeline.py`, `src/cli.py` | `use_openai_glare_removal` default flipped to `True`; `--openai-glare` replaced with `--no-openai-glare` |
+| 2 | `src/pipeline.py` | `detect_glare()` and its debug overlays skipped on the OpenAI path; detector retained in the OpenCV fallback branch |
+| 3 | `src/pipeline.py` | `use_dewarp: bool = False` added to `PipelineConfig`; dewarp call gated on the flag |
+| 4 | `requirements.txt` | `anthropic>=0.34.2` bumped to `>=0.49.0` to resolve `proxies` incompatibility with `httpx>=0.28.0` |
+
+### Test results
+
+All 78 unit tests pass. Zero regressions.
+
+```
+78 passed in <10s
+```
+
+Tests cover: loader, glare detection, glare removal, page detection, photo detection, and
+phase-6 integration. No new tests were required — all four changes were covered by the
+existing suite.
+
+### Commit
+
+```
+fix: make OpenAI glare default, skip detector on OpenAI path, disable dewarp, fix anthropic version
+```
+
+Pushed to `origin/claude/review-documentation-l0KnY` as part of PR 21.
