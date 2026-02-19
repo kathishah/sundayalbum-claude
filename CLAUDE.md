@@ -124,7 +124,14 @@ sundayalbum-claude/
 │   ├── phase-2-summary.md       # Phase 2: Image Loading
 │   ├── phase-3-summary.md       # Phase 3: Glare Detection
 │   ├── phase-4-summary.md       # Phase 4: Glare Removal
-│   └── phase-6-summary.md       # Phase 6: Photo Detection Improvements
+│   ├── phase-6-summary.md       # Phase 6: Photo Detection Improvements
+│   ├── phase-7-summary.md       # Phase 7: Geometry Correction
+│   ├── phase-8-summary.md       # Phase 8: Color Restoration
+│   ├── phase-9-summary.md       # Phase 9: Pipeline Integration
+│   ├── 2026-02-16-single-print-fix.md     # Fix: single-print false splits
+│   ├── 2026-02-17-multi-photo-detection-fix.md  # Fix: three_pics detection
+│   ├── 2026-02-18-openai-glare-and-orientation.md  # OpenAI glare + AI orientation
+│   └── 2026-02-19-rotation-fix.md        # Fix: Hough false corrections + AI direction confusion
 │
 ├── scripts/
 │   └── fetch-test-images.sh     # Download test images from GitHub releases
@@ -158,9 +165,10 @@ sundayalbum-claude/
 │   │
 │   ├── glare/
 │   │   ├── __init__.py
-│   │   ├── detector.py          # Detect glare/reflection regions
-│   │   ├── remover_single.py    # Single-shot glare inpainting
-│   │   ├── remover_multi.py     # Multi-shot glare compositing
+│   │   ├── detector.py          # Detect glare/reflection regions (used by OpenCV path)
+│   │   ├── remover_single.py    # Single-shot glare inpainting (OpenCV fallback)
+│   │   ├── remover_multi.py     # Multi-shot glare compositing (not yet integrated)
+│   │   ├── remover_openai.py    # OpenAI gpt-image-1.5 glare removal (default path)
 │   │   └── confidence.py        # Glare removal confidence scoring
 │   │
 │   ├── photo_detection/
@@ -192,7 +200,8 @@ sundayalbum-claude/
 │       ├── __init__.py
 │       ├── debug.py             # Debug visualization helpers
 │       ├── metrics.py           # Image quality metrics (SSIM, sharpness, etc.)
-│       └── io.py                # File I/O helpers
+│       ├── io.py                # File I/O helpers
+│       └── secrets.py           # Load API keys from secrets.json
 │
 ├── tests/
 │   ├── __init__.py
@@ -227,46 +236,50 @@ python -m src.cli status
 - Detailed descriptions of each step
 - Comprehensive usage examples
 
-**Current Progress (as of Phase 9):**
-- **Overall:** 14/14 steps complete (100%)
-- **Priority 1 (Glare):** 3/4 steps (75%) — single-shot implemented; multi-shot deferred (needs multi-angle test images)
-- **Priority 2 (Splitting):** 2/2 steps (100%)
-- **Priority 3 (Geometry):** 4/4 steps (100%)
-- **Priority 4 (Color):** 4/4 steps (100%)
+**Current Progress (as of 2026-02-19):**
+- **Overall:** All major pipeline steps implemented and producing quality output
+- **Priority 1 (Glare):** OpenAI `gpt-image-1.5` removal is the default path. OpenCV inpainting is the fallback when no OpenAI key is available. Multi-shot compositing deferred (needs multi-angle images).
+- **Priority 2 (Splitting):** 2/2 steps complete. GrabCut page detection + contour photo detection working on all test images.
+- **Priority 3 (Geometry):** AI orientation correction (Step 4.5) handles gross 90°/180°/270° errors per-photo. Small-angle Hough-line rotation disabled (fires on image content; border-based replacement pending).
+- **Priority 4 (Color):** 4/4 steps complete (white balance, deyellowing, CLAHE fade restore, sharpening).
 
 ### Process Command
 
 Process album pages and extract individual photos:
 
 ```bash
-# Process a single album page (HEIC)
+# Process a single album page (HEIC) — OpenAI glare removal on by default
 python -m src.cli process test-images/IMG_three_pics_normal.HEIC --output ./output/
 
 # Process the high-res DNG version
 python -m src.cli process test-images/IMG_three_pics_prores.DNG --output ./output/
 
-# Process with glob patterns (all HEIC files)
-python -m src.cli process test-images/*.HEIC --output ./output/
+# Process with debug visualizations
+python -m src.cli process test-images/IMG_three_pics_normal.HEIC --output ./output/ --debug
 
 # Process all test images in batch mode
 python -m src.cli process test-images/ --output ./output/ --batch
 
-# Process with debug visualizations
-python -m src.cli process test-images/IMG_three_pics_normal.HEIC --output ./output/ --debug
-
 # Process only HEIC files (skip DNG for faster iteration)
 python -m src.cli process test-images/ --output ./output/ --batch --filter "*.HEIC"
 
-# Process with multi-shot glare removal (planned)
-python -m src.cli process shot1.HEIC shot2.HEIC shot3.HEIC --multi-shot --output ./output/
+# Fall back to OpenCV inpainting (no OpenAI API call)
+python -m src.cli process test-images/IMG_harbor_normal.HEIC --output ./output/ --no-openai-glare
+
+# Provide an explicit scene description (skips Claude description, still does orientation)
+python -m src.cli process test-images/IMG_cave_normal.HEIC --output ./output/ \
+  --scene-desc "A cave interior with warm amber light"
+
+# Disable AI orientation correction
+python -m src.cli process test-images/IMG_harbor_normal.HEIC --output ./output/ --no-ai-orientation
 
 # Run only specific pipeline steps
 python -m src.cli process test-images/IMG_cave_normal.HEIC --output ./output/ --steps load,normalize,page_detect
-python -m src.cli process test-images/IMG_cave_normal.HEIC --output ./output/ --steps glare_detect,photo_detect
+python -m src.cli process test-images/IMG_cave_normal.HEIC --output ./output/ --steps photo_detect,ai_orientation
 
 # Available step IDs:
-# load, normalize, page_detect, glare_detect, glare_remove, photo_detect, photo_split,
-# keystone, dewarp, rotation, white_balance, color_restore, deyellow, sharpen
+# load, normalize, page_detect, photo_detect, ai_orientation, glare_detect,
+# keystone_correct, dewarp, rotation_correct, white_balance, color_restore, deyellow, sharpen
 ```
 
 ### Quality Check Commands (Planned)
@@ -289,52 +302,59 @@ Input Image (HEIC, DNG, JPEG, or PNG)
     - Detect format: HEIC → pillow-heif, DNG → rawpy, JPEG/PNG → Pillow
     - For DNG: apply basic demosaicing, convert from linear to sRGB gamma
     - Read & apply EXIF orientation
-    - Strip EXIF metadata (privacy)
-    - Generate working copy (cap 4000px longest edge for pipeline, preserve original for final output)
+    - Generate working copy (cap 4000px longest edge for pipeline)
     │
     ▼
 [2. Page Detection]
-    - Detect if this is an album page (multi-photo) or a single glossy print
-    - For album pages: find page boundary quadrilateral, apply perspective correction
-    - For single prints: detect print boundary, crop to print edges
-    - If no clear boundary found, assume full image is the subject
+    - GrabCut segmentation to find album page boundary quadrilateral
+    - Apply perspective correction (homographic warp to fronto-parallel view)
+    - If no clear boundary found, treat full frame as the subject
     │
     ▼
-[3. Glare Detection & Removal]  ← PRIORITY 1
-    - Detect specular highlights (intensity + saturation thresholding + learned model)
-    - Two glare patterns to handle:
-      a. PLASTIC SLEEVE GLARE: broad, flat, from album page plastic. Affects three_pics and two_pics samples.
-      b. GLOSSY PRINT GLARE: contoured, follows the curvature of the print surface. Affects cave, harbor, skydiving samples.
-    - Single-shot: inpaint glare regions using surrounding context
-    - Multi-shot: align images via feature matching, composite glare-free pixels
-    - Generate confidence map
+[3. Photo Detection & Splitting]  ← PRIORITY 2
+    - Contour-based detection of individual photo boundaries on the page
+    - Album pages (three_pics, two_pics): split into N individual crops
+    - Single prints (cave, harbor, skydiving): treat entire page as one photo
+    - Each crop is perspective-corrected using its detected corner quadrilateral
     │
     ▼
-[4. Photo Detection & Splitting]  ← PRIORITY 2
-    - For album pages (three_pics, two_pics): detect individual photo boundaries, extract as separate images
-    - For single prints (cave, harbor, skydiving): skip splitting, treat entire image as one photo
-    - Handle mixed orientations (two_pics has one portrait + one landscape)
-    - Fallback: Claude vision API for complex layouts
+[4.5. AI Orientation Correction]  ← per extracted photo
+    - One Claude Haiku API call per photo
+    - Returns: clockwise rotation (0/90/180/270°), flip flag, scene description
+    - Corrects gross errors from prints inserted sideways or upside-down in album sleeves
+    - Scene description is passed to the OpenAI glare step
+    - Applied before glare removal so the glare API receives a semantically upright image
     │
     ▼
-[5. Per-Photo Geometry Correction]  ← PRIORITY 3
-    - Fine keystone correction per photo
-    - Bulge/warp detection and dewarping (especially for glossy prints that bow)
-    - Rotation correction (small angle + 90° orientation)
+[5. Glare Removal]  ← PRIORITY 1, per extracted photo
+    DEFAULT PATH (OpenAI):
+    - Send the oriented photo + scene description to OpenAI gpt-image-1.5 images.edit
+    - Model performs semantic, diffusion-based glare removal
+    - Returns at most 1536×1024; resolution reduction is accepted for quality gain
+    FALLBACK PATH (OpenCV, used when OPENAI_API_KEY is absent or --no-openai-glare):
+    - detect_glare() builds a mask of specular highlights
+    - remove_glare_single() inpaints masked regions using surrounding context
     │
     ▼
-[6. Color Restoration]  ← PRIORITY 4
-    - Auto white balance (gray-world + album page reference)
-    - Fade restoration (CLAHE on L channel in LAB space)
-    - Yellowing removal (b* channel shift in LAB)
-    - Sharpening (unsharp mask on L channel)
+[6. Per-Photo Geometry Correction]  ← PRIORITY 3
+    - Dewarp (barrel distortion): DISABLED by default — false positives on content-rich
+      photos; iPhone corrects lens distortion in-camera before writing HEIC
+    - Small-angle rotation (Hough-line): DISABLED — fires on image content rather than
+      the photo frame, producing incorrect corrections; to be replaced with border detection
     │
     ▼
-[7. Output]
-    - Encode to requested format (JPEG default at 92% quality, PNG, TIFF)
+[7. Color Restoration]  ← PRIORITY 4
+    - Auto white balance (gray-world method)
+    - Deyellowing (adaptive LAB b* shift)
+    - Fade restoration (CLAHE on L channel + saturation boost)
+    - Sharpening (unsharp mask)
+    │
+    ▼
+[8. Output]
+    - Encode to JPEG (92% quality default), PNG, or TIFF
     - Save individual photos with naming convention
     - Save debug visualizations if --debug flag
-    - Print summary (photos found, confidence scores, processing time)
+    - Print summary (photos found, processing time per step)
 ```
 
 ## Image Loading Strategy
@@ -418,68 +438,108 @@ class PipelineConfig:
     """All tunable parameters in one place."""
     # Preprocessing
     max_working_resolution: int = 4000  # px, longest edge
-    prefer_heic_for_iteration: bool = True
-    
-    # Page detection
-    page_detect_blur_kernel: int = 5
-    page_detect_canny_low: int = 50
-    page_detect_canny_high: int = 150
+
+    # Page detection (GrabCut)
     page_detect_min_area_ratio: float = 0.3
-    
-    # Glare detection — two profiles for two glare types
+    page_detect_grabcut_iterations: int = 5
+    page_detect_grabcut_max_dimension: int = 800
+
+    # Glare detection (OpenCV fallback path only)
     glare_intensity_threshold: float = 0.85
     glare_saturation_threshold: float = 0.15
     glare_min_area: int = 100
     glare_inpaint_radius: int = 5
+    glare_feather_radius: int = 5
     glare_type: str = "auto"  # "auto", "sleeve" (flat plastic), or "print" (curved glossy)
-    
+
     # Photo detection
     photo_detect_method: str = "contour"  # "contour", "yolo", or "claude"
-    photo_detect_min_area_ratio: float = 0.05
+    photo_detect_min_area_ratio: float = 0.02  # 2% of page area
     photo_detect_max_count: int = 8
-    
+
     # Geometry
     keystone_max_angle: float = 40.0
-    rotation_auto_correct_max: float = 15.0
-    
+    rotation_auto_correct_max: float = 15.0  # used by correct_rotation(); currently a no-op
+    dewarp_detection_threshold: float = 0.02
+    use_dewarp: bool = False  # Disabled: false positives on content-rich photos; iPhone corrects in-camera
+
     # Color
     clahe_clip_limit: float = 2.0
     clahe_grid_size: tuple = (8, 8)
     sharpen_radius: float = 1.5
     sharpen_amount: float = 0.5
     saturation_boost: float = 0.15
-    
+
     # Output
     output_format: str = "jpeg"
     jpeg_quality: int = 92
-    
-    # AI
+
+    # AI orientation correction (Step 4.5) — Claude Haiku, one call per photo
+    use_ai_orientation: bool = True
+    ai_orientation_model: str = "claude-haiku-4-5-20251001"
+    ai_orientation_min_confidence: str = "medium"  # ignore "low" confidence results
+
+    # OpenAI glare removal (default) — gpt-image-1.5, one call per photo
+    use_openai_glare_removal: bool = True
+    openai_model: str = "gpt-image-1.5"
+    openai_glare_quality: str = "high"
+    openai_glare_input_fidelity: str = "high"
+    forced_scene_description: Optional[str] = None  # override Claude's description
+
+    # Legacy AI flags (not used in active pipeline)
     use_ai_quality_check: bool = False
     use_ai_fallback_detection: bool = False
-    anthropic_model: str = "claude-sonnet-4-5-20250929"
 ```
 
-## secret.json
+## secrets.json
 
-```bash
-# secrets.json file (gitignored)
-ANTHROPIC_API_KEY=sk-ant-...
-OPENAI_API_KEY=sk-...
-SUNDAY_ALBUM_DEBUG=1
-SUNDAY_ALBUM_LOG_LEVEL=DEBUG
+```json
+{
+  "ANTHROPIC_API_KEY": "sk-ant-...",
+  "OPENAI_API_KEY": "sk-..."
+}
 ```
+
+Loaded by `src/utils/secrets.py` → `load_secrets()`. Falls back to environment variables `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` if the file is absent. File is gitignored.
 
 ## Key Technical Decisions
 
-### Two Types of Glare
+### Glare Removal: OpenAI by Default
 
-Our test images reveal two distinct glare patterns that need different handling:
+OpenAI `gpt-image-1.5` (images.edit endpoint) is the default glare removal path. It handles both glare types well because it performs semantic, diffusion-based inpainting with scene understanding. The prompt includes a one-sentence description of the scene (generated by the Claude orientation step) so the model knows what to restore.
 
-1. **Plastic sleeve glare** (three_pics, two_pics images): The plastic sheet sits flat over the photos. Glare is broad, relatively uniform, and shifts position when the viewing angle changes. This is the classic "album digitizing" problem. Multi-shot compositing works extremely well here because the glare moves between shots while the photos stay put.
+Two glare patterns still exist in the test images and must be understood when evaluating output quality:
 
-2. **Glossy print glare** (cave, harbor, skydiving images): The photo paper itself has a glossy finish and may be slightly bowed or curved. Glare follows the contour of the paper — it's more complex in shape and tied to the physical surface. Single-shot inpainting is more relevant here since the glare is inherent to the print surface at any angle.
+1. **Plastic sleeve glare** (three_pics, two_pics images): Broad, flat patches that shift position when the viewing angle changes. Affects large areas of the photo.
 
-The `glare_type` config parameter controls this. In `"auto"` mode, the detector should classify which type it's dealing with based on glare pattern analysis (broad/flat = sleeve, contoured/curved = print).
+2. **Glossy print glare** (cave, harbor, skydiving images): Contoured highlights that follow the curvature of the print surface. More complex shape, tied to the physical surface.
+
+The OpenCV inpainting fallback (`remover_single.py`) is retained for when the OpenAI key is absent or `--no-openai-glare` is passed. It uses the glare detector mask. Quality is significantly worse than the OpenAI path on both glare types.
+
+### AI Orientation Correction (Step 4.5)
+
+Prints in album sleeves are frequently inserted sideways or upside-down. The AI orientation step corrects these gross errors (multiples of 90°) before glare removal. This is essential because:
+- `_pick_api_size()` in `remover_openai.py` selects portrait or landscape output size based on pixel dimensions — a sideways photo would request the wrong size
+- OpenAI inpaints better with a semantically upright image
+
+One Claude Haiku call per photo returns `rotation_degrees` (0/90/180/270, clockwise to apply), `flip_horizontal` (rare), and `scene_description`. Combining orientation and description in one call saves latency.
+
+The prompt uses explicit spatial descriptions of each rotation value ("rotate 90° clockwise: the left edge becomes the new top") to help the model reason about direction rather than guessing.
+
+### Hough-Line Rotation Detection: Disabled
+
+`_detect_small_rotation()` in `src/geometry/rotation.py` uses Hough line transform to find dominant lines and computes their median angle as "rotation to correct." This fires on **image content** (boat rigging, car bodies, rock edges, road lines) rather than the photo frame, producing false corrections on already-correct images.
+
+The function returns `0.0` unconditionally. The `correct_rotation()` function remains in place as the intended home for a future border-based implementation. The right approach is to detect the white border of the physical print and use its angle — not content lines.
+
+### Dewarp: Disabled
+
+`correct_warp()` in `src/geometry/dewarp.py` uses Hough lines to detect curvature and `cv2.undistort()` to correct it. Two problems:
+- iPhone corrects barrel/pincushion distortion in-camera before writing HEIC, so there is no lens distortion to correct in the pipeline
+- The Hough detector finds curved content edges (rock walls, curved roads) and fires false positives
+- The float32→uint8→float32 round-trip and bilinear interpolation introduce subtle color shifts
+
+`use_dewarp: bool = False` in `PipelineConfig`. The code is kept for potential future use with explicit distortion calibration.
 
 ### DNG vs HEIC Workflow
 
@@ -501,20 +561,22 @@ When `--debug` flag is used, each pipeline step saves its intermediate result to
 
 ```
 debug/
-├── 01_loaded.jpg                 # Original after format conversion + EXIF fix
-├── 02_page_detected.jpg          # Page boundary overlay on original
-├── 03_page_warped.jpg            # After perspective correction
-├── 04_glare_mask.png             # Detected glare regions (binary mask)
-├── 05_glare_overlay.jpg          # Glare regions highlighted on image
-├── 05_glare_type.txt             # Detected glare type: "sleeve" or "print"
-├── 06_deglared.jpg               # After glare removal
-├── 07_photo_boundaries.jpg       # Detected photo boundaries overlay
-├── 08_photo_01_raw.jpg           # Extracted photo 1
-├── 08_photo_02_raw.jpg           # Extracted photo 2
-├── 09_photo_01_geometry.jpg      # After perspective + dewarp
-├── 10_photo_01_color.jpg         # After color restoration
-├── 11_photo_01_final.jpg         # Final output
-└── pipeline_log.txt              # Detailed timing and parameter log
+├── 01_loaded.jpg                         # After format load + EXIF orientation
+├── 02_page_detected.jpg                  # Page boundary overlay
+├── 03_page_warped.jpg                    # After perspective correction (if boundary found)
+├── 04_photo_boundaries.jpg               # Detected photo bounding boxes overlay
+├── 05_photo_01_raw.jpg                   # Extracted photo 1 (before orientation)
+├── 05_photo_02_raw.jpg                   # Extracted photo 2 (before orientation)
+├── 05b_photo_01_oriented.jpg             # Photo 1 after AI orientation correction
+├── 05b_photo_02_oriented.jpg             # Photo 2 after AI orientation correction
+├── 07_photo_01_deglared.jpg              # Photo 1 after glare removal
+├── 07_photo_02_deglared.jpg              # Photo 2 after glare removal
+│   (06_* glare mask/overlay only appear on OpenCV fallback path)
+├── 10_photo_01_geometry_final.jpg        # After geometry corrections (if any applied)
+├── 11_photo_01_wb.jpg                    # After white balance
+├── 12_photo_01_deyellow.jpg             # After deyellowing
+├── 13_photo_01_restored.jpg             # After fade restoration
+└── 14_photo_01_enhanced.jpg             # After sharpening (final output)
 ```
 
 ## Testing Approach
@@ -538,21 +600,19 @@ pytest tests/test_photo_detection.py -v
 Integration tests process real images and generate debug visualizations in `debug/`:
 
 ```bash
-# Run Phase 6 integration tests (photo detection)
-pytest tests/test_phase6_integration.py -v -s
+# Run all tests including integration
+pytest tests/ -v -s
+
+# Process a real image with debug output to inspect intermediate steps
+python -m src.cli process test-images/IMG_three_pics_normal.HEIC --output ./output/ --debug
 
 # View debug output
 ls -lh debug/
-open debug/IMG_three_pics_normal/phase6_02_detections.jpg
+open debug/05b_photo_01_oriented.jpg   # Check orientation correction
+open debug/07_photo_01_deglared.jpg    # Check glare removal
 ```
 
-**Debug visualizations include:**
-- Original image
-- Detection overlays (bounding boxes, labels, confidence scores)
-- Individual extracted photos
-- Step-by-step pipeline results
-
-These are essential for algorithm development and quality verification.
+**Debug visualizations are the primary tool for algorithm development.** After any pipeline change, run on real HEIC test images with `--debug` and inspect the numbered sequence.
 
 ## Important Notes
 

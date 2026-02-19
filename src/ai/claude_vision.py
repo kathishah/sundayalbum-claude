@@ -94,15 +94,27 @@ def analyze_photo_for_processing(
     image_b64 = _image_to_base64_jpeg(image, quality=85)
 
     prompt = (
-        "Look at this photograph. Determine the rotation needed to make it correctly "
-        "oriented — faces right-side up, horizons horizontal, text readable, objects "
-        "in their natural position. Also write a one-sentence description of the scene.\n\n"
-        "Reply with JSON only:\n"
+        "You are looking at a scanned or re-photographed physical print that may have "
+        "been placed in the scanner/album at an incorrect orientation.\n\n"
+        "Step 1 — identify what is currently wrong:\n"
+        "  • Is the content upside-down (sky at bottom, people standing on their heads)?\n"
+        "  • Is the content rotated 90° — i.e. a landscape scene displayed as a tall "
+        "portrait, or a portrait subject lying on their side?\n"
+        "  • Is it already correct?\n\n"
+        "Step 2 — choose the CLOCKWISE rotation to apply:\n"
+        "  • 0   — already correct, do nothing\n"
+        "  • 90  — rotate 90° clockwise: the left edge becomes the new top\n"
+        "           (use when the correct top of the scene is currently on the LEFT)\n"
+        "  • 180 — flip upside-down: use when heads/sky are at the bottom\n"
+        "  • 270 — rotate 270° clockwise (= 90° counter-clockwise): the right edge "
+        "becomes the new top\n"
+        "           (use when the correct top of the scene is currently on the RIGHT)\n\n"
+        "Also write a one-sentence description of the scene.\n\n"
+        "Reply with JSON only — no markdown, no explanation:\n"
         '{"rotation_degrees": <0|90|180|270>, "flip_horizontal": <true|false>, '
         '"confidence": <"low"|"medium"|"high">, "scene_description": "<one sentence>"}\n\n'
-        "rotation_degrees is the clockwise rotation to apply. flip_horizontal is only "
-        "true if the image is a lateral mirror (very rare for physical prints). "
-        "When in doubt, use 0."
+        "flip_horizontal is only true for a genuine lateral mirror image (a physical "
+        "defect, extremely rare). When genuinely uncertain about orientation, use 0."
     )
 
     try:

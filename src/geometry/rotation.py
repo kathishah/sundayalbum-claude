@@ -64,6 +64,13 @@ def _detect_small_rotation(photo: np.ndarray, max_angle: float) -> float:
     Uses Hough line transform to find dominant lines in the image, then
     computes the median angle deviation from horizontal/vertical.
 
+    NOTE: Disabled — returns 0.0 unconditionally. The Hough transform fires
+    on image *content* (car bodies, boat rigging, rock edges) rather than the
+    photo frame, producing false corrections that tilt already-correct images.
+    Gross orientation errors (90°/180°/270°) are handled by the AI orientation
+    step (Step 4.5). Fine-drift correction should use the photo's white border
+    or detected corner quadrilateral, not content lines.
+
     Args:
         photo: Photo image, float32 RGB [0, 1]
         max_angle: Maximum angle to detect (degrees)
@@ -71,6 +78,9 @@ def _detect_small_rotation(photo: np.ndarray, max_angle: float) -> float:
     Returns:
         Rotation angle in degrees (positive = clockwise)
     """
+    return 0.0
+
+    # --- disabled code below ---
     h, w = photo.shape[:2]
 
     # Convert to grayscale uint8
