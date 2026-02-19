@@ -181,6 +181,7 @@ class PipelineConfig:
     keystone_max_angle: float = 40.0
     rotation_auto_correct_max: float = 15.0
     dewarp_detection_threshold: float = 0.02  # Minimum curvature ratio (2%)
+    use_dewarp: bool = False  # Disabled: Hough-line detection fires false positives on content
 
     # Color
     clahe_clip_limit: float = 2.0
@@ -203,8 +204,8 @@ class PipelineConfig:
     ai_orientation_model: str = "claude-haiku-4-5-20251001"
     ai_orientation_min_confidence: str = "medium"  # ignore "low" confidence detections
 
-    # OpenAI glare removal (opt-in; OpenCV is still the default)
-    use_openai_glare_removal: bool = False
+    # OpenAI glare removal (default; use --no-openai-glare to fall back to OpenCV)
+    use_openai_glare_removal: bool = True
     openai_model: str = "gpt-image-1.5"
     openai_glare_quality: str = "high"
     openai_glare_input_fidelity: str = "high"
@@ -488,78 +489,67 @@ class Pipeline:
             deglared_photos: List[np.ndarray] = []
 
             try:
-                # Process each photo separately for glare detection and removal
+                # Resolve OpenAI key once if needed
+                openai_key = None
+                if self.config.use_openai_glare_removal:
+                    from src.utils.secrets import load_secrets
+                    secrets = load_secrets()
+                    openai_key = secrets.openai_api_key
+                    if not openai_key:
+                        logger.warning(
+                            "OPENAI_API_KEY not set; falling back to OpenCV inpainting"
+                        )
+
+                use_openai = self.config.use_openai_glare_removal and bool(openai_key)
+
+                # Process each photo separately for glare removal
                 for photo_idx, photo in enumerate(extracted_photos, 1):
                     logger.debug(f"Processing glare for photo {photo_idx}/{len(extracted_photos)}")
 
-                    # Detect glare on this individual photo
-                    photo_glare = detect_glare(
-                        photo,
-                        intensity_threshold=self.config.glare_intensity_threshold,
-                        saturation_threshold=self.config.glare_saturation_threshold,
-                        min_area=self.config.glare_min_area,
-                        glare_type=self.config.glare_type,
-                    )
-
-                    # Save debug for first photo (to avoid clutter)
-                    if debug_dir and photo_idx == 1:
-                        from src.utils.debug import save_debug_image, save_debug_text
-
-                        save_debug_image(
-                            photo_glare.mask,
-                            debug_dir / f"06_photo_{photo_idx:02d}_glare_mask.png",
-                            f"Photo {photo_idx} glare mask"
+                    if use_openai:
+                        # OpenAI path: no detection needed — send the whole image
+                        from src.glare.remover_openai import remove_glare_openai
+                        analysis = photo_analyses[photo_idx - 1] if photo_analyses else None
+                        scene_desc = (
+                            self.config.forced_scene_description
+                            or (analysis.scene_description if analysis and analysis.scene_description else "")
+                            or "A printed photograph."
+                        )
+                        deglared_photo = remove_glare_openai(
+                            photo,
+                            scene_desc=scene_desc,
+                            api_key=openai_key,
+                            model=self.config.openai_model,
+                            quality=self.config.openai_glare_quality,
+                            input_fidelity=self.config.openai_glare_input_fidelity,
+                        )
+                        logger.debug(f"Photo {photo_idx}: OpenAI glare removal applied")
+                    else:
+                        # OpenCV fallback: run detector to get the mask
+                        photo_glare = detect_glare(
+                            photo,
+                            intensity_threshold=self.config.glare_intensity_threshold,
+                            saturation_threshold=self.config.glare_saturation_threshold,
+                            min_area=self.config.glare_min_area,
+                            glare_type=self.config.glare_type,
                         )
 
-                        overlay = draw_glare_overlay(photo, photo_glare)
-                        save_debug_image(
-                            overlay,
-                            debug_dir / f"06_photo_{photo_idx:02d}_glare_overlay.jpg",
-                            f"Photo {photo_idx} glare (type={photo_glare.glare_type})"
-                        )
+                        # Save debug overlays for first photo only
+                        if debug_dir and photo_idx == 1:
+                            from src.utils.debug import save_debug_image
+                            save_debug_image(
+                                photo_glare.mask,
+                                debug_dir / f"06_photo_{photo_idx:02d}_glare_mask.png",
+                                f"Photo {photo_idx} glare mask"
+                            )
+                            overlay = draw_glare_overlay(photo, photo_glare)
+                            save_debug_image(
+                                overlay,
+                                debug_dir / f"06_photo_{photo_idx:02d}_glare_overlay.jpg",
+                                f"Photo {photo_idx} glare (type={photo_glare.glare_type})"
+                            )
 
-                    # Remove glare if detected
-                    if photo_glare.total_glare_area_ratio > 0.001:
-                        if self.config.use_openai_glare_removal:
-                            # Use OpenAI diffusion-based inpainting (opt-in)
-                            from src.glare.remover_openai import remove_glare_openai
-                            from src.utils.secrets import load_secrets
-                            secrets = load_secrets()
-                            openai_key = secrets.openai_api_key
-
-                            if openai_key:
-                                # Get scene description: forced override > orientation analysis > default
-                                analysis = photo_analyses[photo_idx - 1] if photo_analyses else None
-                                scene_desc = (
-                                    self.config.forced_scene_description
-                                    or (analysis.scene_description if analysis and analysis.scene_description else "")
-                                    or "A printed photograph."
-                                )
-                                deglared_photo = remove_glare_openai(
-                                    photo,
-                                    scene_desc=scene_desc,
-                                    api_key=openai_key,
-                                    model=self.config.openai_model,
-                                    quality=self.config.openai_glare_quality,
-                                    input_fidelity=self.config.openai_glare_input_fidelity,
-                                )
-                                logger.debug(
-                                    f"Photo {photo_idx}: OpenAI glare removal applied"
-                                )
-                            else:
-                                logger.warning(
-                                    "OPENAI_API_KEY not set; falling back to OpenCV inpainting"
-                                )
-                                glare_result = remove_glare_single(
-                                    photo,
-                                    photo_glare.mask,
-                                    photo_glare.severity_map,
-                                    inpaint_radius=self.config.glare_inpaint_radius,
-                                    feather_radius=self.config.glare_feather_radius,
-                                )
-                                deglared_photo = glare_result.image
-                        else:
-                            # Default: OpenCV inpainting
+                        if photo_glare.total_glare_area_ratio > 0.001:
                             glare_result = remove_glare_single(
                                 photo,
                                 photo_glare.mask,
@@ -568,38 +558,27 @@ class Pipeline:
                                 feather_radius=self.config.glare_feather_radius,
                             )
                             deglared_photo = glare_result.image
-
-                        # Save debug
-                        if debug_dir:
-                            from src.utils.debug import save_debug_image
-                            save_debug_image(
-                                deglared_photo,
-                                debug_dir / f"07_photo_{photo_idx:02d}_deglared.jpg",
-                                f"Photo {photo_idx} after glare removal"
+                            logger.debug(
+                                f"Photo {photo_idx}: OpenCV glare removal applied "
+                                f"(type={photo_glare.glare_type})"
                             )
+                        else:
+                            deglared_photo = photo
+                            logger.debug(f"Photo {photo_idx}: no significant glare detected")
 
-                        logger.debug(f"Photo {photo_idx}: removed glare (type={photo_glare.glare_type})")
-                    else:
-                        deglared_photo = photo
-                        logger.debug(f"Photo {photo_idx}: no glare detected")
+                    # Save debug
+                    if debug_dir:
+                        from src.utils.debug import save_debug_image
+                        save_debug_image(
+                            deglared_photo,
+                            debug_dir / f"07_photo_{photo_idx:02d}_deglared.jpg",
+                            f"Photo {photo_idx} after glare removal"
+                        )
 
                     deglared_photos.append(deglared_photo)
 
                 # Update extracted_photos with deglared versions
                 extracted_photos = deglared_photos
-
-                # Store overall stats (use first photo's glare detection for reporting)
-                if len(extracted_photos) > 0:
-                    glare_detection_result = detect_glare(
-                        extracted_photos[0],
-                        intensity_threshold=self.config.glare_intensity_threshold,
-                        saturation_threshold=self.config.glare_saturation_threshold,
-                        min_area=self.config.glare_min_area,
-                        glare_type=self.config.glare_type,
-                    )
-                    glare_confidence_score = compute_glare_confidence(
-                        extracted_photos[0], glare_detection_result.mask
-                    )
 
                 self.step_times['glare_detect'] = time.time() - step_start
                 steps_completed.append('glare_detect')
@@ -662,7 +641,10 @@ class Pipeline:
                         pass
 
                     # 3. Dewarp correction (correct barrel distortion)
-                    if steps_filter is None or 'dewarp' in steps_filter:
+                    # Disabled by default: Hough-line detection produces false positives on
+                    # content-rich photos, and the float32→uint8 round-trip in cv2.undistort
+                    # introduces subtle colour shifts. Enable via config.use_dewarp if needed.
+                    if (steps_filter is None or 'dewarp' in steps_filter) and self.config.use_dewarp:
                         corrected_photo, warp_detected = correct_warp(corrected_photo)
                         if warp_detected:
                             corrections_applied.append("dewarp")

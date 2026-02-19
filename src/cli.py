@@ -63,10 +63,10 @@ def main() -> None:
     help='Comma-separated list of steps to run (e.g., "load,normalize,glare")'
 )
 @click.option(
-    '--openai-glare',
-    'openai_glare',
+    '--no-openai-glare',
+    'no_openai_glare',
     is_flag=True,
-    help='Use OpenAI diffusion-based glare removal instead of OpenCV inpainting (requires OPENAI_API_KEY)'
+    help='Disable OpenAI glare removal and fall back to OpenCV inpainting'
 )
 @click.option(
     '--scene-desc',
@@ -94,7 +94,7 @@ def process(
     batch: bool,
     filter_pattern: Optional[str],
     steps: Optional[str],
-    openai_glare: bool,
+    no_openai_glare: bool,
     scene_desc: Optional[str],
     no_ai_orientation: bool,
     verbose: bool
@@ -158,7 +158,7 @@ def process(
 
     # Create pipeline
     config = PipelineConfig(
-        use_openai_glare_removal=openai_glare,
+        use_openai_glare_removal=not no_openai_glare,
         use_ai_orientation=not no_ai_orientation,
         forced_scene_description=scene_desc,
     )
@@ -296,11 +296,12 @@ def status() -> None:
     click.echo("  # Process directory (batch mode)")
     click.echo("  python -m src.cli process test-images/ --batch --filter \"*.HEIC\" --output ./output/")
     click.echo()
-    click.echo("  # Enable OpenAI diffusion-based glare removal (requires OPENAI_API_KEY)")
-    click.echo("  python -m src.cli process image.HEIC --output ./output/ --openai-glare")
+    click.echo("  # OpenAI glare removal is on by default (requires OPENAI_API_KEY)")
+    click.echo("  # To fall back to OpenCV inpainting:")
+    click.echo("  python -m src.cli process image.HEIC --output ./output/ --no-openai-glare")
     click.echo()
-    click.echo("  # OpenAI glare with an explicit scene description")
-    click.echo("  python -m src.cli process image.HEIC --output ./output/ --openai-glare --scene-desc \"A cave interior\"")
+    click.echo("  # Override scene description for OpenAI glare prompt")
+    click.echo("  python -m src.cli process image.HEIC --output ./output/ --scene-desc \"A cave interior\"")
     click.echo()
     click.echo("  # Disable AI orientation correction")
     click.echo("  python -m src.cli process image.HEIC --output ./output/ --no-ai-orientation")
