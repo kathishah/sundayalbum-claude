@@ -130,7 +130,8 @@ sundayalbum-claude/
 │   ├── phase-9-summary.md       # Phase 9: Pipeline Integration
 │   ├── 2026-02-16-single-print-fix.md     # Fix: single-print false splits
 │   ├── 2026-02-17-multi-photo-detection-fix.md  # Fix: three_pics detection
-│   └── 2026-02-18-openai-glare-and-orientation.md  # OpenAI glare + AI orientation
+│   ├── 2026-02-18-openai-glare-and-orientation.md  # OpenAI glare + AI orientation
+│   └── 2026-02-19-rotation-fix.md        # Fix: Hough false corrections + AI direction confusion
 │
 ├── scripts/
 │   └── fetch-test-images.sh     # Download test images from GitHub releases
