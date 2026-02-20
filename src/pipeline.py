@@ -20,6 +20,7 @@ from src.photo_detection.splitter import split_photos
 from src.geometry import correct_keystone, correct_rotation, correct_warp
 from src.color import (
     auto_white_balance,
+    assess_white_balance_quality,
     remove_yellowing_adaptive,
     restore_fading,
     enhance_adaptive,
@@ -704,20 +705,30 @@ class Pipeline:
                     restored_photo = photo
                     restorations_applied = []
 
-                    # 1. White balance correction
+                    # 1. White balance correction — only apply if a real color cast is detected.
+                    # Gray-world WB assumes the average pixel is neutral gray, which destroys
+                    # intentional scene colors (warm cave light, blue sky, etc.).
                     if steps_filter is None or 'white_balance' in steps_filter:
-                        restored_photo, wb_info = auto_white_balance(
-                            restored_photo,
-                            page_border=None,
-                            method="gray_world"
-                        )
-                        restorations_applied.append(f"white_balance ({wb_info['method_used']})")
-                        logger.debug(
-                            f"Photo {photo_idx}: white balance applied "
-                            f"(R={wb_info.get('gain_r', 1.0):.2f}, "
-                            f"G={wb_info.get('gain_g', 1.0):.2f}, "
-                            f"B={wb_info.get('gain_b', 1.0):.2f})"
-                        )
+                        wb_quality = assess_white_balance_quality(restored_photo)
+                        if wb_quality['color_cast_score'] > 0.08:
+                            restored_photo, wb_info = auto_white_balance(
+                                restored_photo,
+                                page_border=None,
+                                method="gray_world"
+                            )
+                            restorations_applied.append(f"white_balance ({wb_info['method_used']})")
+                            logger.info(
+                                f"Photo {photo_idx}: white balance applied "
+                                f"(cast={wb_quality['color_cast_score']:.3f}, "
+                                f"R={wb_info.get('gain_r', 1.0):.2f}, "
+                                f"G={wb_info.get('gain_g', 1.0):.2f}, "
+                                f"B={wb_info.get('gain_b', 1.0):.2f})"
+                            )
+                        else:
+                            logger.info(
+                                f"Photo {photo_idx}: white balance skipped "
+                                f"(cast score={wb_quality['color_cast_score']:.3f} below threshold)"
+                            )
 
                         if debug_dir:
                             from src.utils.debug import save_debug_image
