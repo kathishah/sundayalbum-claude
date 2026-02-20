@@ -86,10 +86,10 @@ def _white_balance_gray_world(photo: np.ndarray) -> Tuple[np.ndarray, dict]:
     gain_g = target_gray / mean_g
     gain_b = target_gray / mean_b
 
-    # Clamp gains to reasonable range (avoid extreme corrections)
-    gain_r = np.clip(gain_r, 0.5, 2.0)
-    gain_g = np.clip(gain_g, 0.5, 2.0)
-    gain_b = np.clip(gain_b, 0.5, 2.0)
+    # Clamp gains to conservative range (±⅓ stop max — avoids destroying scene colors)
+    gain_r = np.clip(gain_r, 0.75, 1.33)
+    gain_g = np.clip(gain_g, 0.75, 1.33)
+    gain_b = np.clip(gain_b, 0.75, 1.33)
 
     # Apply gains
     balanced = photo.copy()
@@ -134,10 +134,10 @@ def _white_balance_white_patch(photo: np.ndarray) -> Tuple[np.ndarray, dict]:
     gain_g = 1.0 / max_g
     gain_b = 1.0 / max_b
 
-    # Clamp gains to reasonable range
-    gain_r = np.clip(gain_r, 0.5, 2.5)
-    gain_g = np.clip(gain_g, 0.5, 2.5)
-    gain_b = np.clip(gain_b, 0.5, 2.5)
+    # Clamp gains to conservative range (±⅓ stop max)
+    gain_r = np.clip(gain_r, 0.75, 1.33)
+    gain_g = np.clip(gain_g, 0.75, 1.33)
+    gain_b = np.clip(gain_b, 0.75, 1.33)
 
     # Apply gains
     balanced = photo.copy()
@@ -188,10 +188,10 @@ def _white_balance_from_reference(
     gain_g = target / ref_mean_g
     gain_b = target / ref_mean_b
 
-    # Clamp gains
-    gain_r = np.clip(gain_r, 0.5, 2.0)
-    gain_g = np.clip(gain_g, 0.5, 2.0)
-    gain_b = np.clip(gain_b, 0.5, 2.0)
+    # Clamp gains to conservative range (±⅓ stop max)
+    gain_r = np.clip(gain_r, 0.75, 1.33)
+    gain_g = np.clip(gain_g, 0.75, 1.33)
+    gain_b = np.clip(gain_b, 0.75, 1.33)
 
     # Apply gains
     balanced = photo.copy()

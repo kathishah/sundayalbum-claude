@@ -176,9 +176,11 @@ def detect_intentional_warmth(photo: np.ndarray) -> dict:
     warm_hue_mask = (h < 30) & (s > 0.2) & (v > 0.2)
     warm_pixel_ratio = np.sum(warm_hue_mask) / (photo.shape[0] * photo.shape[1])
 
-    # High ratio of warm, saturated pixels suggests intentional warm tones
-    has_intentional_warmth = warm_pixel_ratio > 0.3
-    confidence = float(min(1.0, warm_pixel_ratio / 0.3))
+    # High ratio of warm, saturated pixels suggests intentional warm tones.
+    # Threshold lowered to 0.2 so scenes with moderate warmth (caves, candlelight)
+    # are protected, not just full-frame sunset shots.
+    has_intentional_warmth = warm_pixel_ratio > 0.2
+    confidence = float(min(1.0, warm_pixel_ratio / 0.2))
 
     logger.debug(
         f"Intentional warmth detection: ratio={warm_pixel_ratio:.3f}, "
@@ -216,8 +218,10 @@ def remove_yellowing_adaptive(photo: np.ndarray) -> Tuple[np.ndarray, dict]:
             f"reducing deyellow strength to {strength:.2f}"
         )
     else:
-        # Full strength for photos without warm tones
-        strength = 0.6
+        # Moderate strength for photos without warm tones.
+        # Reduced from 0.6 to avoid over-correcting scenes with subtle warmth
+        # that didn't cross the detection threshold.
+        strength = 0.4
 
     # Apply yellowing removal with adjusted strength
     corrected, info = remove_yellowing(photo, strength=strength, auto_detect=True)
