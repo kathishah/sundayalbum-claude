@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-RELEASE_TAG="v0.0.1-testdata"
+RELEASE_TAG="v0.0.3-testdata"
 REPO="kathishah/sundayalbum-claude"
 ZIP_FILE="test-images.zip"
 DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${RELEASE_TAG}/${ZIP_FILE}"

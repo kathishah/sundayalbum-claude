@@ -88,8 +88,21 @@ def _mask_to_quad(
     if not contours:
         return None
 
-    largest = max(contours, key=cv2.contourArea)
-    area_ratio = cv2.contourArea(largest) / image_area
+    # Collect all significant foreground contours, not just the largest one.
+    # This handles open album spreads where GrabCut produces separate blobs for
+    # each page (e.g. two photos on facing pages): taking only the largest blob
+    # would crop out the second page entirely.  Any contour that is at least
+    # 25% of min_area_ratio in size is considered significant (generous enough
+    # to capture real photo regions while rejecting dust/noise specks).
+    component_min = image_area * max(0.01, min_area_ratio * 0.25)
+    significant = [c for c in contours if cv2.contourArea(c) >= component_min]
+
+    if not significant:
+        return None
+
+    # Combined area check — the union of all significant regions must still
+    # fall within [min_area_ratio, max_area_ratio].
+    area_ratio = sum(cv2.contourArea(c) for c in significant) / image_area
 
     if area_ratio < min_area_ratio or area_ratio > max_area_ratio:
         logger.debug(
@@ -98,8 +111,15 @@ def _mask_to_quad(
         )
         return None
 
-    # Use convex hull for cleaner corner estimation
-    hull = cv2.convexHull(largest)
+    logger.debug(
+        f"Mask-to-quad: {len(significant)} significant component(s), "
+        f"combined area_ratio={area_ratio:.3f}"
+    )
+
+    # Build convex hull over all significant foreground points so that the
+    # resulting quad encloses every detected region (handles multi-blob spreads).
+    all_points = np.vstack(significant)
+    hull = cv2.convexHull(all_points)
     rect = cv2.minAreaRect(hull)
     box = cv2.boxPoints(rect)
     corners = np.array(box, dtype=np.float32)
