@@ -3,6 +3,7 @@ secrets.json
 test-images/
 output/
 debug/
+logs/
 __pycache__/
 *.pyc
 .mypy_cache/
@@ -10,4 +11,5 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+tmp/
 .DS_Store

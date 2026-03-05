@@ -69,6 +69,17 @@ def detect_photos(
                 f"No album page borders detected on perspective-corrected image "
                 f"({w}×{h}) — treating as single print"
             )
+            # Try a brightness-profile crop to strip dark or bright background
+            # material that GrabCut page detection may have included at the edges
+            # (e.g. dark leather below the print, patterned album material above).
+            cropped = _find_print_crop_by_brightness(page_image, min_area_ratio)
+            if cropped is not None:
+                logger.info(
+                    f"Brightness-profile crop applied to single print: "
+                    f"({cropped.bbox[0]},{cropped.bbox[1]})→"
+                    f"({cropped.bbox[2]},{cropped.bbox[3]})"
+                )
+                return [cropped]
             return [PhotoDetection(
                 bbox=(0, 0, w, h),
                 corners=np.array([[0, 0], [w, 0], [w, h], [0, h]], dtype=np.float32),
@@ -497,22 +508,218 @@ def _detect_photos_contour(
         for reason in filtered_reasons[:10]:  # Limit to first 10
             logger.debug(f"  {reason}")
 
-    # Sanity check: if 2+ detections have badly disproportionate areas (one is >2.5x
-    # another), the contour method likely found wrong boundaries.  Fall back to the
-    # projection-profile approach which finds physical gaps between photos.
+    # Sanity check: if 2+ detections have badly disproportionate bounding-box areas
+    # (one is >2.5× another), the contour method likely found wrong boundaries.
+    # Uses bounding-box area rather than contour area because highly skewed contours
+    # can have a very small contour area but a massive bounding box (e.g. a diagonal
+    # stripe contour), masking the true disproportion from the contour-area ratio.
+    fell_back_via_imbalance = False
     if len(detections) >= 2:
-        areas = [d.area_ratio for d in detections]
-        area_imbalance = max(areas) / (min(areas) + 1e-6)
+        bbox_areas = [
+            (d.bbox[2] - d.bbox[0]) * (d.bbox[3] - d.bbox[1]) / total_area
+            for d in detections
+        ]
+        area_imbalance = max(bbox_areas) / (min(bbox_areas) + 1e-6)
         if area_imbalance > 2.5:
             logger.warning(
                 f"Contour detections are disproportionate (imbalance={area_imbalance:.1f}x). "
-                f"Falling back to projection-profile detection."
+                f"Falling back to detection."
             )
-            proj_detections = _detect_photos_by_projection(page_image, min_area_ratio)
-            if proj_detections:
-                detections = proj_detections
+            fell_back_via_imbalance = True
+
+            # Try brightness-based spine detection first: it directly finds the
+            # white album-spine band and splits there — more reliable than
+            # edge-density projection when the spine fabric has its own edges.
+            # The function returns [] if conditions are not met (not exactly one
+            # qualifying band in 33–67% of page height).
+            bright_detections = _detect_photos_by_whiteness(page_image, min_area_ratio)
+            if bright_detections:
+                detections = bright_detections
+            else:
+                # Brightness spine detection didn't apply; use projection-profile.
+                proj_detections = _detect_photos_by_projection(page_image, min_area_ratio)
+                if proj_detections:
+                    # Projection may over-split the page into many strips when there
+                    # is no white paper gap (e.g. two prints on a dark album
+                    # background).  When it returns more than 3 photos, fall back to
+                    # GrabCut segmentation which correctly separates photo blobs from
+                    # the background.
+                    if len(proj_detections) > 3:
+                        logger.warning(
+                            f"Projection over-splits ({len(proj_detections)} photos). "
+                            f"Trying GrabCut photo-detection fallback."
+                        )
+                        grab_detections = _detect_photos_grabcut(page_image, min_area_ratio)
+                        if grab_detections:
+                            detections = grab_detections
+                        else:
+                            detections = proj_detections
+                    else:
+                        detections = proj_detections
+
+    # Secondary quality check: if ALL contour detections are badly non-rectangular
+    # (max rectangularity < 0.45), every contour found a diagonal/skewed shape
+    # rather than a photo border.  Try the brightness-based spine detector as a
+    # last resort before returning the bad contour results.
+    # Only runs when the imbalance check above did NOT already fire.
+    if not fell_back_via_imbalance and len(detections) >= 2:
+        rects = [
+            cv2.contourArea(d.contour)
+            / ((d.bbox[2] - d.bbox[0]) * (d.bbox[3] - d.bbox[1]) + 1e-6)
+            for d in detections
+        ]
+        if max(rects) < 0.45:
+            logger.warning(
+                f"All contour detections are non-rectangular "
+                f"(max_rect={max(rects):.2f}). "
+                f"Trying brightness-based separator detection."
+            )
+            bright_detections = _detect_photos_by_whiteness(page_image, min_area_ratio)
+            if bright_detections:
+                detections = bright_detections
+
+    # Single-photo quality check: when exactly one photo is detected but its
+    # contour is badly non-rectangular, the detector found a diagonal edge stripe
+    # within the photo content (e.g. dark tablecloth edges, angled wine-glass
+    # highlights) rather than the actual photo boundary.  Applying perspective
+    # correction using these skewed corners produces a severely distorted crop.
+    # Try a brightness-profile crop first; fall back to [] (full page) if it
+    # doesn't find a meaningful tighter boundary.
+    if len(detections) == 1:
+        bw = detections[0].bbox[2] - detections[0].bbox[0]
+        bh = detections[0].bbox[3] - detections[0].bbox[1]
+        rect = cv2.contourArea(detections[0].contour) / (bw * bh + 1e-6)
+        if rect < 0.45:
+            logger.warning(
+                f"Single-photo contour is badly non-rectangular (rect={rect:.2f}). "
+                f"Trying brightness-profile crop to find photo print boundary."
+            )
+            cropped = _find_print_crop_by_brightness(page_image, min_area_ratio)
+            if cropped is not None:
+                return [cropped]
+            logger.warning(
+                "Brightness-profile crop found no clear boundary; "
+                "returning [] so the pipeline uses the full page as the photo."
+            )
+            return []
 
     return detections
+
+
+def _find_print_crop_by_brightness(
+    page_image: np.ndarray,
+    min_area_ratio: float,
+    dark_thresh: float = 0.25,
+    bright_thresh: float = 0.65,
+    margin_frac: float = 0.015,
+) -> Optional[PhotoDetection]:
+    """Find a tight crop of the actual photo print within a warped page.
+
+    Handles two common backgrounds that appear after perspective correction:
+
+    * **Dark background** (e.g. black leather/cloth): row-mean brightness below
+      ``dark_thresh``.  These rows are stripped from the top/bottom/sides.
+    * **Bright non-photo background** (e.g. patterned album material):
+      row-mean brightness above ``bright_thresh`` that forms a *contiguous block
+      at the image edge*.  Only edge-adjacent bright rows are stripped; isolated
+      bright rows inside the photo (e.g. a white tablecloth) are kept.
+
+    Args:
+        page_image: Perspective-corrected album page, float32 RGB [0, 1].
+        min_area_ratio: Minimum crop area as fraction of page area.
+        dark_thresh: Rows darker than this are background.
+        bright_thresh: Contiguous edge rows brighter than this are background.
+        margin_frac: Small fractional margin to restore around detected crop.
+
+    Returns:
+        A single PhotoDetection for the found crop, or None if the crop would
+        be too small or not meaningfully tighter than the full page.
+    """
+    h, w = page_image.shape[:2]
+    total_area = float(h * w)
+    gray = page_image.mean(axis=2)
+
+    row_bright = np.array([gray[y, :].mean() for y in range(h)])
+    col_bright = np.array([gray[:, x].mean() for x in range(w)])
+
+    def _find_axis_bounds(profile: np.ndarray, size: int) -> Tuple[int, int]:
+        """Strip dark and edge-adjacent bright background from one axis."""
+        # Step 1: strip dark from both ends
+        lo = 0
+        while lo < size and profile[lo] < dark_thresh:
+            lo += 1
+        hi = size - 1
+        while hi > lo and profile[hi] < dark_thresh:
+            hi -= 1
+
+        # Step 2: strip contiguous bright background from the low end (edge)
+        while lo < hi and profile[lo] > bright_thresh:
+            lo += 1
+
+        # Step 3: strip contiguous bright background from the high end (edge)
+        while hi > lo and profile[hi] > bright_thresh:
+            hi -= 1
+
+        return lo, hi
+
+    y1, y2 = _find_axis_bounds(row_bright, h)
+    x1, x2 = _find_axis_bounds(col_bright, w)
+
+    # Add a small margin so we don't clip the white paper border
+    margin_y = max(1, int(h * margin_frac))
+    margin_x = max(1, int(w * margin_frac))
+    y1 = max(0, y1 - margin_y)
+    y2 = min(h - 1, y2 + margin_y)
+    x1 = max(0, x1 - margin_x)
+    x2 = min(w - 1, x2 + margin_x)
+
+    crop_h = y2 - y1
+    crop_w = x2 - x1
+    area_ratio = (crop_h * crop_w) / total_area
+
+    # Sanity checks: crop must be large enough and meaningfully smaller
+    if area_ratio < min_area_ratio:
+        logger.debug(
+            f"Brightness-profile crop too small (area_ratio={area_ratio:.3f})"
+        )
+        return None
+
+    # If the crop is nearly the same as the full page (< 5% reduction), don't
+    # bother — it would be misleading to claim we found a tight boundary.
+    if area_ratio > 0.95:
+        logger.debug(
+            f"Brightness-profile crop not meaningfully tighter "
+            f"(area_ratio={area_ratio:.3f})"
+        )
+        return None
+
+    orientation: str
+    if crop_w > crop_h * 1.1:
+        orientation = "landscape"
+    elif crop_h > crop_w * 1.1:
+        orientation = "portrait"
+    else:
+        orientation = "square"
+
+    corners = np.array(
+        [[x1, y1], [x2, y1], [x2, y2], [x1, y2]], dtype=np.float32
+    )
+    contour = np.array(
+        [[x1, y1], [x2, y1], [x2, y2], [x1, y2]], dtype=np.int32
+    ).reshape(-1, 1, 2)
+
+    logger.info(
+        f"Brightness-profile crop: ({x1},{y1})→({x2},{y2}) "
+        f"area_ratio={area_ratio:.3f}"
+    )
+    return PhotoDetection(
+        bbox=(x1, y1, x2, y2),
+        corners=corners,
+        confidence=0.75,
+        orientation=orientation,
+        area_ratio=area_ratio,
+        contour=contour,
+    )
 
 
 def _find_projection_gaps(
@@ -723,6 +930,289 @@ def _detect_photos_by_projection(
         ))
 
     logger.debug(f"Projection detection produced {len(detections)} regions")
+    return detections
+
+
+def _detect_photos_by_whiteness(
+    page_image: np.ndarray,
+    min_area_ratio: float,
+) -> List[PhotoDetection]:
+    """Detect two photos separated by a single bright album-spine band.
+
+    Album pages that have an album spine (white or cream textured band)
+    visually dividing two prints are accurately split here.  The edge-density
+    projection approach fails on these pages because the spine fabric has
+    sufficient texture to produce Sobel edges, masking the gap.
+
+    Strict acceptance criteria prevent false splits on 3-photo pages or pages
+    with a photo-content bright patch near an edge:
+
+    * Exactly **one** qualifying interior separator band.
+    * Band maximum row-brightness ≥ 0.80 (true spine; distinguishes white
+      album fabric from a slightly bright patch inside photo content).
+    * Band center between 33 % and 67 % of page height (the spine of a
+      two-photo page lies near the vertical midpoint).
+
+    Args:
+        page_image: Perspective-corrected album page, float32 RGB [0, 1].
+        min_area_ratio: Minimum photo area as fraction of total page area.
+
+    Returns:
+        List of two PhotoDetection objects if exactly one qualifying spine
+        band is found; empty list otherwise.
+    """
+    h, w = page_image.shape[:2]
+    total_area = float(h * w)
+
+    row_brightness = page_image.mean(axis=(1, 2))
+
+    # Smooth with ~1.5% of page height to suppress row-level noise.
+    window = max(5, int(h * 0.015))
+    smooth = np.convolve(row_brightness, np.ones(window) / window, mode="same")
+
+    # Collect bright runs (threshold 0.74 passes all real spine candidates).
+    bright_threshold = 0.74
+    is_bright = smooth > bright_threshold
+    raw_bands: List[Tuple[int, int]] = []
+    in_band = False
+    start = 0
+    for y in range(h):
+        if is_bright[y] and not in_band:
+            in_band = True
+            start = y
+        elif not is_bright[y] and in_band:
+            in_band = False
+            raw_bands.append((start, y - 1))
+    if in_band:
+        raw_bands.append((start, h - 1))
+
+    # Merge sub-bands within 100 rows of each other.
+    merged: List[Tuple[int, int]] = []
+    for band in raw_bands:
+        if merged and band[0] - merged[-1][1] < 100:
+            merged[-1] = (merged[-1][0], band[1])
+        else:
+            merged.append(band)
+
+    # Filter: interior (5%–95%), at least 30 rows wide, and max per-row
+    # brightness ≥ 0.80 (true album-spine fabric; not a bright photo patch).
+    edge_margin = 0.05
+    min_brightness = 0.80
+    qualifying: List[int] = []  # separator center y-coordinates
+    for start, end in merged:
+        width = end - start + 1
+        center = (start + end) // 2
+        max_bright = float(row_brightness[start : end + 1].max())
+        if (
+            width >= 30
+            and start > h * edge_margin
+            and end < h * (1.0 - edge_margin)
+            and max_bright >= min_brightness
+        ):
+            qualifying.append(center)
+
+    # Accept only when exactly ONE qualifying band exists and it lies in the
+    # central third of the page (33%–67%).  This rejects:
+    #   – 3-photo pages whose second separator lands near 69% (outside range)
+    #   – 2-photo side-by-side pages with multiple bright strips
+    if len(qualifying) != 1:
+        logger.debug(
+            f"Whiteness separator: {len(qualifying)} qualifying band(s); "
+            f"need exactly 1 — falling through."
+        )
+        return []
+
+    separator_y = qualifying[0]
+    if not (h * 0.33 <= separator_y <= h * 0.67):
+        logger.debug(
+            f"Whiteness separator: band at y={separator_y} "
+            f"({separator_y/h*100:.0f}%) is outside 33–67% range — falling through."
+        )
+        return []
+
+    separators = [separator_y]
+    logger.info(
+        f"Whiteness separator detection: 1 qualifying band at y={separator_y} "
+        f"({separator_y/h*100:.0f}%)"
+    )
+
+    split_points = [0] + separators + [h]
+    detections: List[PhotoDetection] = []
+    for i in range(len(split_points) - 1):
+        y1 = split_points[i]
+        y2 = split_points[i + 1]
+        region_h = y2 - y1
+        area_ratio = (w * region_h) / total_area
+        if area_ratio < min_area_ratio:
+            continue
+
+        bbox = (0, y1, w, y2)
+        corners = np.array(
+            [[0, y1], [w, y1], [w, y2], [0, y2]], dtype=np.float32
+        )
+
+        if w > region_h * 1.1:
+            orientation = "landscape"
+        elif region_h > w * 1.1:
+            orientation = "portrait"
+        else:
+            orientation = "square"
+
+        detections.append(
+            PhotoDetection(
+                bbox=bbox,
+                corners=corners,
+                confidence=0.70,
+                orientation=orientation,
+                area_ratio=area_ratio,
+                contour=np.array(
+                    [[0, y1], [w, y1], [w, y2], [0, y2]], dtype=np.int32
+                ).reshape(-1, 1, 2),
+            )
+        )
+
+    detections.sort(key=lambda d: (d.bbox[1], d.bbox[0]))
+    logger.info(f"Whiteness separator detection: {len(detections)} photo(s)")
+    return detections
+
+
+def _detect_photos_grabcut(
+    page_image: np.ndarray,
+    min_area_ratio: float,
+) -> List[PhotoDetection]:
+    """Detect photo regions using GrabCut segmentation on the page image.
+
+    Last-resort fallback for pages where neither contour detection nor
+    projection-profile detection finds the correct photo boundaries — typically
+    when two or more prints are placed on a dark album background without white
+    paper gaps between them.
+
+    GrabCut treats the large photo-content regions as foreground and the dark
+    album background as background, returning one blob per physical photo.
+
+    Args:
+        page_image: Perspective-corrected album page, float32 RGB [0, 1].
+        min_area_ratio: Minimum photo area as fraction of total page area.
+
+    Returns:
+        List of PhotoDetection objects (one per detected blob), sorted
+        top-to-bottom, left-to-right.  Empty list if GrabCut fails or finds
+        no qualifying regions.
+    """
+    h, w = page_image.shape[:2]
+    total_area = float(h * w)
+
+    # Downscale for speed — coarse segmentation is all we need.
+    max_dim = 600
+    scale = max_dim / max(h, w)
+    gc_h = max(50, int(h * scale))
+    gc_w = max(50, int(w * scale))
+    scale_x = w / gc_w
+    scale_y = h / gc_h
+
+    gc_uint8 = cv2.resize(
+        (page_image * 255).astype(np.uint8),
+        (gc_w, gc_h),
+        interpolation=cv2.INTER_AREA,
+    )
+    gc_bgr = cv2.cvtColor(gc_uint8, cv2.COLOR_RGB2BGR)
+
+    margin_x = max(2, int(gc_w * 0.02))
+    margin_y = max(2, int(gc_h * 0.02))
+    rect = (margin_x, margin_y, gc_w - 2 * margin_x, gc_h - 2 * margin_y)
+
+    gc_mask = np.zeros((gc_h, gc_w), dtype=np.uint8)
+    bg_model = np.zeros((1, 65), dtype=np.float64)
+    fg_model = np.zeros((1, 65), dtype=np.float64)
+
+    try:
+        cv2.grabCut(
+            gc_bgr, gc_mask, rect,
+            bg_model, fg_model,
+            5, cv2.GC_INIT_WITH_RECT,
+        )
+    except cv2.error as e:
+        logger.warning(f"GrabCut photo-detection fallback failed: {e}")
+        return []
+
+    fg_mask = np.where(
+        (gc_mask == cv2.GC_FGD) | (gc_mask == cv2.GC_PR_FGD),
+        np.uint8(255),
+        np.uint8(0),
+    )
+
+    # Morphological cleanup — same approach as page_detection.detector.
+    kernel_size = max(15, int(min(gc_h, gc_w) * 0.015))
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_size, kernel_size))
+    cleaned = cv2.morphologyEx(fg_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+    cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_OPEN, kernel, iterations=1)
+
+    contours, _ = cv2.findContours(cleaned, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    # Require each blob to cover at least 5 % of the (downscaled) image area so
+    # that dust/noise specks do not produce spurious detections.
+    component_min = float(gc_h * gc_w) * max(0.05, min_area_ratio * 0.15)
+    significant = [c for c in contours if cv2.contourArea(c) >= component_min]
+
+    if not significant:
+        logger.debug("GrabCut fallback: no significant photo blobs found")
+        return []
+
+    logger.debug(
+        f"GrabCut fallback: {len(significant)} blob(s) above "
+        f"component_min={component_min:.0f}px"
+    )
+
+    detections: List[PhotoDetection] = []
+    for contour in significant:
+        # Scale contour points back to full-resolution page coordinates.
+        contour_full = (contour.astype(np.float32)
+                        * np.array([[[scale_x, scale_y]]])).astype(np.int32)
+
+        x, y, bw, bh = cv2.boundingRect(contour_full)
+        x = max(0, min(x, w - 1))
+        y = max(0, min(y, h - 1))
+        bw = min(bw, w - x)
+        bh = min(bh, h - y)
+
+        area_ratio = (bw * bh) / total_area
+        if area_ratio < min_area_ratio:
+            logger.debug(
+                f"  GrabCut blob skipped: area_ratio={area_ratio:.3f} < min={min_area_ratio}"
+            )
+            continue
+
+        # Convex hull → minAreaRect → ordered 4-corner quad.
+        hull = cv2.convexHull(contour_full)
+        rect = cv2.minAreaRect(hull)
+        box = cv2.boxPoints(rect)
+        corners = np.array(box, dtype=np.float32)
+        corners[:, 0] = np.clip(corners[:, 0], 0, w - 1)
+        corners[:, 1] = np.clip(corners[:, 1], 0, h - 1)
+        corners = _order_corners(corners)
+
+        if bw > bh * 1.1:
+            orientation = "landscape"
+        elif bh > bw * 1.1:
+            orientation = "portrait"
+        else:
+            orientation = "square"
+
+        contour_area = cv2.contourArea(contour_full)
+        rectangularity = contour_area / float(bw * bh + 1)
+        confidence = float(np.clip(0.60 + rectangularity * 0.20, 0.0, 0.80))
+
+        detections.append(PhotoDetection(
+            bbox=(x, y, x + bw, y + bh),
+            corners=corners,
+            confidence=confidence,
+            orientation=orientation,
+            area_ratio=area_ratio,
+            contour=contour_full,
+        ))
+
+    detections.sort(key=lambda d: (d.bbox[1], d.bbox[0]))
+    logger.info(f"GrabCut fallback detected {len(detections)} photo(s)")
     return detections
 
 
