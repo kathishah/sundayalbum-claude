@@ -10,7 +10,7 @@ the resulting corner coordinates back to the original resolution.
 
 import logging
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -30,6 +30,12 @@ class PageDetection:
     confidence: float    # 0.0 to 1.0
     is_full_frame: bool  # True if no clear boundary found, using full image
     area_ratio: float = field(default=0.0)  # Detected quad area / total image area
+    photo_quads: Optional[List[np.ndarray]] = field(default=None)
+    # When GrabCut finds 2+ separate foreground blobs (e.g. two prints on a dark
+    # background), this list holds one (4, 2) corner array per blob — in the
+    # same coordinate space as ``corners``.  The pipeline uses these to extract
+    # each photo directly from the pre-warp image, bypassing the normal photo-
+    # detection step which fails on merged-hull spreads.
 
 
 def _order_corners(pts: np.ndarray) -> np.ndarray:
@@ -60,11 +66,15 @@ def _mask_to_quad(
     image_area: float,
     min_area_ratio: float,
     max_area_ratio: float = _MAX_AREA_RATIO,
-) -> Optional[np.ndarray]:
+) -> Tuple[Optional[np.ndarray], Optional[List[np.ndarray]]]:
     """Convert a binary foreground mask to a quadrilateral boundary.
 
-    Cleans the mask with morphological ops, finds the largest foreground region,
-    and returns its minimum-area bounding rectangle as 4 corners.
+    Cleans the mask with morphological ops, finds significant foreground
+    regions, and returns:
+      - the minimum-area bounding rectangle of their convex hull as 4 corners
+        (the overall page boundary), and
+      - a list of individual blob corners when 2+ significant regions are found
+        (used by the pipeline to extract each photo independently).
 
     Args:
         mask: Binary mask (uint8, 0 or 255) — 255 is foreground.
@@ -75,7 +85,10 @@ def _mask_to_quad(
         max_area_ratio: Maximum foreground area as fraction of image area.
 
     Returns:
-        Ordered corner points as (4, 2) float32 array, or None if not found.
+        Tuple of:
+          - Ordered corner points (4, 2) float32, or None if not found.
+          - List of per-blob corner arrays (each (4, 2) float32), or None if
+            only one significant blob exists.
     """
     # Morphological close to fill holes (e.g., glare patches inside the subject),
     # then open to remove small noise. Kernel proportional to image size.
@@ -86,7 +99,7 @@ def _mask_to_quad(
 
     contours, _ = cv2.findContours(cleaned, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
-        return None
+        return None, None
 
     # Collect all significant foreground contours, not just the largest one.
     # This handles open album spreads where GrabCut produces separate blobs for
@@ -98,7 +111,7 @@ def _mask_to_quad(
     significant = [c for c in contours if cv2.contourArea(c) >= component_min]
 
     if not significant:
-        return None
+        return None, None
 
     # Combined area check — the union of all significant regions must still
     # fall within [min_area_ratio, max_area_ratio].
@@ -109,12 +122,27 @@ def _mask_to_quad(
             f"Mask-to-quad: rejected contour (area_ratio={area_ratio:.3f}, "
             f"bounds=[{min_area_ratio:.2f}, {max_area_ratio:.2f}])"
         )
-        return None
+        return None, None
 
     logger.debug(
         f"Mask-to-quad: {len(significant)} significant component(s), "
         f"combined area_ratio={area_ratio:.3f}"
     )
+
+    # When 2+ blobs exist, compute individual per-blob quads so the pipeline
+    # can extract each photo independently (bypassing photo detection on the
+    # merged hull image, which fails when there is no white paper gap).
+    individual_quads: Optional[List[np.ndarray]] = None
+    if len(significant) >= 2:
+        individual_quads = []
+        for contour in significant:
+            b_hull = cv2.convexHull(contour)
+            b_rect = cv2.minAreaRect(b_hull)
+            b_box = cv2.boxPoints(b_rect)
+            b_corners = np.array(b_box, dtype=np.float32)
+            b_corners[:, 0] = np.clip(b_corners[:, 0], 0, image_w - 1)
+            b_corners[:, 1] = np.clip(b_corners[:, 1], 0, image_h - 1)
+            individual_quads.append(_order_corners(b_corners))
 
     # Build convex hull over all significant foreground points so that the
     # resulting quad encloses every detected region (handles multi-blob spreads).
@@ -127,7 +155,7 @@ def _mask_to_quad(
     corners[:, 0] = np.clip(corners[:, 0], 0, image_w - 1)
     corners[:, 1] = np.clip(corners[:, 1], 0, image_h - 1)
 
-    return _order_corners(corners)
+    return _order_corners(corners), individual_quads
 
 
 def detect_page(
@@ -198,6 +226,7 @@ def detect_page(
     fg_model = np.zeros((1, 65), dtype=np.float64)
 
     corners: Optional[np.ndarray] = None
+    photo_quads: Optional[List[np.ndarray]] = None
 
     try:
         cv2.grabCut(
@@ -219,13 +248,24 @@ def detect_page(
             f"(ran on {gc_w}×{gc_h})"
         )
 
-        corners_small = _mask_to_quad(
+        corners_small, individual_quads_small = _mask_to_quad(
             fg_mask, gc_h, gc_w, float(gc_h * gc_w), min_area_ratio,
         )
         if corners_small is not None:
             corners = corners_small.copy()
             corners[:, 0] = np.clip(corners[:, 0] * scale_x, 0, width - 1)
             corners[:, 1] = np.clip(corners[:, 1] * scale_y, 0, height - 1)
+
+            if individual_quads_small is not None:
+                photo_quads = []
+                for q in individual_quads_small:
+                    q_scaled = q.copy()
+                    q_scaled[:, 0] = np.clip(q_scaled[:, 0] * scale_x, 0, width - 1)
+                    q_scaled[:, 1] = np.clip(q_scaled[:, 1] * scale_y, 0, height - 1)
+                    photo_quads.append(q_scaled)
+                logger.info(
+                    f"Multi-blob page: {len(photo_quads)} separate foreground regions detected"
+                )
 
     except cv2.error as e:
         logger.warning(f"GrabCut failed: {e}")
@@ -268,6 +308,7 @@ def detect_page(
         confidence=confidence,
         is_full_frame=False,
         area_ratio=area_ratio,
+        photo_quads=photo_quads,
     )
 
 

@@ -295,6 +295,11 @@ class Pipeline:
 
         # Step 3: Page detection & perspective correction
         page_detection_result: Optional[PageDetection] = None
+        # Keep a reference to the pre-warp image so the multi-blob path can
+        # perspective-correct each blob independently from the original pixels.
+        pre_warp_image = working_image
+        # Photos extracted directly from GrabCut blobs (multi-blob case only).
+        multi_blob_photos: Optional[List[np.ndarray]] = None
         should_run_page_detect = steps_filter is None or 'page_detect' in steps_filter
 
         if should_run_page_detect:
@@ -318,7 +323,32 @@ class Pipeline:
                         f"full_frame={page_detection_result.is_full_frame})"
                     )
 
-                # Apply perspective correction if a boundary was found
+                # Multi-blob extraction: when GrabCut found 2+ separate foreground
+                # regions (e.g. two prints lying on a dark background), extract each
+                # blob directly from the pre-warp image instead of running photo
+                # detection on the merged hull, which fails for this layout.
+                if (
+                    page_detection_result.photo_quads
+                    and len(page_detection_result.photo_quads) >= 2
+                ):
+                    logger.info(
+                        f"Multi-blob detection: extracting {len(page_detection_result.photo_quads)} "
+                        "photos directly from GrabCut regions (skipping contour photo detection)"
+                    )
+                    multi_blob_photos = []
+                    from src.utils.debug import save_debug_image as _sdi
+                    for blob_idx, quad in enumerate(page_detection_result.photo_quads, 1):
+                        blob_photo = correct_perspective(pre_warp_image, quad)
+                        multi_blob_photos.append(blob_photo)
+                        if debug_dir:
+                            _sdi(
+                                blob_photo,
+                                debug_dir / f"03b_blob_{blob_idx:02d}_extracted.jpg",
+                                f"Blob {blob_idx} extracted via per-blob perspective correction"
+                            )
+
+                # Apply full-page perspective correction (always, for debug viz and
+                # as the working image for normal single-blob photo detection).
                 if not page_detection_result.is_full_frame:
                     working_image = correct_perspective(
                         working_image,
@@ -354,58 +384,97 @@ class Pipeline:
         if should_run_photo_detect:
             step_start = time.time()
 
-            try:
-                # Detect individual photos on the page.
-                # page_was_corrected=True tells the detector that the image has
-                # already been perspective-corrected by GrabCut page detection,
-                # so it can apply the album-border pre-check to avoid false splits
-                # on single prints (cave/harbor/skydiving).
-                _page_was_corrected = (
-                    page_detection_result is not None
-                    and not page_detection_result.is_full_frame
-                )
-                photo_detections_result = detect_photos(
-                    working_image,
-                    min_area_ratio=self.config.photo_detect_min_area_ratio,
-                    max_count=self.config.photo_detect_max_count,
-                    method=self.config.photo_detect_method,
-                    page_was_corrected=_page_was_corrected,
-                )
-
-                # Save debug: photo boundaries overlay
+            if multi_blob_photos is not None:
+                # Multi-blob case: photos already extracted from per-blob perspective
+                # correction in the page detection step — skip contour/projection photo
+                # detection entirely as it fails on merged-hull images with no white
+                # paper gaps between photos.
+                extracted_photos = multi_blob_photos
+                photo_detections_result = None
                 if debug_dir:
                     from src.utils.debug import save_debug_image
-                    overlay = draw_photo_detections(working_image, photo_detections_result)
+                    # Show blob quads overlaid on the pre-warp image as the boundaries viz.
+                    import cv2 as _cv2
+                    vis = (pre_warp_image * 255).astype(np.uint8).copy()
+                    colors = [(0, 255, 0), (255, 0, 0), (0, 0, 255), (255, 255, 0)]
+                    for i, quad in enumerate(page_detection_result.photo_quads):  # type: ignore[union-attr]
+                        pts = quad.astype(np.int32)
+                        _cv2.polylines(vis, [pts], True, colors[i % len(colors)], 3)
+                        _cv2.putText(
+                            vis, f"Blob {i+1}", tuple(pts[0]),
+                            _cv2.FONT_HERSHEY_SIMPLEX, 1.5, colors[i % len(colors)], 3
+                        )
                     save_debug_image(
-                        overlay,
+                        vis.astype(np.float32) / 255.0,
                         debug_dir / "04_photo_boundaries.jpg",
-                        f"Detected {len(photo_detections_result)} photos"
+                        f"Multi-blob: {len(multi_blob_photos)} photos from GrabCut regions"
                     )
-
-                # Extract individual photos
-                if photo_detections_result:
-                    extracted_photos = split_photos(working_image, photo_detections_result)
-
-                    # Save debug: each extracted photo (before glare removal)
-                    if debug_dir:
-                        from src.utils.debug import save_debug_image
-                        for i, photo in enumerate(extracted_photos, 1):
-                            save_debug_image(
-                                photo,
-                                debug_dir / f"05_photo_{i:02d}_raw.jpg",
-                                f"Extracted photo {i} ({photo.shape[1]}x{photo.shape[0]})"
-                            )
-
+                    for i, photo in enumerate(extracted_photos, 1):
+                        save_debug_image(
+                            photo,
+                            debug_dir / f"05_photo_{i:02d}_raw.jpg",
+                            f"Blob {i} extracted ({photo.shape[1]}x{photo.shape[0]})"
+                        )
                 self.step_times['photo_detect'] = time.time() - step_start
                 steps_completed.append('photo_detect')
                 logger.info(
                     f"Photo detection time: {self.step_times['photo_detect']:.3f}s, "
-                    f"detected={len(photo_detections_result)}, extracted={len(extracted_photos)}"
+                    f"detected={len(extracted_photos)} (multi-blob GrabCut), "
+                    f"extracted={len(extracted_photos)}"
                 )
+            else:
+                try:
+                    # Detect individual photos on the page.
+                    # page_was_corrected=True tells the detector that the image has
+                    # already been perspective-corrected by GrabCut page detection,
+                    # so it can apply the album-border pre-check to avoid false splits
+                    # on single prints (cave/harbor/skydiving).
+                    _page_was_corrected = (
+                        page_detection_result is not None
+                        and not page_detection_result.is_full_frame
+                    )
+                    photo_detections_result = detect_photos(
+                        working_image,
+                        min_area_ratio=self.config.photo_detect_min_area_ratio,
+                        max_count=self.config.photo_detect_max_count,
+                        method=self.config.photo_detect_method,
+                        page_was_corrected=_page_was_corrected,
+                    )
 
-            except Exception as e:
-                logger.warning(f"Photo detection failed, passing through: {e}")
-                self.step_times['photo_detect'] = time.time() - step_start
+                    # Save debug: photo boundaries overlay
+                    if debug_dir:
+                        from src.utils.debug import save_debug_image
+                        overlay = draw_photo_detections(working_image, photo_detections_result)
+                        save_debug_image(
+                            overlay,
+                            debug_dir / "04_photo_boundaries.jpg",
+                            f"Detected {len(photo_detections_result)} photos"
+                        )
+
+                    # Extract individual photos
+                    if photo_detections_result:
+                        extracted_photos = split_photos(working_image, photo_detections_result)
+
+                        # Save debug: each extracted photo (before glare removal)
+                        if debug_dir:
+                            from src.utils.debug import save_debug_image
+                            for i, photo in enumerate(extracted_photos, 1):
+                                save_debug_image(
+                                    photo,
+                                    debug_dir / f"05_photo_{i:02d}_raw.jpg",
+                                    f"Extracted photo {i} ({photo.shape[1]}x{photo.shape[0]})"
+                                )
+
+                    self.step_times['photo_detect'] = time.time() - step_start
+                    steps_completed.append('photo_detect')
+                    logger.info(
+                        f"Photo detection time: {self.step_times['photo_detect']:.3f}s, "
+                        f"detected={len(photo_detections_result)}, extracted={len(extracted_photos)}"
+                    )
+
+                except Exception as e:
+                    logger.warning(f"Photo detection failed, passing through: {e}")
+                    self.step_times['photo_detect'] = time.time() - step_start
 
         # If no photos were extracted, treat the whole page as one photo
         if not extracted_photos:

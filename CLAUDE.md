@@ -6,6 +6,8 @@ Sunday Album is a free tool that digitizes physical photo album pages into clean
 
 This is the foundational image processing pipeline. No web UI, no cloud deployment — just raw image quality. Get the processing right first, then wrap infrastructure around it.
 
+The user is expected to use iphone 17 pro camera or Google pixel camera to take photo of a picture printed on a glossy paper. The purpose is to digitize the prints. The page from iphone can have multiple pictures in the same frame or only one. Since this is a photo of physical print(s) that were done on glossy papaers, we need to find the picture boundaries, apply glare removal while preserving original composition, textures, and colors. 
+
 ## Development Machine
 
 - **MacBook Air M4, 24 GB RAM**
