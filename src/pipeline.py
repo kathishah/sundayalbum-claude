@@ -54,18 +54,17 @@ PIPELINE_STEPS = [
     },
     {
         'id': 'glare_detect',
-        'name': 'Glare Detection',
-        'description': 'Detect specular highlights from plastic sleeves or glossy prints',
+        'name': 'Glare Detection & Removal',
+        'description': 'Detect and remove glare — OpenAI gpt-image-1.5 by default, OpenCV inpainting fallback',
         'priority': 1,
         'implemented': True,
     },
     {
-        'id': 'glare_remove',
-        'name': 'Glare Removal',
-        'description': 'Inpaint or composite glare regions',
-        'priority': 1,
-        'implemented': False,
-        'notes': 'Detection complete, removal partially implemented (single-shot only)',
+        'id': 'ai_orientation',
+        'name': 'AI Orientation Correction',
+        'description': 'Claude Haiku call per photo — corrects 90°/180°/270° rotation errors and produces scene description',
+        'priority': 2,
+        'implemented': True,
     },
     {
         'id': 'photo_detect',
@@ -552,7 +551,7 @@ class Pipeline:
         # Now we process each extracted photo separately for glare
         glare_detection_result: Optional[GlareDetection] = None
         glare_confidence_score: Optional[float] = None
-        should_run_glare_detect = steps_filter is None or 'glare' in steps_filter
+        should_run_glare_detect = steps_filter is None or 'glare_detect' in steps_filter
 
         if should_run_glare_detect:
             step_start = time.time()

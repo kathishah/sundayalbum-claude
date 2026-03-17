@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Sunday Album CLI wrapper
+#
+# Usage (from anywhere inside the project):
+#   ./scripts/sunday process image.HEIC -o ./output/
+#
+# For system-wide access you can symlink or alias this script:
+#   ln -s "$(pwd)/scripts/sunday" ~/.local/bin/sunday
+#   alias sunday="$(pwd)/scripts/sunday"
+#
+# The script auto-activates the project's .venv when not already inside a
+# virtual environment, so there is no need to run `source .venv/bin/activate`
+# before using it.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+# Activate the project venv if we are not already inside one
+if [[ -z "${VIRTUAL_ENV:-}" ]]; then
+    VENV_ACTIVATE="$PROJECT_ROOT/.venv/bin/activate"
+    if [[ -f "$VENV_ACTIVATE" ]]; then
+        # shellcheck source=/dev/null
+        source "$VENV_ACTIVATE"
+    else
+        echo "Warning: no .venv found at $PROJECT_ROOT/.venv" >&2
+        echo "Run: python3 -m venv .venv && source .venv/bin/activate && pip install -e '.[dev]'" >&2
+    fi
+fi
+
+# Change to project root so relative paths (test-images/, output/, etc.) resolve correctly
+cd "$PROJECT_ROOT"
+
+exec python -m src.cli "$@"
