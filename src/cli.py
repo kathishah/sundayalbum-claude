@@ -2,14 +2,24 @@
 
 import logging
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import List, Optional
 
 import click
 from dotenv import load_dotenv
 
-from src.pipeline import Pipeline, PipelineConfig
+from src.pipeline import Pipeline, PipelineConfig, PIPELINE_STEPS
 from src.utils.debug import save_debug_image
+
+# Build the canonical list of step IDs once at import time so the --steps help
+# text always stays in sync with the pipeline definition.
+_STEP_IDS: list[str] = [s["id"] for s in PIPELINE_STEPS]
+_STEPS_HELP = (
+    "Comma-separated pipeline step IDs to run (skips all others). "
+    "Valid IDs: " + ", ".join(_STEP_IDS) + ". "
+    "Example: -s load,photo_detect,glare_detect"
+)
 
 # Load environment variables from .env
 load_dotenv()
@@ -23,69 +33,120 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+# Shared context settings applied to every command and the group
+_CTX = dict(help_option_names=["-h", "--help"], max_content_width=100)
 
-@click.group()
-@click.version_option(version='0.1.0')
+
+class _DetailedGroup(click.Group):
+    """Click Group subclass that appends each subcommand's option table to the group help."""
+
+    def format_help(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
+        super().format_help(ctx, formatter)
+        # Append per-subcommand option tables so `sunday --help` is self-contained
+        for name in self.list_commands(ctx):
+            cmd = self.commands.get(name)
+            if cmd is None or cmd.hidden:
+                continue
+            sub_ctx = click.Context(cmd, info_name=name, parent=ctx)
+            params = [p for p in cmd.params if isinstance(p, click.Option)]
+            if not params:
+                continue
+            rows = []
+            for param in params:
+                flags = ", ".join(param.opts)
+                metavar = param.make_metavar() if not param.is_flag else ""
+                left = f"  {flags} {metavar}".rstrip()
+                right = param.help or ""
+                if param.default is not None and not param.is_flag:
+                    right += f"  [default: {param.default}]"
+                rows.append((left, right))
+            with formatter.section(f"Options — {name}"):
+                formatter.write_dl(rows)
+
+
+@click.group(cls=_DetailedGroup, context_settings=_CTX)
+@click.version_option(version="0.1.0")
 def main() -> None:
-    """Sunday Album - Digitize physical photo album pages into clean individual digital photos."""
+    """Sunday Album — digitize physical photo album pages into clean individual digital photos.
+
+    \b
+    Commands:
+      process   Run the full pipeline on one or more images
+      validate  Batch-validate all test images and print a report
+      check     Quality-check a processed image against its original
+      compare   Side-by-side before/after comparison image
+      status    Show pipeline implementation progress
+
+    Run 'sunday COMMAND -h' for full options of any command.
+    """
     pass
 
 
-@main.command()
+@main.command(context_settings=_CTX)
 @click.argument('input_paths', nargs=-1, required=True, type=click.Path(exists=True))
 @click.option(
-    '--output',
-    '-o',
+    '--output', '-o',
     'output_dir',
     type=click.Path(),
     default='./output',
-    help='Output directory for processed images'
+    show_default=True,
+    help='Output directory for processed images',
 )
 @click.option(
-    '--debug',
+    '--debug', '-d',
     is_flag=True,
-    help='Save debug visualizations at each pipeline step'
+    help='Save debug visualizations at each pipeline step',
 )
 @click.option(
-    '--batch',
+    '--batch', '-b',
     is_flag=True,
-    help='Process all images in directory'
+    help='Process all images found inside a directory argument',
 )
 @click.option(
-    '--filter',
+    '--filter', '-f',
     'filter_pattern',
     type=str,
-    help='Glob pattern to filter files (e.g., "*.HEIC")'
+    metavar='PATTERN',
+    help='Glob pattern to filter files when using --batch (e.g. "*.HEIC")',
 )
 @click.option(
-    '--steps',
+    '--steps', '-s',
     type=str,
-    help='Comma-separated list of steps to run (e.g., "load,normalize,glare")'
+    metavar='STEP,...',
+    help=_STEPS_HELP,
 )
 @click.option(
-    '--no-openai-glare',
+    '--no-openai-glare', '-G',
     'no_openai_glare',
     is_flag=True,
-    help='Disable OpenAI glare removal and fall back to OpenCV inpainting'
+    help='Disable OpenAI glare removal and fall back to OpenCV inpainting',
 )
 @click.option(
-    '--scene-desc',
+    '--scene-desc', '-D',
     'scene_desc',
     type=str,
     default=None,
-    help='Explicit scene description for OpenAI glare prompt (skips Claude description; orientation still runs)'
+    metavar='TEXT',
+    help='Explicit scene description for OpenAI glare prompt (skips Claude description step)',
 )
 @click.option(
-    '--no-ai-orientation',
+    '--no-ai-orientation', '-O',
     'no_ai_orientation',
     is_flag=True,
-    help='Disable AI orientation correction (useful when images are known to be correctly oriented)'
+    help='Disable AI orientation correction (Claude Haiku call per photo)',
 )
 @click.option(
-    '--verbose',
-    '-v',
+    '--workers', '-j',
+    type=click.IntRange(min=1),
+    default=1,
+    show_default=True,
+    metavar='N',
+    help='Number of parallel workers (threads) for processing multiple files',
+)
+@click.option(
+    '--verbose', '-v',
     is_flag=True,
-    help='Enable verbose logging'
+    help='Enable verbose / DEBUG logging',
 )
 def process(
     input_paths: tuple,
@@ -97,6 +158,7 @@ def process(
     no_openai_glare: bool,
     scene_desc: Optional[str],
     no_ai_orientation: bool,
+    workers: int,
     verbose: bool
 ) -> None:
     """Process album page images through the digitization pipeline.
@@ -143,7 +205,7 @@ def process(
         logger.error("No input files found")
         sys.exit(1)
 
-    logger.info(f"Processing {len(input_files)} file(s)")
+    logger.info(f"Processing {len(input_files)} file(s) with {workers} worker(s)")
 
     # Create output directory
     output_path = Path(output_dir)
@@ -156,73 +218,77 @@ def process(
         debug_dir.mkdir(parents=True, exist_ok=True)
         logger.info(f"Debug output will be saved to: {debug_dir}")
 
-    # Create pipeline
     config = PipelineConfig(
         use_openai_glare_removal=not no_openai_glare,
         use_ai_orientation=not no_ai_orientation,
         forced_scene_description=scene_desc,
     )
-    pipeline = Pipeline(config)
 
-    # Process each file
-    results = []
-    for input_file in input_files:
+    def _process_one(input_file: Path) -> Optional[object]:
+        """Process a single file and save its outputs. Returns PipelineResult or None on error."""
         try:
             logger.info(f"\n{'=' * 60}")
             logger.info(f"Processing: {input_file.name}")
             logger.info(f"{'=' * 60}")
 
-            # Set up debug directory for this file if debug is enabled
+            # Each worker gets its own Pipeline instance (not thread-safe to share state)
+            pipeline = Pipeline(config)
+
+            file_debug_dir = None
             if debug_dir:
                 file_debug_dir = debug_dir / input_file.stem
                 file_debug_dir.mkdir(parents=True, exist_ok=True)
-            else:
-                file_debug_dir = None
 
-            # Process the image
             result = pipeline.process(
                 str(input_file),
                 debug_output_dir=str(file_debug_dir) if file_debug_dir else None,
-                steps_filter=steps_filter
+                steps_filter=steps_filter,
             )
 
-            # Save output images
-            # Naming convention: SundayAlbum_Page{XX}_Photo{YY}.jpg
-            # For single output, just use Photo{YY}
             num_outputs = len(result.output_images)
-
             for i, output_image in enumerate(result.output_images, 1):
                 if num_outputs > 1:
-                    # Multiple photos extracted from one page
                     output_filename = f"SundayAlbum_{input_file.stem}_Photo{i:02d}.jpg"
                 else:
-                    # Single photo (either single print or full page if splitting failed)
                     output_filename = f"SundayAlbum_{input_file.stem}.jpg"
 
                 output_file_path = output_path / output_filename
-
                 save_debug_image(
                     output_image,
                     output_file_path,
                     f"Final output {i}",
-                    quality=config.jpeg_quality
+                    quality=config.jpeg_quality,
                 )
-
                 logger.info(f"Saved: {output_file_path.name}")
 
-            results.append(result)
-
-            # Print summary
-            logger.info(f"\nProcessing Summary:")
-            logger.info(f"  Format: {result.metadata.format}")
-            logger.info(f"  Original size: {result.metadata.original_size[0]}x{result.metadata.original_size[1]}")
-            logger.info(f"  Photos extracted: {result.num_photos_extracted}")
-            logger.info(f"  Processing time: {result.processing_time:.3f}s")
-            logger.info(f"  Steps completed: {', '.join(result.steps_completed)}")
+            logger.info(
+                f"\nProcessing Summary [{input_file.name}]:\n"
+                f"  Format: {result.metadata.format}\n"
+                f"  Original size: {result.metadata.original_size[0]}x{result.metadata.original_size[1]}\n"
+                f"  Photos extracted: {result.num_photos_extracted}\n"
+                f"  Processing time: {result.processing_time:.3f}s\n"
+                f"  Steps completed: {', '.join(result.steps_completed)}"
+            )
+            return result
 
         except Exception as e:
             logger.error(f"Error processing {input_file}: {e}", exc_info=verbose)
-            continue
+            return None
+
+    # Process files — parallel when workers > 1, sequential otherwise
+    results = []
+    if workers == 1:
+        for input_file in input_files:
+            result = _process_one(input_file)
+            if result is not None:
+                results.append(result)
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {executor.submit(_process_one, f): f for f in input_files}
+            for future in as_completed(futures):
+                result = future.result()
+                if result is not None:
+                    results.append(result)
 
     # Print overall summary
     logger.info(f"\n{'=' * 60}")
@@ -233,7 +299,7 @@ def process(
     logger.info(f"{'=' * 60}")
 
 
-@main.command()
+@main.command(context_settings=_CTX)
 def status() -> None:
     """Show pipeline implementation status and available steps."""
     from src.pipeline import PIPELINE_STEPS, get_step_status
@@ -282,39 +348,50 @@ def status() -> None:
 
     click.echo("\n📋 Usage Examples:")
     click.echo("  # Process a single file (all implemented steps)")
-    click.echo("  python -m src.cli process image.HEIC --output ./output/")
+    click.echo("  sunday process image.HEIC -o ./output/")
     click.echo()
     click.echo("  # Process with debug visualizations")
-    click.echo("  python -m src.cli process image.HEIC --output ./output/ --debug")
+    click.echo("  sunday process image.HEIC -o ./output/ -d")
     click.echo()
-    click.echo("  # Process multiple files with glob pattern")
-    click.echo("  python -m src.cli process test-images/*.HEIC --output ./output/")
+    click.echo("  # Process multiple files at once (shell glob)")
+    click.echo("  sunday process test-images/*.HEIC -o ./output/")
     click.echo()
-    click.echo("  # Process only specific steps")
-    click.echo("  python -m src.cli process image.HEIC --steps load,detect_photos,split --output ./output/")
+    click.echo("  # Process multiple files in parallel (4 workers)")
+    click.echo("  sunday process test-images/*.HEIC -o ./output/ -j 4")
     click.echo()
-    click.echo("  # Process directory (batch mode)")
-    click.echo("  python -m src.cli process test-images/ --batch --filter \"*.HEIC\" --output ./output/")
+    click.echo("  # Process only specific pipeline steps")
+    click.echo("  sunday process image.HEIC -s load,photo_detect,split -o ./output/")
     click.echo()
-    click.echo("  # OpenAI glare removal is on by default (requires OPENAI_API_KEY)")
-    click.echo("  # To fall back to OpenCV inpainting:")
-    click.echo("  python -m src.cli process image.HEIC --output ./output/ --no-openai-glare")
+    click.echo("  # Batch-process a directory")
+    click.echo("  sunday process test-images/ -b -f \"*.HEIC\" -o ./output/")
+    click.echo()
+    click.echo("  # Fall back to OpenCV inpainting (no OpenAI API call)")
+    click.echo("  sunday process image.HEIC -o ./output/ -G")
     click.echo()
     click.echo("  # Override scene description for OpenAI glare prompt")
-    click.echo("  python -m src.cli process image.HEIC --output ./output/ --scene-desc \"A cave interior\"")
+    click.echo("  sunday process image.HEIC -o ./output/ -D \"A cave interior with warm amber light\"")
     click.echo()
     click.echo("  # Disable AI orientation correction")
-    click.echo("  python -m src.cli process image.HEIC --output ./output/ --no-ai-orientation")
+    click.echo("  sunday process image.HEIC -o ./output/ -O")
     click.echo()
 
 
-@main.command()
+@main.command(context_settings=_CTX)
 @click.argument('output_file', type=click.Path(exists=True))
-@click.option('--original', type=click.Path(exists=True), help='Original input file for comparison', required=True)
-@click.option('--use-ai', is_flag=True, help='Use AI vision for quality assessment (requires ANTHROPIC_API_KEY)')
-@click.option('--verbose', '-v', is_flag=True, help='Enable verbose logging')
+@click.option(
+    '--original', '-i',
+    type=click.Path(exists=True),
+    required=True,
+    help='Original (pre-processing) input file to compare against',
+)
+@click.option(
+    '--use-ai', '-A',
+    is_flag=True,
+    help='Use Claude AI vision for quality assessment (requires ANTHROPIC_API_KEY)',
+)
+@click.option('--verbose', '-v', is_flag=True, help='Enable verbose / DEBUG logging')
 def check(output_file: str, original: str, use_ai: bool, verbose: bool) -> None:
-    """Quality check processed images against originals.
+    """Quality check a processed image against its original.
 
     OUTPUT_FILE: Processed output image to check
     """
@@ -379,16 +456,22 @@ def check(output_file: str, original: str, use_ai: bool, verbose: bool) -> None:
         sys.exit(1)
 
 
-@main.command()
+@main.command(context_settings=_CTX)
 @click.argument('before', type=click.Path(exists=True))
 @click.argument('after', type=click.Path(exists=True))
-@click.option('--save', type=click.Path(), help='Save comparison image to file', default='comparison.jpg')
-@click.option('--verbose', '-v', is_flag=True, help='Enable verbose logging')
+@click.option(
+    '--save', '-s',
+    type=click.Path(),
+    default='comparison.jpg',
+    show_default=True,
+    help='Path to save the side-by-side comparison image',
+)
+@click.option('--verbose', '-v', is_flag=True, help='Enable verbose / DEBUG logging')
 def compare(before: str, after: str, save: str, verbose: bool) -> None:
-    """Compare before/after images side-by-side.
+    """Compare before/after images side-by-side and save as a single image.
 
-    BEFORE: Original image
-    AFTER: Processed image
+    BEFORE: Original image\n
+    AFTER:  Processed image
     """
     import numpy as np
     import cv2
@@ -469,41 +552,41 @@ def compare(before: str, after: str, save: str, verbose: bool) -> None:
         sys.exit(1)
 
 
-@main.command()
+@main.command(context_settings=_CTX)
 @click.option(
-    '--test-images-dir',
+    '--test-images-dir', '-t',
     type=click.Path(exists=True),
     default='./test-images',
-    help='Directory containing test images'
+    show_default=True,
+    help='Directory containing test images',
 )
 @click.option(
-    '--output',
-    '-o',
+    '--output', '-o',
     'output_dir',
     type=click.Path(),
     default='./output',
-    help='Output directory for processed images'
+    show_default=True,
+    help='Output directory for processed images',
 )
 @click.option(
-    '--debug',
+    '--debug', '-d',
     is_flag=True,
-    help='Save debug visualizations'
+    help='Save debug visualizations for each step',
 )
 @click.option(
-    '--use-ai',
+    '--use-ai', '-A',
     is_flag=True,
-    help='Use AI vision for quality assessment (requires ANTHROPIC_API_KEY)'
+    help='Use Claude AI vision for quality assessment (requires ANTHROPIC_API_KEY)',
 )
 @click.option(
-    '--heic-only',
+    '--heic-only', '-H',
     is_flag=True,
-    help='Process only HEIC files (skip DNG for faster testing)'
+    help='Process only HEIC files, skip DNG (faster iteration)',
 )
 @click.option(
-    '--verbose',
-    '-v',
+    '--verbose', '-v',
     is_flag=True,
-    help='Enable verbose logging'
+    help='Enable verbose / DEBUG logging',
 )
 def validate(
     test_images_dir: str,
