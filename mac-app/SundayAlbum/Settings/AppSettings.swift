@@ -50,7 +50,14 @@ final class AppSettings {
         set { defaults.set(newValue, forKey: "useOpenCVFallback") }
     }
 
-    var canProcess: Bool { anthropicKeyStatus == .valid }
+    /// True when processing is allowed. Untested/testing keys are treated optimistically —
+    /// only .absent and .invalid block the pipeline.
+    var canProcess: Bool {
+        switch anthropicKeyStatus {
+        case .absent, .invalid: return false
+        default: return true
+        }
+    }
 
     // MARK: - Default paths
 

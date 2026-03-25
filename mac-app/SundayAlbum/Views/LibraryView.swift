@@ -130,6 +130,7 @@ struct LibraryView: View {
 
 private struct APIKeyBanner: View {
     @Environment(AppSettings.self) private var appSettings
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         HStack(spacing: 12) {
@@ -144,8 +145,7 @@ private struct APIKeyBanner: View {
             Spacer()
 
             Button("Open Settings →") {
-                // Trigger ⌘, programmatically
-                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                openSettings()
             }
             .buttonStyle(.plain)
             .font(.dmSans(12, weight: .semibold))

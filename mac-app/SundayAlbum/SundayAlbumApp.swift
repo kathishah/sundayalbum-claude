@@ -19,6 +19,16 @@ struct SundayAlbumApp: App {
             ContentView()
                 .environment(appState)
                 .environment(appSettings)
+                .task {
+                    // Silently re-validate saved keys on every launch so status
+                    // resolves before the user tries to process anything.
+                    if appSettings.anthropicKey() != nil {
+                        await appSettings.testAnthropicKey()
+                    }
+                    if appSettings.openaiKey() != nil {
+                        await appSettings.testOpenAIKey()
+                    }
+                }
         }
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified)
