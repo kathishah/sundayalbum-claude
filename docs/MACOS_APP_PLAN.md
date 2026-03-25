@@ -458,7 +458,7 @@ Polish work added after Phase 6 export.
 
 ---
 
-### Phase 8: Bundle Python Runtime (Option A — Guided Setup)
+### Phase 9: Bundle Python Runtime (Option A — Guided Setup)
 
 **Goal:** Make the app self-contained with the smallest possible download. Friends don't have `.venv/`, `src/`, or Python.
 
@@ -524,7 +524,7 @@ This means using AppCleaner or dragging to Trash alone leaves ~200MB behind — 
 
 ---
 
-### Phase 9: Settings Screen (API Keys + Storage)
+### Phase 8: Settings Screen (API Keys + Storage)
 
 **Goal:** Friends configure their own API keys and choose where files are stored. Processing is blocked until the Anthropic key is validated. Keys can be tested or replaced at any time.
 
