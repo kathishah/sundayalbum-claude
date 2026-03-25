@@ -23,8 +23,10 @@
 		5CFE6AFE130430B610CBC651 /* PageDetectionStepView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 549FFF500E47A57344FB13D0 /* PageDetectionStepView.swift */; };
 		5FFA9E51BFBFA1D9EB074C78 /* FileImporterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB3C37F91E8B98850E73574B /* FileImporterTests.swift */; };
 		6AA52B4126333AC93839AFE4 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2867767A01AF43F34628E58 /* LibraryView.swift */; };
+		716DDB1938AF8A3A477902DB /* ExportActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90E743B8B6D472B7F1E4EB6B /* ExportActions.swift */; };
 		73A62FB5DAD4A929AE381E19 /* PipelineEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26F7B64D5A93B9566A8DB6BA /* PipelineEvent.swift */; };
 		95DB47AA935958F2706B444A /* PipelineRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = F94393D19B5CB4E6828D3202 /* PipelineRunner.swift */; };
+		9A28C7096FDD21BD04F7DEFD /* Photos.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3624BAE96CBC4C90714A3769 /* Photos.framework */; };
 		A628AE9D1A800E98E5E36D30 /* SundayAlbumApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB4099DAE2D726871919696D /* SundayAlbumApp.swift */; };
 		B4A16F5F0919EE4572CCB50A /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F7AAAE450D303F3206E05E /* AppState.swift */; };
 		C8E91D42D70A7AAA0749CD02 /* PhotoSplitStepView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E34FB3B4953E05D514C82659 /* PhotoSplitStepView.swift */; };
@@ -51,6 +53,7 @@
 		26F7B64D5A93B9566A8DB6BA /* PipelineEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipelineEvent.swift; sourceTree = "<group>"; };
 		2B765E4C4CCEC45AB74EDDB0 /* FileImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileImporter.swift; sourceTree = "<group>"; };
 		355EBB4B4C161BBB3E19E2AF /* GlareRemovalStepView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlareRemovalStepView.swift; sourceTree = "<group>"; };
+		3624BAE96CBC4C90714A3769 /* Photos.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Photos.framework; path = System/Library/Frameworks/Photos.framework; sourceTree = SDKROOT; };
 		379914ED2B9199F7EB66783E /* ProcessingJob.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingJob.swift; sourceTree = "<group>"; };
 		3A669CA7ED2A89229225CD89 /* DropZoneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DropZoneView.swift; sourceTree = "<group>"; };
 		4A79A30A46DFBAEF6263C415 /* CLIOutputParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLIOutputParser.swift; sourceTree = "<group>"; };
@@ -59,6 +62,7 @@
 		597DA4F1B2F949A815A5A39D /* ResultsStepView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResultsStepView.swift; sourceTree = "<group>"; };
 		606E7E08C678BF7DA4DD3536 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		6634ACB94D5866C29FF93221 /* SundayAlbumTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SundayAlbumTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		90E743B8B6D472B7F1E4EB6B /* ExportActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportActions.swift; sourceTree = "<group>"; };
 		A8424CAE4A02516A09ABCA8F /* ComparisonView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComparisonView.swift; sourceTree = "<group>"; };
 		AB4099DAE2D726871919696D /* SundayAlbumApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SundayAlbumApp.swift; sourceTree = "<group>"; };
 		AE87891A348335D42DDEE1F0 /* CLIOutputParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLIOutputParserTests.swift; sourceTree = "<group>"; };
@@ -73,6 +77,17 @@
 		FD9738DA4D54476F0E1CD019 /* ColorCorrectionStepView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorCorrectionStepView.swift; sourceTree = "<group>"; };
 		FE95D5A469A6614F963B80A3 /* PipelineStep.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipelineStep.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		E2DE6786AAEE2FB4EB106DDC /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9A28C7096FDD21BD04F7DEFD /* Photos.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		0208DE45F0B6599534563701 /* SundayAlbum */ = {
@@ -162,6 +177,7 @@
 		7A27579D9801C2CD18612B47 /* Utils */ = {
 			isa = PBXGroup;
 			children = (
+				90E743B8B6D472B7F1E4EB6B /* ExportActions.swift */,
 				2B765E4C4CCEC45AB74EDDB0 /* FileImporter.swift */,
 			);
 			path = Utils;
@@ -172,8 +188,17 @@
 			children = (
 				0208DE45F0B6599534563701 /* SundayAlbum */,
 				5649BB83E2F3F747EF5C7004 /* SundayAlbumTests */,
+				95703CC6B661BE9B45B10495 /* Frameworks */,
 				4008CEACED04A7A2185D4EFE /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		95703CC6B661BE9B45B10495 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				3624BAE96CBC4C90714A3769 /* Photos.framework */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 		E14012468F4595CEA2F906E7 /* Steps */ = {
@@ -214,6 +239,7 @@
 			buildConfigurationList = 8CCF890BC63B60C7088B1862 /* Build configuration list for PBXNativeTarget "SundayAlbum" */;
 			buildPhases = (
 				4A5EAB0CAFAF338A9ADF7C25 /* Sources */,
+				E2DE6786AAEE2FB4EB106DDC /* Frameworks */,
 			);
 			buildRules = (
 			);
@@ -279,6 +305,7 @@
 				FA2E7ABA7FD753CB0888134D /* ContentView.swift in Sources */,
 				545F67DC95E0E7C51E719A84 /* DesignSystem.swift in Sources */,
 				2923B95A5113DADC5DAE744E /* DropZoneView.swift in Sources */,
+				716DDB1938AF8A3A477902DB /* ExportActions.swift in Sources */,
 				3E015696A6B7977AB568DB1B /* ExtractedPhoto.swift in Sources */,
 				5466EA451599406F195AF715 /* FileImporter.swift in Sources */,
 				346FE836C909620BF8D10558 /* GlareRemovalStepView.swift in Sources */,
@@ -320,6 +347,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Sunday Album";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.photography";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Sunday Album saves your processed photos to the Photos library.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -505,6 +533,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Sunday Album";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.photography";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Sunday Album saves your processed photos to the Photos library.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",

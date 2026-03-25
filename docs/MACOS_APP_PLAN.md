@@ -399,28 +399,34 @@ Turn raw stdout into typed Swift state and wire into the existing UI models.
 
 ---
 
-### Phase 5: Wire Drop → Pipeline
+### Phase 5: Wire Drop → Pipeline ✅ COMPLETE
 
 Replace mock data with real processing end-to-end.
 
-1. Remove `MockData.swift` (or gate it behind a debug flag)
-2. On file acceptance (from Phase 2): call `PipelineRunner.run(job:)` immediately (or queue for serial execution)
-3. Output directory: `~/Library/Application Support/SundayAlbum/output/<job.id>/`
-4. After `.complete`: `ExtractedPhoto` objects already created by the parser in Phase 4 — thumbnails load via existing `AfterThumb` async loader
+**What was built (completed as part of Phase 4):**
+- `MockData.swift` gated behind `MOCK_DATA=1` env var in Xcode scheme
+- `addFiles` starts `PipelineRunner` per job immediately on file drop or NSOpenPanel selection
+- Output directory: `~/Library/Application Support/SundayAlbum/output/<job.id>/`
+- `ExtractedPhoto` objects created by parser on each `.outputSaved` event; thumbnails load via `AfterThumb` async loader
 
-**Deliverable:** Drop a real HEIC → library card shows live progress wheel → reaches "✓ N photos" → after-thumbnails appear in the card.
+**Deliverable:** ✅ Drop a real HEIC → library card shows live progress wheel → reaches "✓ N photos" → after-thumbnails appear scaled to fill card.
 
 ---
 
-### Phase 6: Export & macOS Integration
+### Phase 6: Export & macOS Integration ✅ COMPLETE
 
 Get processed photos out of the app.
 
-1. **Show in Finder:** `NSWorkspace.shared.activateFileViewerSelecting([photo.imageURL])` — ~2 lines
-2. **Add to Photos:** `Photos` framework + `NSPhotoLibraryAddUsageDescription` in Info.plist + `PHPhotoLibrary.shared().performChanges` — ~10 lines
-3. **Export Selected:** "Export Selected" toolbar button → `NSOpenPanel` (directory picker mode) → copy selected JPEGs to chosen folder
+**What was built:**
+- `ExportActions.swift` — shared stateless helper enum with three actions:
+  - `showInFinder(_:)` — `NSWorkspace.activateFileViewerSelecting`, reveals file selected in Finder
+  - `addToPhotos(url:)` — `PHPhotoLibrary` with `.addOnly` authorization request + `PHAssetChangeRequest`
+  - `exportToFolder(_:)` — `NSOpenPanel` directory picker → copies all job JPEGs → reveals in Finder
+- `ComparisonView` — "Show in Finder" and "Add to Photos" buttons wired
+- `ResultsStepView` — "Export All" button wired; thumbnail hover folder + photo-badge icons wired
+- `project.yml` — `Photos.framework` dependency + `NSPhotoLibraryAddUsageDescription` key
 
-**Deliverable:** Photos appear in Photos.app; Finder reveals the output JPEG.
+**Deliverable:** ✅ "Show in Finder" reveals JPEG; "Add to Photos" saves to Photos.app; "Export All" copies to chosen folder.
 
 ---
 
@@ -546,10 +552,11 @@ open SundayAlbum.xcodeproj
 [ ] Phase 3: Manual verify — Xcode console shows live per-line stdout from a real HEIC run
 [x] Phase 4: PipelineRunner wired into UI — drop a file → progress wheel advances step-by-step
 [x] Phase 4: After-thumbnails scale to fill card width for 1, 2, or 3 extracted photos
-[ ] Phase 5: Drop IMG_three_pics_normal.HEIC → progress wheel advances step-by-step → "✓ 3 photos"
-[ ] Phase 5: After thumbnails appear in card with natural portrait/landscape ratios
-[ ] Phase 6: "Add to Photos" → photos appear in Photos.app
-[ ] Phase 6: "Show in Finder" → Finder window reveals the output JPEG
+[x] Phase 5: Drop IMG_three_pics_normal.HEIC → progress wheel advances step-by-step → "✓ 3 photos"
+[x] Phase 5: After thumbnails appear in card scaled to fill available width
+[x] Phase 6: "Add to Photos" → photos appear in Photos.app
+[x] Phase 6: "Show in Finder" → Finder window reveals the output JPEG
+[x] Phase 6: "Export All" → folder picker → copies all JPEGs → reveals in Finder
 ```
 
 ---

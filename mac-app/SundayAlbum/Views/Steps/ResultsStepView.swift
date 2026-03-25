@@ -24,11 +24,13 @@ struct ResultsStepView: View {
                         .font(.dmSans(13, weight: .medium))
                         .foregroundStyle(Color.saStone700)
                     Spacer()
-                    Button("Export All") {}
-                        .buttonStyle(.borderedProminent)
-                        .tint(Color.saAmber500)
-                        .controlSize(.small)
-                        .font(.dmSans(12, weight: .medium))
+                    Button("Export All") {
+                        ExportActions.exportToFolder(job.extractedPhotos)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color.saAmber500)
+                    .controlSize(.small)
+                    .font(.dmSans(12, weight: .medium))
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
@@ -93,12 +95,16 @@ private struct ResultThumbnail: View {
 
             if isHovered {
                 HStack(spacing: 14) {
-                    Button {} label: {
+                    Button {
+                        ExportActions.showInFinder(photo.imageURL)
+                    } label: {
                         Image(systemName: "folder")
                             .font(.system(size: 12, weight: .medium))
                     }
                     .buttonStyle(.plain)
-                    Button {} label: {
+                    Button {
+                        Task { await ExportActions.addToPhotos(url: photo.imageURL) }
+                    } label: {
                         Image(systemName: "photo.badge.plus")
                             .font(.system(size: 12, weight: .medium))
                     }

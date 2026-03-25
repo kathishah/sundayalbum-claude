@@ -65,14 +65,18 @@ struct ComparisonView: View {
                 }
 
                 HStack(spacing: 8) {
-                    Button("Show in Finder") {}
-                        .buttonStyle(.borderedProminent)
-                        .tint(Color.saAmber500)
-                        .controlSize(.small)
+                    Button("Show in Finder") {
+                        ExportActions.showInFinder(photo.imageURL)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color.saAmber500)
+                    .controlSize(.small)
 
-                    Button("Add to Photos") {}
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
+                    Button("Add to Photos") {
+                        Task { await ExportActions.addToPhotos(url: photo.imageURL) }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

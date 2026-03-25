@@ -18,6 +18,8 @@ targets:
     deploymentTarget: "26.0"
     sources:
       - path: SundayAlbum
+    dependencies:
+      - sdk: Photos.framework
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.sundayalbum.mac
@@ -29,6 +31,7 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: "Sunday Album"
         INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.photography"
+        INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription: "Sunday Album saves your processed photos to the Photos library."
         SWIFT_STRICT_CONCURRENCY: targeted
         ENABLE_USER_SCRIPT_SANDBOXING: NO
 
