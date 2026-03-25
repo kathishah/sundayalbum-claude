@@ -49,7 +49,7 @@ struct AlbumPageCard: View {
         }
         .background(Color.saCard)
         .clipShape(RoundedRectangle(cornerRadius: 12))
-        .shadow(color: Color.saShadow, radius: 14, y: 4)
+        .shadow(color: Color.saShadow, radius: 6, y: 3)
         .task { beforeImage = job.loadBeforeImage() }
     }
 }

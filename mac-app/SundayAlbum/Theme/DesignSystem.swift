@@ -63,8 +63,8 @@ extension Color {
     )
     // Card shadow — dark drop in light mode, soft white glow in dark mode
     static let saShadow = dynamic(
-        light: Color(red: 0.110, green: 0.098, blue: 0.090, opacity: 0.18),
-        dark:  Color(red: 1.000, green: 1.000, blue: 1.000, opacity: 0.07)
+        light: Color(red: 0.110, green: 0.098, blue: 0.090, opacity: 0.45),
+        dark:  Color(red: 1.000, green: 1.000, blue: 1.000, opacity: 0.12)
     )
 
     // ── Adaptive text tokens ─────────────────────────────────────────────────
