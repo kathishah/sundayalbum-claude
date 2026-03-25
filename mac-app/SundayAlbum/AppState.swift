@@ -54,6 +54,14 @@ final class AppState {
 
         guard startProcessing else { return }
 
+        guard AppSettings.shared.canProcess else {
+            for job in newJobs {
+                job.state = .failed
+                job.errorMessage = "Anthropic API key required. Open Settings (⌘,) to add it."
+            }
+            return
+        }
+
         for job in newJobs {
             let runner = PipelineRunner(job: job)
             runners[job.id] = runner

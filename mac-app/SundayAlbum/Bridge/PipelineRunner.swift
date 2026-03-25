@@ -35,12 +35,8 @@ final class PipelineRunner {
 
     init(job: ProcessingJob) {
         self.job = job
-        // Per-job output directory under ~/Library/Application Support/SundayAlbum/output/<id>/
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        outputDir = appSupport
-            .appendingPathComponent("SundayAlbum")
-            .appendingPathComponent("output")
-            .appendingPathComponent(job.id.uuidString)
+        // Per-job output directory inside the user-configured output folder.
+        outputDir = AppSettings.shared.outputFolder.appendingPathComponent(job.id.uuidString)
         try? FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
     }
 
@@ -63,11 +59,16 @@ final class PipelineRunner {
 
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: pythonPath)
-        proc.arguments = [
-            "-m", "src.cli", "process",
-            inputURL.path,
-            "--output", outputDir.path
-        ]
+        var args = ["-m", "src.cli", "process", inputURL.path, "--output", outputDir.path]
+
+        let s = AppSettings.shared
+        if s.useOpenCVFallback { args.append("--no-openai-glare") }
+        if s.debugOutputEnabled {
+            args += ["--debug", "--debug-dir", s.debugFolder.path]
+            try? FileManager.default.createDirectory(at: s.debugFolder, withIntermediateDirectories: true)
+        }
+
+        proc.arguments = args
         proc.currentDirectoryURL = Self.projectRoot
 
         let secrets = SecretsLoader(projectRoot: Self.projectRoot)

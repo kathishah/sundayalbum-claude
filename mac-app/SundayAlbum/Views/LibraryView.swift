@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 
 struct LibraryView: View {
     @Environment(AppState.self) private var appState
+    @Environment(AppSettings.self) private var appSettings
     @State private var isDropTargeted = false
 
     let columns = [GridItem(.adaptive(minimum: 280, maximum: 400), spacing: 16)]
@@ -12,6 +13,14 @@ struct LibraryView: View {
             // ── Scrollable grid ──────────────────────────────────────────────
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
+
+                    // ── API key banner (shown when Anthropic key is missing/invalid) ──
+                    if !appSettings.canProcess {
+                        APIKeyBanner()
+                            .padding(.horizontal, 32)
+                            .padding(.top, 20)
+                    }
+
                     // Header
                     HStack(alignment: .center) {
                         Text("Library")
@@ -114,5 +123,49 @@ struct LibraryView: View {
             appState.addFiles(resolved)
         }
         return true
+    }
+}
+
+// MARK: - API Key Banner
+
+private struct APIKeyBanner: View {
+    @Environment(AppSettings.self) private var appSettings
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "key.fill")
+                .foregroundStyle(Color.saAmber600)
+                .font(.system(size: 13))
+
+            Text(bannerText)
+                .font(.dmSans(12, weight: .medium))
+                .foregroundStyle(Color.saAmber700)
+
+            Spacer()
+
+            Button("Open Settings →") {
+                // Trigger ⌘, programmatically
+                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+            }
+            .buttonStyle(.plain)
+            .font(.dmSans(12, weight: .semibold))
+            .foregroundStyle(Color.saAmber600)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(Color.saAmber100)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Color.saAmber200, lineWidth: 1)
+        }
+    }
+
+    private var bannerText: String {
+        switch appSettings.anthropicKeyStatus {
+        case .absent:   return "Add your Anthropic API key to start processing photos."
+        case .invalid:  return "Anthropic API key is invalid — update it in Settings to resume processing."
+        default:        return "Anthropic API key required to process photos."
+        }
     }
 }

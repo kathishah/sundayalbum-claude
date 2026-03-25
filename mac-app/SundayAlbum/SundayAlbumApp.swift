@@ -12,13 +12,22 @@ struct SundayAlbumApp: App {
         return AppState()
     }()
 
+    private let appSettings = AppSettings.shared
+
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environment(appState)
+                .environment(appSettings)
         }
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified)
         .defaultSize(width: 1280, height: 760)
+
+        // ⌘, opens this automatically on macOS
+        Settings {
+            SettingsView()
+                .environment(appSettings)
+        }
     }
 }
