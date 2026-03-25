@@ -66,4 +66,10 @@ final class AppState {
         runners[jobID]?.cancel()
         runners.removeValue(forKey: jobID)
     }
+
+    /// Cancels (if running) and removes a job from the library.
+    func removeJob(id: UUID) {
+        cancel(jobID: id)
+        jobs.removeAll { $0.id == id }
+    }
 }

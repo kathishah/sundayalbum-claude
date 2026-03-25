@@ -28,6 +28,7 @@ struct LibraryView: View {
                         .buttonStyle(.borderedProminent)
                         .tint(Color.saAmber500)
                         .controlSize(.regular)
+                        .keyboardShortcut("o", modifiers: .command)
                     }
                     .padding(.horizontal, 32)
                     .padding(.top, 32)

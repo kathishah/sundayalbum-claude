@@ -5,7 +5,9 @@ import AppKit
 
 struct AlbumPageCard: View {
     let job: ProcessingJob
+    @Environment(AppState.self) private var appState
     @State private var beforeImage: NSImage?
+    @State private var isHovered = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -50,6 +52,26 @@ struct AlbumPageCard: View {
         .background(Color.saCard)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .shadow(color: Color.saShadow, radius: 6, y: 3)
+        .overlay(alignment: .topTrailing) {
+            if isHovered {
+                Button {
+                    appState.removeJob(id: job.id)
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 16))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(
+                            job.state == .running || job.state == .queued
+                                ? Color.saError : Color.saStone400
+                        )
+                }
+                .buttonStyle(.plain)
+                .padding(8)
+                .transition(.opacity.combined(with: .scale(scale: 0.8)))
+            }
+        }
+        .animation(.saStandard, value: isHovered)
+        .onHover { isHovered = $0 }
         .task { beforeImage = job.loadBeforeImage() }
     }
 }
