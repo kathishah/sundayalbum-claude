@@ -524,110 +524,41 @@ This means using AppCleaner or dragging to Trash alone leaves ~200MB behind — 
 
 ---
 
-### Phase 8: Settings Screen (API Keys + Storage)
+### Phase 8: Settings Screen (API Keys + Storage) ✅ COMPLETE
 
-**Goal:** Friends configure their own API keys and choose where files are stored. Processing is blocked until the Anthropic key is validated. Keys can be tested or replaced at any time.
+**Goal:** Friends configure their own API keys and choose where files are stored. Processing is blocked until the Anthropic key is present. Keys can be tested or replaced at any time.
 
-**Python CLI change required first:**
-Add `--debug-dir <path>` to `src/cli.py` so the app can direct debug images to the user-chosen folder instead of the hardcoded `./debug/`:
-```python
-@click.option('--debug-dir', type=click.Path(), default=None,
-              help='Directory for debug visualizations (default: ./debug)')
-```
+**What was built:**
 
----
+**Storage: file-based JSON instead of Keychain**
+- `SettingsStorage.swift` — stores API keys in `~/Library/Application Support/SundayAlbum/settings.json`. Simpler than Keychain, no entitlement required for a dev tool.
+- `KeychainHelper.swift` — emptied (replaced by `SettingsStorage`)
+- `Security.framework` dependency removed from `project.yml`
 
-**1. `KeychainHelper.swift`** — thin `Security.framework` wrapper:
-```swift
-enum KeychainHelper {
-    static func save(key: String, value: String)   // creates or overwrites
-    static func load(key: String) -> String?
-    static func delete(key: String)
-}
-// Service name: "com.sundayalbum.mac"
-```
+**`AppSettings.swift`** — `@MainActor @Observable` singleton:
+- `canProcess` returns `true` for `.untested` and `.testing` (not just `.valid`), so the banner doesn't appear every launch while keys are re-testing in background
+- Auto-tests saved keys via `.task` on app launch (background, non-blocking)
+- `PipelineRunner` reads `outputFolder`, `debugFolder`, `debugOutputEnabled`, `useOpenCVFallback` from `AppSettings` instead of hardcoded paths
 
-**2. Update `SecretsLoader`** — read order: Keychain → `secrets.json` (dev only) → env vars:
-```swift
-func value(for key: String) -> String? {
-    KeychainHelper.load(key: key)
-    ?? secrets[key]
-    ?? ProcessInfo.processInfo.environment[key]
-}
-```
+**`SettingsView.swift`** — opened by ⌘,:
+- API Keys section: per-key row with text field, Test/Save/Discard buttons, `KeyStatusBadge`
+- Storage section: output folder picker + debug folder picker (shown when debug enabled)
+- Save triggers auto-test; Discard reverts to last saved value
 
-**3. `AppSettings.swift`** — `@Observable` singleton, Keychain + UserDefaults:
-```swift
-@Observable final class AppSettings {
-    var anthropicKeyStatus: KeyStatus   // .absent | .untested | .testing | .valid | .invalid(String)
-    var openaiKeyStatus: KeyStatus
+**`LibraryView`** — amber banner + `@Environment(\.openSettings)` action (correct SwiftUI way to open Settings window).
 
-    var outputFolder: URL      // UserDefaults; default: .../SundayAlbum/output/
-    var debugFolder: URL       // UserDefaults; default: .../SundayAlbum/debug/
-    var debugOutputEnabled: Bool
+**`src/cli.py`** — added `--debug-dir <path>` so the app can direct debug images to the user-chosen folder.
 
-    var canProcess: Bool { anthropicKeyStatus == .valid }
-}
+**Step detail tree navigation (also completed in this phase):**
+- `StepDetailView` restructured: horizontal step strip replaced by scrollable left tree pane (196pt) + right canvas
+- `StepSelection` enum: `.preSplit(PipelineStep)` for Load/Page/Split, `.photo(index:, step:)` for per-photo steps
+- Multi-photo jobs show a branching tree — each extracted photo has its own Orient → Glare → Color → Done branch with a vertical connector line and thumbnail header
+- Single-photo jobs show a flat list (no branching)
+- `OrientationStepView`, `GlareRemovalStepView`, `ColorCorrectionStepView` all take a `photoIndex` parameter; thumbnail strips removed (tree handles navigation)
+- `ExtractedPhoto` gains `rotationOverride: Int?` and `sceneDescription: String?` for user overrides in the Orientation step
+- `PipelineStep.debugImageURL` uses `AppSettings.shared.debugFolder` instead of hardcoded dev path
 
-enum KeyStatus: Equatable {
-    case absent, untested, testing
-    case valid
-    case invalid(String)   // error message from API
-}
-```
-
-**4. `SettingsView.swift`** — two sections, opened by ⌘, :
-
-*API Keys section — one row per key:*
-
-Each row has this layout:
-```
-[Label]  [_____ text field _____]  [Test]  [Save]  [Discard]
-         [status badge]
-```
-
-- **Text field** (not SecureField — key is visible while editing, standard for API tools)
-  - Placeholder: `sk-ant-api03-...` / `sk-...`
-  - Pre-filled with the masked existing key when one is saved (`sk-ant-...••••1234`)
-  - Editing the field activates "Save" and "Discard"; both are disabled when field is unchanged
-- **"Save"** — writes new value to Keychain, triggers auto-test, disables both action buttons
-- **"Discard"** — reverts text field to the last saved value, disables both action buttons
-- **"Test"** — always enabled when a key is present; fires API call regardless of edit state
-- **Status badge** below the field:
-  - `No key saved` (red)
-  - `Not tested` (stone)
-  - `Testing…` (amber, spinner)
-  - `Valid ✓` (green)
-  - `Invalid — <reason from API>` (red)
-
-*Anthropic API key (required):*
-- Auto-test fires on Save
-- Footnote: `"Get a key at console.anthropic.com"`
-- `canProcess` requires this to be `.valid`
-
-*OpenAI API key (optional):*
-- Auto-test fires on Save
-- Additional toggle below the row: **"Use OpenCV fallback instead"** (replaces the key row entirely when toggled on) — passes `--no-openai-glare` to CLI
-- Footnote: `"Get a key at platform.openai.com — enables higher-quality glare removal"`
-
-**API test calls (Swift — no Python subprocess):**
-- Anthropic: `POST https://api.anthropic.com/v1/messages` with a 1-token prompt via `URLSession`
-- OpenAI: `GET https://api.openai.com/v1/models` via `URLSession`
-- Both are lightweight — no image data sent, just auth verification
-
-*Storage section:*
-- **Output folder** — path label + "Choose…" (`NSOpenPanel`, directory mode) + "Reset to default"
-  - Default: `~/Library/Application Support/SundayAlbum/output/`
-- **Debug images** — `Toggle` ("Save debug images at each step")
-  - When on: shows **Debug folder** picker below it (same layout as output folder)
-  - Default debug folder: `~/Library/Application Support/SundayAlbum/debug/`
-  - Passes `--debug --debug-dir <debugFolder>` to CLI when enabled
-
-**5. Blocking gate in `LibraryView`:**
-When `appSettings.canProcess == false`:
-- Amber banner at top of library: *"Add your Anthropic API key to start processing"* + "Open Settings →" button
-- File drop and "Add Photos" still work — files queue as `.queued`
-- Starting a job without a valid key fails immediately with: *"Anthropic API key required. Open Settings (⌘,)."*
+**Deliverable:** ✅ Settings window opens via ⌘,; keys can be entered, tested, and saved; banner only appears when key is absent/invalid; step detail shows per-photo branches for multi-photo jobs.
 
 ---
 
@@ -838,6 +769,14 @@ open SundayAlbum.xcodeproj
 [x] Phase 6b: App follows system light/dark mode setting
 [x] Phase 7: Hover × on card removes queued/complete jobs; cancels + removes running jobs
 [x] Phase 7: ⌘O triggers "Add Photos" file picker
+[x] Phase 8: ⌘, opens Settings window with API key entry and storage folder pickers
+[x] Phase 8: Amber banner appears when Anthropic key is absent/invalid; "Open Settings →" navigates correctly
+[x] Phase 8: Banner does not appear on launch when a valid key is already saved
+[x] Phase 8: API keys stored in file-based JSON (not Keychain); no Security.framework required
+[x] Phase 8: PipelineRunner uses AppSettings.outputFolder and AppSettings.debugFolder
+[x] Phase 8: Step detail shows left tree pane with per-photo branches for multi-photo jobs
+[x] Phase 8: Clicking Orient/Glare/Color/Done for any photo branch shows that photo's canvas
+[x] Phase 8: Orientation step shows rotation picker + scene description editor per photo
 ```
 
 ---
