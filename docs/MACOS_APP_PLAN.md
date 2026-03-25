@@ -458,172 +458,228 @@ Polish work added after Phase 6 export.
 
 ---
 
-### Phase 8: Bundle Python CLI (PyInstaller)
+### Phase 8: Bundle Python Runtime
 
-**Goal:** Make the app self-contained. Friends don't have `.venv/`, the `src/` package, or Python at all. The Python pipeline needs to be compiled into a standalone binary and embedded in the app bundle.
+**Goal:** Make the app self-contained. Friends don't have `.venv/`, the `src/` package, or Python at all.
 
-**Strategy: PyInstaller `--onefile`**
+**Why it can't be small:** The core runtime deps (OpenCV ~50MB, NumPy ~30MB, SciPy ~30MB, scikit-image ~30MB, Anthropic SDK ~15MB, OpenAI SDK ~15MB, Pillow + HEIC ~20MB, rawpy ~20MB) add up to ~200MB regardless of approach. The choice is whether that weight lands in the download or in a one-time first-run setup.
 
-PyInstaller packages Python + all pip dependencies into a single native executable. The app calls that executable instead of `.venv/bin/python -m src.cli`. A ~2s extraction overhead on first run is acceptable since processing takes 15–26s.
+**Three options (pick one):**
 
-**Steps:**
+---
 
-1. **Build the PyInstaller binary (dev machine, run once per release):**
+**Option A: Guided first-run setup** *(recommended for beta — smallest download)*
+
+App bundle is ~5 MB. On first launch a setup screen runs a one-time install that takes ~3–5 min (internet required). After that, the app starts instantly.
+
+1. Bundle `scripts/setup-runtime.sh` and `requirements-runtime.txt` (runtime-only deps, no pytest/mypy/matplotlib) in `Contents/Resources/`
+2. On launch, check `~/Library/Application Support/SundayAlbum/venv/bin/python` exists
+3. If not → show a full-window `SetupView` with a log stream and progress bar; run:
    ```bash
-   source .venv/bin/activate
-   pip install pyinstaller
-   # Build from repo root so src/ imports resolve
-   pyinstaller \
-     --onefile \
-     --name sundayalbum-cli \
-     --hidden-import pillow_heif \
-     --hidden-import rawpy \
-     --hidden-import cv2 \
-     --collect-all anthropic \
-     --collect-all openai \
-     src/cli.py
-   # Output: dist/sundayalbum-cli  (~200–400 MB)
+   /bin/bash setup-runtime.sh ~/Library/Application\ Support/SundayAlbum/venv
+   # script: python3 -m venv <path> && pip install -r requirements-runtime.txt
    ```
+4. After setup completes → transition to normal library view
+5. `PipelineRunner` always uses `~/Library/Application Support/SundayAlbum/venv/bin/python` in production; falls back to `.venv/` for dev
 
-2. **Add binary to Xcode project:**
-   - Copy `dist/sundayalbum-cli` to `mac-app/SundayAlbum/Resources/sundayalbum-cli`
-   - Add to `project.yml` under `resources:` — Xcode copies it into `Contents/Resources/` at build time
-
-3. **Update `PipelineRunner` to prefer bundled binary:**
-   ```swift
-   private static var pythonExecutable: URL? {
-       // 1. Bundled CLI (production / distributed build)
-       if let bundled = Bundle.main.url(forResource: "sundayalbum-cli", withExtension: nil),
-          FileManager.default.isExecutableFile(atPath: bundled.path) {
-           return bundled
-       }
-       // 2. Dev machine .venv (Xcode run, no bundled binary)
-       let devVenv = projectRoot.appendingPathComponent(".venv/bin/python")
-       if FileManager.default.fileExists(atPath: devVenv.path) {
-           return devVenv
-       }
-       return nil
-   }
-   ```
-   When using bundled binary, call it directly with arguments (no `-m src.cli` needed):
-   ```swift
-   // Bundled: sundayalbum-cli process <file> --output <dir>
-   // Dev:     python -m src.cli process <file> --output <dir>
-   ```
-
-4. **Working directory for bundled binary:** The `src/` package is frozen inside the binary, so `currentDirectoryURL` no longer needs to be the repo root. Set it to a writable temp dir instead.
-
-5. **Remove hardcoded dev fallback** in `PipelineRunner.projectRoot` — fail with a clear error if neither binary is found.
-
-**Notes:**
-- `dist/sundayalbum-cli` is ~200–400 MB — add to `.gitignore`, distribute via GitHub Releases asset
-- The binary is architecture-specific (ARM64 for M-series Macs). Friends must be on Apple Silicon. Add a note to the beta invite.
-- Intel support: build a separate binary on an Intel Mac or via Rosetta 2 cross-compile (defer for v1 beta)
+*Download: ~5 MB app + ~200 MB deps downloaded once at first run*
 
 ---
 
-### Phase 9: API Key Onboarding
+**Option B: PyInstaller with dev-package exclusions** *(self-contained, no internet needed)*
 
-**Goal:** Friends need their own Anthropic and OpenAI API keys. Replace `secrets.json` dependency with a first-launch Settings flow that stores keys in macOS Keychain.
+Single binary embedded in bundle. Excludes dev-only packages (matplotlib, pytest, mypy, ruff, ipython, setuptools test utilities). Startup adds ~2s extraction overhead (PyInstaller `--onefile` temp-dir extraction), acceptable given 15–26s processing time.
 
-**Steps:**
+```bash
+source .venv/bin/activate && pip install pyinstaller
+pyinstaller \
+  --onefile --name sundayalbum-cli \
+  --hidden-import pillow_heif --hidden-import rawpy --hidden-import cv2 \
+  --collect-all anthropic --collect-all openai \
+  --exclude-module matplotlib --exclude-module pytest --exclude-module mypy \
+  --exclude-module ruff --exclude-module IPython --exclude-module tkinter \
+  src/cli.py
+# → dist/sundayalbum-cli  (~150–200 MB)
+```
 
-1. **`KeychainHelper.swift`** — thin wrapper around `Security.framework`:
-   ```swift
-   enum KeychainHelper {
-       static func save(key: String, value: String)
-       static func load(key: String) -> String?
-       static func delete(key: String)
-   }
-   ```
-   Service name: `com.sundayalbum.mac`
+Copy to `mac-app/SundayAlbum/Resources/sundayalbum-cli`, add to `project.yml` resources. `PipelineRunner` calls it directly: `sundayalbum-cli process <file> --output <dir>` (no `-m src.cli`).
 
-2. **Update `SecretsLoader`** to read from Keychain first, fall back to `secrets.json` (dev), then env vars:
-   ```swift
-   func value(for key: String) -> String? {
-       KeychainHelper.load(key: key)       // production
-       ?? secrets[key]                      // dev (secrets.json)
-       ?? ProcessInfo.processInfo.environment[key]
-   }
-   ```
-
-3. **`APIKeysView.swift`** — Settings sheet with two `SecureField`s:
-   - Anthropic API key (starts with `sk-ant-...`)
-   - OpenAI API key (starts with `sk-...`)
-   - "Save" button writes both to Keychain
-   - "Test" button fires a minimal API call to verify each key
-   - Link text: "Get Anthropic key →" / "Get OpenAI key →" (user opens browser manually)
-
-4. **First-launch gate in `SundayAlbumApp`:**
-   ```swift
-   // On launch, if either key is missing → show APIKeysView as a sheet
-   // User cannot drop files until both keys are set
-   // "Skip OpenAI" option: disables glare removal, uses OpenCV fallback
-   ```
-
-5. **Settings menu item** — ⌘, opens `APIKeysView` as a Settings window (for key rotation)
-
-**Note:** The `--no-openai-glare` flag can be passed to the CLI if only the Anthropic key is present. Glare removal falls back to the OpenCV path. Document this in the onboarding UI.
+*Download: ~150–200 MB self-contained*
 
 ---
 
-### Phase 10: Code Signing + Notarization
+**Option C: Zip the stripped venv** *(middle ground — avoids PyInstaller quirks)*
 
-**Goal:** Friends can open the app without "unidentified developer" or "app is damaged" errors. Required for distribution on macOS 15+.
+Build a runtime-only venv, zip it, embed in bundle, extract to App Support on first launch. No internet needed after download; no PyInstaller extraction overhead at runtime.
 
-**Prerequisites:**
+```bash
+python3 -m venv venv-dist
+source venv-dist/bin/activate
+pip install -r requirements-runtime.txt
+zip -r venv-dist.zip venv-dist/
+# → venv-dist.zip  (~150–200 MB)
+```
+
+On first launch: unzip to `~/Library/Application Support/SundayAlbum/venv/`. `PipelineRunner` uses it the same way as Option A.
+
+*Download: ~150–200 MB; first launch extracts, subsequent launches start instantly*
+
+---
+
+**Whichever option is chosen:**
+- Add `requirements-runtime.txt` (runtime-only, stripped of dev tools)
+- `PipelineRunner` uses `Bundle.main.resourceURL` to locate the bundled asset, falls back to `.venv/` for dev
+- Remove the hardcoded `/Users/dev/dev/sundayalbum-claude` fallback — fail with a clear error if Python is not found
+- Architecture: ARM64 only for v1 beta (Intel requires a separate build)
+
+---
+
+### Phase 9: Settings Screen (API Keys + Storage)
+
+**Goal:** Friends can configure their own API keys and storage locations. Processing is blocked until the required Anthropic key is present. Keys are validated on entry and can be retested at any time.
+
+**Python CLI change required first:**
+Add `--debug-dir <path>` flag to `src/cli.py` so the app can direct debug images to a user-chosen folder instead of the hardcoded `./debug/` relative to CWD:
+```python
+@click.option('--debug-dir', type=click.Path(), default=None,
+              help='Directory for debug visualizations (default: ./debug)')
+```
+
+---
+
+**1. `KeychainHelper.swift`** — thin `Security.framework` wrapper:
+```swift
+enum KeychainHelper {
+    static func save(key: String, value: String)   // overwrites if exists
+    static func load(key: String) -> String?
+    static func delete(key: String)
+}
+// Service name: "com.sundayalbum.mac"
+```
+
+**2. Update `SecretsLoader`** — read order: Keychain → `secrets.json` (dev only) → env vars:
+```swift
+func value(for key: String) -> String? {
+    KeychainHelper.load(key: key)
+    ?? secrets[key]
+    ?? ProcessInfo.processInfo.environment[key]
+}
+```
+
+**3. `AppSettings.swift`** — `@Observable` singleton backed by `UserDefaults` + Keychain:
+```swift
+@Observable final class AppSettings {
+    // API keys (Keychain)
+    var anthropicKey: String   { get/set via KeychainHelper }
+    var openaiKey: String      { get/set via KeychainHelper }  // optional
+    var anthropicKeyStatus: KeyStatus  // .absent | .untested | .testing | .valid | .invalid(String)
+    var openaiKeyStatus: KeyStatus
+
+    // Storage (UserDefaults)
+    var outputFolder: URL      // default: ~/Library/Application Support/SundayAlbum/output/
+    var debugFolder: URL       // default: ~/Library/Application Support/SundayAlbum/debug/
+    var debugOutputEnabled: Bool  // controls --debug flag passed to CLI
+
+    var canProcess: Bool { anthropicKeyStatus == .valid }
+}
+```
+
+**4. `SettingsView.swift`** — opened by ⌘, or from the app menu — two sections:
+
+*API Keys section:*
+- **Anthropic API key** (required)
+  - `SecureField` showing masked key or placeholder `sk-ant-...`
+  - Status badge: `Absent` (red) / `Untested` (grey) / `Testing…` (amber spinner) / `Valid ✓` (green) / `Invalid — <reason>` (red)
+  - "Save" button: writes to Keychain, sets status to `.untested`, triggers auto-test
+  - "Test" button: fires `POST /v1/messages` with a minimal prompt, updates status
+  - "Remove" button (shown only when key is present): deletes from Keychain, resets status
+  - Footnote: "Get a key at console.anthropic.com" (plain text — user opens browser manually)
+- **OpenAI API key** (optional — enables higher-quality glare removal)
+  - Same layout as above
+  - Status badge adds: `Skipped` (stone) — shown when user clicks "Skip / Use OpenCV fallback"
+  - When skipped: CLI is called with `--no-openai-glare`
+  - Footnote: "Get a key at platform.openai.com"
+
+*Storage section:*
+- **Output folder** — `HStack` with path label + "Choose…" button (`NSOpenPanel` directory mode)
+  - Default: `~/Library/Application Support/SundayAlbum/output/`
+  - "Reset to default" link
+- **Debug images folder** — same layout
+  - Default: `~/Library/Application Support/SundayAlbum/debug/`
+  - Only visible when "Save debug images" is on
+- **Save debug images** — `Toggle` — when on, passes `--debug --debug-dir <debugFolder>` to CLI; when off, omits both flags
+
+**5. Blocking gate in `LibraryView`:**
+When `appSettings.canProcess == false` (Anthropic key absent or invalid):
+- Show an amber banner at the top of the library: `"Add your Anthropic API key to start processing  →  Open Settings"`
+- File drop and "Add Photos" still work (files enter the queue as `.queued`)
+- When the user taps "Add Photos" and starts a job with no valid key, the job immediately fails with: `"Anthropic API key required. Open Settings (⌘,) to add it."`
+
+**6. Auto-test on save:**
+Whenever a key field is saved, immediately fire a background test:
+- Anthropic: minimal `messages.create` call (`claude-haiku-4-5`, 1-token prompt)
+- OpenAI: minimal `models.list` call (no image processing, just auth check)
+- Update `keyStatus` to `.testing` while in flight, then `.valid` or `.invalid(errorMessage)`
+
+**7. Manual test button:**
+Always visible next to each key field (even after a prior successful test). Lets users re-verify after a key is rotated or suspected compromised.
+
+---
+
+### Phase 10: Code Signing + Notarization *(deferred — not required for v1 beta)*
+
+**Can friends bypass the warning without notarization?** Yes — for a small beta group of technical friends, the unsigned app works fine. macOS blocks it by default but provides an easy bypass:
+
+```
+Option 1 (easiest): Right-click the app → "Open" → click "Open" in the dialog
+Option 2: System Settings → Privacy & Security → scroll down → "Open Anyway"
+Option 3 (one-liner in Terminal):
+  xattr -d com.apple.quarantine /Applications/SundayAlbum.app
+```
+
+Include these instructions in the beta invite. All three work on macOS 15.
+
+**When notarization becomes necessary:**
+- Distributing to non-technical users who won't know how to bypass
+- More than ~10–20 beta testers (managing the bypass instructions at scale is annoying)
+- Any public release or App Store submission
+
+**When you're ready to notarize (prerequisites):**
 - Apple Developer Program membership ($99/year)
-- Developer ID Application certificate installed in Keychain
+- Developer ID Application certificate in Keychain
 - App Store Connect API key (for `notarytool`)
 
-**Steps:**
+**Steps (for future reference):**
 
-1. **Enable Hardened Runtime** in `project.yml`:
+1. Enable Hardened Runtime in `project.yml`:
    ```yaml
    settings:
      ENABLE_HARDENED_RUNTIME: YES
    ```
 
-2. **Entitlements file** `mac-app/SundayAlbum/SundayAlbum.entitlements`:
+2. Add `SundayAlbum.entitlements`:
    ```xml
-   <!-- Network access for Anthropic + OpenAI API calls -->
    <key>com.apple.security.network.client</key><true/>
-   <!-- Allow unsigned code in subprocess (PyInstaller binary extraction) -->
+   <!-- PyInstaller / venv subprocess needs these: -->
    <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
-   <!-- Allow loading unsigned libraries (PyInstaller deps) -->
    <key>com.apple.security.cs.disable-library-validation</key><true/>
    ```
-   Add to `project.yml` under `settings: CODE_SIGN_ENTITLEMENTS`.
 
-3. **Sign the embedded PyInstaller binary** with the same Developer ID before packaging:
+3. Sign the embedded CLI binary (if using Option B/C from Phase 8):
    ```bash
-   codesign --force --sign "Developer ID Application: <Your Name> (<TEAM_ID>)" \
-     --options runtime \
-     mac-app/SundayAlbum/Resources/sundayalbum-cli
+   codesign --force --sign "Developer ID Application: You (TEAMID)" \
+     --options runtime mac-app/SundayAlbum/Resources/sundayalbum-cli
    ```
 
-4. **Archive and export** from Xcode:
-   - Product → Archive
-   - Distribute App → Developer ID → Developer ID Application certificate
-   - Export to folder
-
-5. **Notarize:**
+4. Archive → Distribute App → Developer ID from Xcode, then:
    ```bash
-   xcrun notarytool submit SundayAlbum.zip \
-     --apple-id your@email.com \
-     --team-id YOURTEAMID \
-     --password "@keychain:AC_PASSWORD" \
-     --wait
+   xcrun notarytool submit SundayAlbum.zip --apple-id you@email.com \
+     --team-id TEAMID --password "@keychain:AC_PASSWORD" --wait
    xcrun stapler staple SundayAlbum.app
+   spctl --assess --type execute SundayAlbum.app  # should print: accepted
    ```
 
-6. **Verify** (test on a clean Mac):
-   ```bash
-   spctl --assess --type execute SundayAlbum.app
-   # Should print: SundayAlbum.app: accepted
-   ```
-
-**Note on App Sandbox:** Keep disabled for v1 beta. Sandboxed subprocess launching has additional entitlement complexity; re-evaluate if moving to Mac App Store.
+**App Sandbox:** Keep disabled. Sandbox + subprocess launching has significant entitlement overhead; re-evaluate only if submitting to the Mac App Store.
 
 ---
 
@@ -685,15 +741,6 @@ Split-view per-photo refinement:
 - Right: exposure slider, white balance, saturation, "Restore fading" toggle, rotation slider ±15°, 90° CW/CCW buttons
 - Bottom: "Before/After" toggle, "Revert to Auto", "Save"
 - "Re-process glare" button reruns just the glare step via `--steps glare_detect`
-
-### Settings Screen
-
-- ANTHROPIC_API_KEY and OPENAI_API_KEY fields stored in macOS Keychain
-- Output format: JPEG / PNG / TIFF
-- JPEG quality slider 70–100%
-- Output folder picker (default: `~/Pictures/SundayAlbum/`)
-- Toggle: OpenAI glare removal on/off
-- Toggle: AI orientation correction on/off
 
 ---
 
