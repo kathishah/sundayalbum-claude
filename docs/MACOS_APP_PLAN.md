@@ -430,12 +430,30 @@ Get processed photos out of the app.
 
 ---
 
-### Phase 7: Polish
+### Phase 6b: Debug Folder Auto-Load + Dark Mode ✅ COMPLETE
 
+Polish work added after Phase 6 export.
+
+**What was built:**
+- `DebugFolderScanner.swift` — scans `<projectRoot>/debug/` subdirectories at app launch, finds `15_photo_NN_final.jpg` (fallback: `14_photo_NN_enhanced.jpg`) per photo index, reconstructs completed `ProcessingJob`s so the library is pre-populated during development without re-running the pipeline
+- `AppState.init(loadDebugJobs: Bool = true)` — `false` in tests to suppress debug job loading
+- **Dark mode support** — `Color.dynamic(light:dark:)` via `NSColor(name:dynamicProvider:)` for all semantic tokens; app now follows system appearance setting
+- **Light/dark color tweaks** — background = white (light) / black (dark); cards = soft warm grey in both modes
+- **Card shadow** — adaptive `saShadow` token: dark drop shadow in light mode (opacity 0.45), subtle white glow in dark mode (opacity 0.12)
+- Removed card divider between thumbnail row and filename; tightened padding; fixed vertical centering of thumbnails using `GeometryReader` `.frame(alignment: .center)`
+
+---
+
+### Phase 7: Polish ✅ COMPLETE
+
+**What was built:**
+- `AppState.removeJob(id:)` — cancels the running subprocess (if any) and removes the job from the library
+- **Hover × button** on every `AlbumPageCard` — appears when the mouse enters the card; red `xmark.circle.fill` for queued/running jobs (cancels + removes), grey for completed/failed (removes only)
+- **⌘O keyboard shortcut** — wired to the "Add Photos" toolbar button via `.keyboardShortcut("o", modifiers: .command)`, works from anywhere in the app
+
+**Remaining Polish (future):**
 - App icon — warm amber palette, film/album motif
-- Error state — red badge in card + last `ERROR -` log line shown on hover
-- Job cancellation — "×" button on running cards calls `process.terminate()`
-- Keyboard shortcuts: ⌘O open files, ⌘A select all photos, ⌘E export, ⌘⌫ remove job
+- ⌘A select all photos in results grid, ⌘E export selected
 - "Process More" toolbar button when library is non-empty (re-opens NSOpenPanel)
 
 ---
@@ -557,6 +575,10 @@ open SundayAlbum.xcodeproj
 [x] Phase 6: "Add to Photos" → photos appear in Photos.app
 [x] Phase 6: "Show in Finder" → Finder window reveals the output JPEG
 [x] Phase 6: "Export All" → folder picker → copies all JPEGs → reveals in Finder
+[x] Phase 6b: App launch pre-populates library from debug/ folder (no reprocessing needed)
+[x] Phase 6b: App follows system light/dark mode setting
+[x] Phase 7: Hover × on card removes queued/complete jobs; cancels + removes running jobs
+[x] Phase 7: ⌘O triggers "Add Photos" file picker
 ```
 
 ---
