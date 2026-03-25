@@ -16,7 +16,7 @@ struct LibraryView: View {
                     HStack(alignment: .center) {
                         Text("Library")
                             .font(.fraunces(32, weight: .semibold))
-                            .foregroundStyle(Color.saStone900)
+                            .foregroundStyle(Color.saTextPrimary)
                         Spacer()
                         Button {
                             let urls = FileImporter.openPanel()
@@ -84,7 +84,7 @@ struct LibraryView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.saStone100)
+        .background(Color.saBackground)
         // Drop target — active even when grid is populated (not just on DropZoneView)
         .onDrop(of: [UTType.fileURL], isTargeted: $isDropTargeted) { providers in
             handleDrop(providers)

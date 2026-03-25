@@ -41,16 +41,20 @@ struct AlbumPageCard: View {
             // ── Info row ─────────────────────────────────────────────
             Text(job.inputName)
                 .font(.dmSans(12, weight: .semibold))
-                .foregroundStyle(Color.saStone700)
+                .foregroundStyle(Color.saTextPrimary)
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
         }
-        .background(Color.white)
+        .background(Color.saCard)
         .clipShape(RoundedRectangle(cornerRadius: 12))
-        .shadow(color: Color.saStone900.opacity(0.07), radius: 6, y: 2)
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(Color.saBorder, lineWidth: 1)
+        }
+        .shadow(color: Color.saStone900.opacity(0.10), radius: 8, y: 3)
         .task { beforeImage = job.loadBeforeImage() }
     }
 }
@@ -90,7 +94,7 @@ struct ExpandedAlbumCard: View {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(job.inputName)
                         .font(.dmSans(14, weight: .semibold))
-                        .foregroundStyle(Color.saStone700)
+                        .foregroundStyle(Color.saTextPrimary)
                         .lineLimit(1)
                     JobStatusLine(job: job)
                 }
@@ -105,8 +109,12 @@ struct ExpandedAlbumCard: View {
             }
             .padding(20)
         }
-        .background(Color.white)
+        .background(Color.saCard)
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(Color.saBorder, lineWidth: 1)
+        }
         .shadow(color: Color.saStone900.opacity(0.22), radius: 32, y: 12)
         .task { beforeImage = job.loadBeforeImage() }
     }
@@ -125,7 +133,7 @@ struct ThumbBox: View {
                     .aspectRatio(contentMode: .fill)
             } else {
                 Rectangle()
-                    .fill(Color.saStone200)
+                    .fill(Color.saSurface)
                     .overlay { ProgressView().controlSize(.small) }
             }
         }
@@ -238,17 +246,17 @@ struct PipelineProgressWheel: View {
 
             // Donut hole
             Circle()
-                .fill(Color.white)
+                .fill(Color.saCard)
                 .padding(size * 0.22)
 
             // Center label
             VStack(spacing: 1) {
                 Text("\(completedCount)")
                     .font(.dmSans(size * 0.22, weight: .bold))
-                    .foregroundStyle(Color.saStone700)
+                    .foregroundStyle(Color.saTextPrimary)
                 Text("of \(totalSteps)")
                     .font(.dmSans(size * 0.12))
-                    .foregroundStyle(Color.saStone400)
+                    .foregroundStyle(Color.saTextTertiary)
             }
         }
         .frame(width: size, height: size)
@@ -306,7 +314,7 @@ struct JobStatusLine: View {
                 Text("Step \(stepNum) of \(totalSteps): \(stepLabel)")
                     .font(.dmSans(11))
                     .foregroundStyle(
-                        job.stepStatus == .awaitingReview ? Color.saAmber600 : Color.saStone500
+                        job.stepStatus == .awaitingReview ? Color.saAmber600 : Color.saTextSecondary
                     )
             }
 

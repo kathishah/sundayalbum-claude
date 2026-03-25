@@ -29,7 +29,7 @@ struct StepDetailView: View {
             // ── Step strip ───────────────────────────────────────────
             StepStrip(job: job, selectedStep: $selectedStep)
                 .frame(height: 94)
-                .background(Color.saStone50)
+                .background(Color.saSurface)
 
             Divider()
 
@@ -62,7 +62,7 @@ struct StepDetailView: View {
                 ReprocessBar(job: job, fromStep: selectedStep)
             }
         }
-        .background(Color.saStone50)
+        .background(Color.saBackground)
     }
 }
 
@@ -95,7 +95,7 @@ struct BreadcrumbBar: View {
                 } else {
                     Text(crumb)
                         .font(.dmSans(13, weight: .semibold))
-                        .foregroundStyle(Color.saStone700)
+                        .foregroundStyle(Color.saTextPrimary)
                         .lineLimit(1)
                 }
             }
@@ -103,7 +103,7 @@ struct BreadcrumbBar: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 11)
-        .background(Color.saStone50)
+        .background(Color.saSurface)
     }
 }
 
@@ -165,11 +165,11 @@ struct StepTile: View {
                         Image(nsImage: img).resizable().aspectRatio(contentMode: .fill)
                     } else {
                         Rectangle()
-                            .fill(Color.saStone200)
+                            .fill(Color.saSurface)
                             .overlay {
                                 Image(systemName: step.systemImage)
                                     .font(.system(size: 14))
-                                    .foregroundStyle(Color.saStone400)
+                                    .foregroundStyle(Color.saTextTertiary)
                             }
                     }
                 }
@@ -186,7 +186,7 @@ struct StepTile: View {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 13))
                         .foregroundStyle(Color.saSuccess)
-                        .background(Circle().fill(Color.white).padding(2))
+                        .background(Circle().fill(Color.saCard).padding(2))
                         .offset(x: 4, y: 4)
                 } else if isCurrent {
                     Circle()
@@ -199,7 +199,7 @@ struct StepTile: View {
 
             Text(step.title)
                 .font(.dmSans(9, weight: isSelected ? .semibold : .regular))
-                .foregroundStyle(isSelected ? Color.saAmber600 : Color.saStone500)
+                .foregroundStyle(isSelected ? Color.saAmber600 : Color.saTextSecondary)
         }
         .opacity(isAccessible ? 1.0 : 0.35)
         .task {

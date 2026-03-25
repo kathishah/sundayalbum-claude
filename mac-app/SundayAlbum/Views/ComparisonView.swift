@@ -56,12 +56,12 @@ struct ComparisonView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(photo.jobInputName)
                         .font(.jetbrainsMono(11))
-                        .foregroundStyle(Color.saStone500)
+                        .foregroundStyle(Color.saTextSecondary)
                         .lineLimit(1)
 
                     Text("Extracted · glare removed · color restored")
                         .font(.dmSans(12))
-                        .foregroundStyle(Color.saStone400)
+                        .foregroundStyle(Color.saTextTertiary)
                 }
 
                 HStack(spacing: 8) {
@@ -82,7 +82,7 @@ struct ComparisonView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(16)
         }
-        .background(Color.saStone50)
+        .background(Color.saSurface)
         .id(photo.id)   // forces full redraw + re-animation on photo change
         .task {
             // Load images then trigger the signature reveal animation

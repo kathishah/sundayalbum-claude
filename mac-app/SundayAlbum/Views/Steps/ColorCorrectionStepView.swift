@@ -134,7 +134,3 @@ private struct AdjustmentSlider: View {
     }
 }
 
-private extension Color {
-    static let saStone300 = Color(red: 0.792, green: 0.780, blue: 0.769)
-    static let saStone800 = Color(red: 0.165, green: 0.149, blue: 0.137)
-}

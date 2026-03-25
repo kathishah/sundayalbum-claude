@@ -22,7 +22,7 @@ struct ResultsStepView: View {
                 HStack {
                     Text("\(job.extractedPhotos.count) photo\(job.extractedPhotos.count == 1 ? "" : "s") extracted")
                         .font(.dmSans(13, weight: .medium))
-                        .foregroundStyle(Color.saStone700)
+                        .foregroundStyle(Color.saTextPrimary)
                     Spacer()
                     Button("Export All") {
                         ExportActions.exportToFolder(job.extractedPhotos)
@@ -53,7 +53,7 @@ struct ResultsStepView: View {
                     }
                     .padding(12)
                 }
-                .background(Color.saStone50)
+                .background(Color.saSurface)
             }
             .frame(maxWidth: .infinity)
 

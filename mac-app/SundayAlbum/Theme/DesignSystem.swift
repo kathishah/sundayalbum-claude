@@ -1,9 +1,10 @@
 import SwiftUI
+import AppKit
 
 // MARK: - Colors
 
 extension Color {
-    // Amber — primary accent
+    // ── Amber — primary accent ───────────────────────────────────────────────
     static let saAmber50  = Color(red: 1.000, green: 0.973, blue: 0.941)
     static let saAmber100 = Color(red: 0.996, green: 0.941, blue: 0.863)
     static let saAmber200 = Color(red: 0.992, green: 0.878, blue: 0.753)
@@ -12,19 +13,68 @@ extension Color {
     static let saAmber600 = Color(red: 0.706, green: 0.325, blue: 0.035)
     static let saAmber700 = Color(red: 0.565, green: 0.243, blue: 0.043)
 
-    // Stone — neutrals
+    // ── Stone — neutrals ─────────────────────────────────────────────────────
     static let saStone50  = Color(red: 0.980, green: 0.980, blue: 0.976)
     static let saStone100 = Color(red: 0.961, green: 0.961, blue: 0.957)
     static let saStone200 = Color(red: 0.906, green: 0.898, blue: 0.894)
+    static let saStone300 = Color(red: 0.820, green: 0.812, blue: 0.804)
     static let saStone400 = Color(red: 0.659, green: 0.635, blue: 0.620)
     static let saStone500 = Color(red: 0.471, green: 0.443, blue: 0.424)
     static let saStone600 = Color(red: 0.341, green: 0.325, blue: 0.306)
     static let saStone700 = Color(red: 0.267, green: 0.251, blue: 0.235)
+    static let saStone800 = Color(red: 0.180, green: 0.161, blue: 0.149)
     static let saStone900 = Color(red: 0.110, green: 0.098, blue: 0.090)
+    static let saStone950 = Color(red: 0.047, green: 0.039, blue: 0.035)
 
-    // Status
+    // ── Status ───────────────────────────────────────────────────────────────
     static let saSuccess = Color(red: 0.086, green: 0.639, blue: 0.290)
     static let saError   = Color(red: 0.863, green: 0.149, blue: 0.149)
+
+    // ── Adaptive helper ──────────────────────────────────────────────────────
+    /// Returns a color that switches between `light` and `dark` based on the
+    /// current macOS appearance (Aqua vs. Dark Aqua).
+    static func dynamic(light: Color, dark: Color) -> Color {
+        Color(NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                ? NSColor(dark) : NSColor(light)
+        })
+    }
+
+    // ── Semantic adaptive tokens ─────────────────────────────────────────────
+    // Page / window background
+    static let saBackground = dynamic(
+        light: Color(red: 0.878, green: 0.871, blue: 0.863),  // stone-300 — more distinct from cards
+        dark:  Color(red: 0.047, green: 0.039, blue: 0.035)   // stone-950 warm near-black
+    )
+    // Card surfaces (album page cards, panels)
+    static let saCard = dynamic(
+        light: .white,
+        dark:  Color(red: 0.110, green: 0.098, blue: 0.090)   // stone-900 warm dark
+    )
+    // Inset surfaces (step strip, comparison pane, results pane)
+    static let saSurface = dynamic(
+        light: Color(red: 0.961, green: 0.961, blue: 0.957),  // stone-100
+        dark:  Color(red: 0.157, green: 0.141, blue: 0.129)   // between stone-800/900
+    )
+    // Card / panel borders
+    static let saBorder = dynamic(
+        light: Color(red: 0.820, green: 0.812, blue: 0.804),  // stone-300
+        dark:  Color(red: 0.220, green: 0.200, blue: 0.184)   // warm dark border
+    )
+
+    // ── Adaptive text tokens ─────────────────────────────────────────────────
+    static let saTextPrimary = dynamic(
+        light: Color(red: 0.267, green: 0.251, blue: 0.235),  // stone-700
+        dark:  Color(red: 0.961, green: 0.961, blue: 0.957)   // stone-100
+    )
+    static let saTextSecondary = dynamic(
+        light: Color(red: 0.471, green: 0.443, blue: 0.424),  // stone-500
+        dark:  Color(red: 0.659, green: 0.635, blue: 0.620)   // stone-400
+    )
+    static let saTextTertiary = dynamic(
+        light: Color(red: 0.659, green: 0.635, blue: 0.620),  // stone-400
+        dark:  Color(red: 0.471, green: 0.443, blue: 0.424)   // stone-500
+    )
 }
 
 // MARK: - Typography

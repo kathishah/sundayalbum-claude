@@ -141,7 +141,3 @@ private extension Array {
     }
 }
 
-// Needed for the dark image pane background
-private extension Color {
-    static let saStone800 = Color(red: 0.165, green: 0.149, blue: 0.137)
-}
