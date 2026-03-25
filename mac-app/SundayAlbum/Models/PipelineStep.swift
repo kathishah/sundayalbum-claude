@@ -60,9 +60,10 @@ enum PipelineStep: Int, CaseIterable, Identifiable {
     // MARK: - Debug image mapping
 
     /// Returns the page-level debug image for this step (not per-photo)
+    @MainActor
     func debugImageURL(forInputName inputName: String) -> URL? {
         let baseName = (inputName as NSString).deletingPathExtension
-        let dir = URL(fileURLWithPath: "/Users/dev/dev/sundayalbum-claude/debug")
+        let dir = AppSettings.shared.debugFolder
             .appendingPathComponent(baseName)
 
         let filename: String
@@ -81,9 +82,10 @@ enum PipelineStep: Int, CaseIterable, Identifiable {
     }
 
     /// Returns the per-photo debug image for a given 1-based photo index
+    @MainActor
     func debugImageURL(forInputName inputName: String, photoIndex: Int) -> URL? {
         let baseName = (inputName as NSString).deletingPathExtension
-        let dir = URL(fileURLWithPath: "/Users/dev/dev/sundayalbum-claude/debug")
+        let dir = AppSettings.shared.debugFolder
             .appendingPathComponent(baseName)
         let idx = String(format: "%02d", photoIndex)
 

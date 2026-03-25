@@ -36,8 +36,10 @@ struct StepDetailView: View {
             // ── Step canvas ──────────────────────────────────────────
             Group {
                 switch selectedStep {
-                case .load, .orientation:
+                case .load:
                     DebugImageView(step: selectedStep, inputName: job.inputName)
+                case .orientation:
+                    OrientationStepView(job: job)
                 case .pageDetect:
                     PageDetectionStepView(job: job)
                 case .photoSplit:

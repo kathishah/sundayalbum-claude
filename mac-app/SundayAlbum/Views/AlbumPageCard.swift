@@ -356,6 +356,7 @@ struct JobStatusLine: View {
 
 private extension ProcessingJob {
     /// Use debug/01_loaded.jpg if available (faster), else fall back to original HEIC
+    @MainActor
     func loadBeforeImage() -> NSImage? {
         if let url = PipelineStep.load.debugImageURL(forInputName: inputName) {
             return NSImage(contentsOf: url)

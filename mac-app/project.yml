@@ -20,7 +20,6 @@ targets:
       - path: SundayAlbum
     dependencies:
       - sdk: Photos.framework
-      - sdk: Security.framework
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.sundayalbum.mac

@@ -78,38 +78,38 @@ final class AppSettings {
     // MARK: - Init
 
     init() {
-        if KeychainHelper.load(key: "ANTHROPIC_API_KEY") != nil {
+        if SettingsStorage.load(key: "ANTHROPIC_API_KEY") != nil {
             anthropicKeyStatus = .untested
         }
-        if KeychainHelper.load(key: "OPENAI_API_KEY") != nil {
+        if SettingsStorage.load(key: "OPENAI_API_KEY") != nil {
             openaiKeyStatus = .untested
         }
     }
 
     // MARK: - Key accessors (read raw value for subprocess injection)
 
-    func anthropicKey() -> String? { KeychainHelper.load(key: "ANTHROPIC_API_KEY") }
-    func openaiKey() -> String?    { KeychainHelper.load(key: "OPENAI_API_KEY") }
+    func anthropicKey() -> String? { SettingsStorage.load(key: "ANTHROPIC_API_KEY") }
+    func openaiKey() -> String?    { SettingsStorage.load(key: "OPENAI_API_KEY") }
 
     // MARK: - Save / delete
 
     func saveAnthropicKey(_ key: String) {
-        KeychainHelper.save(key: "ANTHROPIC_API_KEY", value: key)
+        SettingsStorage.save(key: "ANTHROPIC_API_KEY", value: key)
         anthropicKeyStatus = .untested
     }
 
     func saveOpenAIKey(_ key: String) {
-        KeychainHelper.save(key: "OPENAI_API_KEY", value: key)
+        SettingsStorage.save(key: "OPENAI_API_KEY", value: key)
         openaiKeyStatus = .untested
     }
 
     func deleteAnthropicKey() {
-        KeychainHelper.delete(key: "ANTHROPIC_API_KEY")
+        SettingsStorage.delete(key: "ANTHROPIC_API_KEY")
         anthropicKeyStatus = .absent
     }
 
     func deleteOpenAIKey() {
-        KeychainHelper.delete(key: "OPENAI_API_KEY")
+        SettingsStorage.delete(key: "OPENAI_API_KEY")
         openaiKeyStatus = .absent
     }
 

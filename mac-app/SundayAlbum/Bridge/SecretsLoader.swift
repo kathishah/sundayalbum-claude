@@ -31,7 +31,7 @@ struct SecretsLoader {
     /// Returns the value for a given key.
     /// Read order: Keychain (user-entered in Settings) → secrets.json (dev) → env vars.
     func value(for key: String) -> String? {
-        KeychainHelper.load(key: key) ?? keys[key]
+        SettingsStorage.load(key: key) ?? keys[key]
     }
 
     /// Builds the environment dictionary to inject into a subprocess.
