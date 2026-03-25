@@ -14,8 +14,7 @@ struct AlbumPageCard: View {
             GeometryReader { geo in
                 let hPad: CGFloat = 12
                 let beforeW: CGFloat = 60
-                // HStack spacing (10) × 2 gaps + arrow icon (~11pt)
-                let fixedChrome: CGFloat = 10 + 11 + 10
+                let fixedChrome: CGFloat = 10 + 11 + 10  // HStack spacing × 2 + arrow icon
                 let afterW = max(geo.size.width - hPad * 2 - beforeW - fixedChrome, 40)
 
                 HStack(alignment: .center, spacing: 10) {
@@ -32,13 +31,12 @@ struct AlbumPageCard: View {
 
                     Spacer(minLength: 0)
                 }
-                .frame(width: geo.size.width)
+                // Fill the full GeometryReader height so SwiftUI vertically centers content
+                .frame(width: geo.size.width, height: geo.size.height, alignment: .center)
             }
             .frame(height: 88 + 24)  // thumbHeight + top/bottom padding
 
-            Divider()
-
-            // ── Info row ─────────────────────────────────────────────
+            // ── File name — no divider, tight padding ─────────────────
             Text(job.inputName)
                 .font(.dmSans(12, weight: .semibold))
                 .foregroundStyle(Color.saTextPrimary)
@@ -46,15 +44,12 @@ struct AlbumPageCard: View {
                 .truncationMode(.middle)
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.horizontal, 12)
-                .padding(.vertical, 10)
+                .padding(.top, 4)
+                .padding(.bottom, 10)
         }
         .background(Color.saCard)
         .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay {
-            RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(Color.saBorder, lineWidth: 1)
-        }
-        .shadow(color: Color.saStone900.opacity(0.10), radius: 8, y: 3)
+        .shadow(color: Color.saShadow, radius: 14, y: 4)
         .task { beforeImage = job.loadBeforeImage() }
     }
 }

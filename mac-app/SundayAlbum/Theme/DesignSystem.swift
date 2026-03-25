@@ -61,6 +61,11 @@ extension Color {
         light: Color(red: 0.859, green: 0.851, blue: 0.843),  // subtle on grey cards
         dark:  Color(red: 0.216, green: 0.196, blue: 0.184)   // warm dark border
     )
+    // Card shadow — dark drop in light mode, soft white glow in dark mode
+    static let saShadow = dynamic(
+        light: Color(red: 0.110, green: 0.098, blue: 0.090, opacity: 0.18),
+        dark:  Color(red: 1.000, green: 1.000, blue: 1.000, opacity: 0.07)
+    )
 
     // ── Adaptive text tokens ─────────────────────────────────────────────────
     static let saTextPrimary = dynamic(
