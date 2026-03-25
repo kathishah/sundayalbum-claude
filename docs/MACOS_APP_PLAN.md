@@ -353,16 +353,17 @@ Built a full SwiftUI UI shell with mock data before wiring any real processing. 
 
 ---
 
-### Phase 2: File Import UI
+### Phase 2: File Import UI ✅ COMPLETE
 
 Wire up the "Add Photos" toolbar button and library drag-and-drop so the app accepts real files. No pipeline processing yet — files are enqueued as `.queued` jobs and shown in the library.
 
-1. `NSOpenPanel` behind the "Add Photos" button — allow `.heic`, `.dng`, `.jpg`, `.png`, multi-select, folder selection
-2. Folder handling: walk for matching extensions, enqueue each file as a separate job
-3. `.onDrop(of: [.fileURL])` on `LibraryView` — accepts drags from Finder
-4. On accept: create `ProcessingJob`, append to `appState.jobs`, show card in library grid
+**What was built:**
+- `NSOpenPanel` behind the "Add Photos" toolbar button — `.heic`, `.dng`, `.jpg`, `.png`, multi-select, folder selection
+- Folder handling: walks for matching extensions, enqueues each file as a separate job
+- `.onDrop(of: [.fileURL])` on `LibraryView` — accepts drags from Finder
+- On accept: creates `ProcessingJob`, appends to `appState.jobs`, shows card in library grid with `.queued` state
 
-**Deliverable:** Drag a HEIC from Finder onto the library (or click "Add Photos") → new card appears in the grid with `.queued` state.
+**Deliverable:** ✅ Drag a HEIC from Finder onto the library (or click "Add Photos") → new card appears in the grid with `.queued` state.
 
 ---
 
@@ -540,8 +541,8 @@ open SundayAlbum.xcodeproj
 [x] Phase 1: Library grid, step detail, all step canvases render with mock data
 [x] Phase 1: Cards show before/after thumbnails with correct aspect ratios
 [x] Phase 1: PipelineProgressWheel animates for in-progress jobs
-[ ] Phase 2: Drag a HEIC from Finder → new card appears in library grid
-[ ] Phase 2: "Add Photos" button opens NSOpenPanel, multi-select works
+[x] Phase 2: Drag a HEIC from Finder → new card appears in library grid
+[x] Phase 2: "Add Photos" button opens NSOpenPanel, multi-select works
 [ ] Phase 3: Xcode console shows live per-line stdout from a real HEIC run
 [ ] Phase 3: Lines arrive one-at-a-time (not batched), proving PYTHONUNBUFFERED=1 works
 [ ] Phase 4: All CLIOutputParserTests pass
