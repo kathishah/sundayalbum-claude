@@ -21,7 +21,7 @@ struct AlbumPageCard: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Color.saAmber400)
 
-                AfterSection(job: job, thumbHeight: 88)
+                AfterSection(job: job, thumbHeight: 88, maxVisible: 1)
 
                 Spacer(minLength: 0)
             }
@@ -129,18 +129,22 @@ struct ThumbBox: View {
 struct AfterSection: View {
     let job: ProcessingJob
     let thumbHeight: CGFloat
+    /// Max number of thumbnails to show before collapsing into a "+N" badge.
+    var maxVisible: Int = 3
 
     var body: some View {
         if job.state == .complete, !job.extractedPhotos.isEmpty {
-            // Fully processed — show actual output thumbnails with natural orientation
+            // Fully processed — show output thumbnails, capped at maxVisible
+            let visible = Array(job.extractedPhotos.prefix(maxVisible))
+            let overflow = job.extractedPhotos.count - visible.count
             HStack(spacing: thumbHeight > 100 ? 8 : 5) {
-                ForEach(job.extractedPhotos.prefix(3)) { photo in
+                ForEach(visible) { photo in
                     AfterThumb(url: photo.imageURL, height: thumbHeight)
                 }
-                if job.extractedPhotos.count > 3 {
+                if overflow > 0 {
                     ZStack {
                         RoundedRectangle(cornerRadius: 6).fill(Color.saStone200)
-                        Text("+\(job.extractedPhotos.count - 3)")
+                        Text("+\(overflow)")
                             .font(.dmSans(12, weight: .semibold))
                             .foregroundStyle(Color.saStone500)
                     }
@@ -148,7 +152,7 @@ struct AfterSection: View {
                 }
             }
         } else {
-            // In progress or queued — show pie-chart progress wheel, no blank thumbnail
+            // In progress or queued — show pie-chart progress wheel
             PipelineProgressWheel(job: job, size: thumbHeight)
         }
     }
