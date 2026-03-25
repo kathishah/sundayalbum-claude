@@ -458,88 +458,78 @@ Polish work added after Phase 6 export.
 
 ---
 
-### Phase 8: Bundle Python Runtime
+### Phase 8: Bundle Python Runtime (Option A — Guided Setup)
 
-**Goal:** Make the app self-contained. Friends don't have `.venv/`, the `src/` package, or Python at all.
+**Goal:** Make the app self-contained with the smallest possible download. Friends don't have `.venv/`, `src/`, or Python.
 
-**Why it can't be small:** The core runtime deps (OpenCV ~50MB, NumPy ~30MB, SciPy ~30MB, scikit-image ~30MB, Anthropic SDK ~15MB, OpenAI SDK ~15MB, Pillow + HEIC ~20MB, rawpy ~20MB) add up to ~200MB regardless of approach. The choice is whether that weight lands in the download or in a one-time first-run setup.
+**Why the deps are unavoidably large:** OpenCV ~50MB, NumPy ~30MB, SciPy ~30MB, scikit-image ~30MB, Anthropic SDK ~15MB, OpenAI SDK ~15MB, Pillow + HEIC ~20MB, rawpy ~20MB ≈ ~200MB. There is no way around this — the choice is whether that weight is in the download or a one-time first-run fetch.
 
-**Three options (pick one):**
+**Approach:** App bundle is ~5 MB. On first launch a setup screen downloads and installs deps (~3–5 min, internet required). Subsequent launches start instantly.
 
----
+**Implementation steps:**
 
-**Option A: Guided first-run setup** *(recommended for beta — smallest download)*
-
-App bundle is ~5 MB. On first launch a setup screen runs a one-time install that takes ~3–5 min (internet required). After that, the app starts instantly.
-
-1. Bundle `scripts/setup-runtime.sh` and `requirements-runtime.txt` (runtime-only deps, no pytest/mypy/matplotlib) in `Contents/Resources/`
-2. On launch, check `~/Library/Application Support/SundayAlbum/venv/bin/python` exists
-3. If not → show a full-window `SetupView` with a log stream and progress bar; run:
-   ```bash
-   /bin/bash setup-runtime.sh ~/Library/Application\ Support/SundayAlbum/venv
-   # script: python3 -m venv <path> && pip install -r requirements-runtime.txt
+1. **Add `requirements-runtime.txt`** to the repo root — runtime-only deps, no pytest/mypy/matplotlib/ruff:
    ```
-4. After setup completes → transition to normal library view
-5. `PipelineRunner` always uses `~/Library/Application Support/SundayAlbum/venv/bin/python` in production; falls back to `.venv/` for dev
+   opencv-python-headless
+   numpy scipy scikit-image
+   Pillow pillow-heif rawpy
+   anthropic openai
+   click python-dotenv
+   ```
 
-*Download: ~5 MB app + ~200 MB deps downloaded once at first run*
+2. **Add `scripts/setup-runtime.sh`** — creates a venv and pip-installs runtime deps:
+   ```bash
+   #!/bin/bash
+   set -e
+   VENV_DIR="$1"
+   python3 -m venv "$VENV_DIR"
+   "$VENV_DIR/bin/pip" install --upgrade pip
+   "$VENV_DIR/bin/pip" install -r "$2"   # $2 = path to requirements-runtime.txt
+   ```
+   Both files go in `Contents/Resources/` via `project.yml` resources.
 
----
+3. **`SetupView.swift`** — full-window first-launch screen:
+   - Shown when `~/Library/Application Support/SundayAlbum/venv/bin/python` does not exist
+   - Title: "Setting up Sunday Album (one time only)"
+   - `ScrollView` showing live pip output streamed line-by-line
+   - Determinate `ProgressView` — parse `pip` output for package count to estimate progress
+   - "Cancel" aborts the setup process; partially-installed venv is deleted
+   - On completion: `withAnimation` transitions to `LibraryView`
 
-**Option B: PyInstaller with dev-package exclusions** *(self-contained, no internet needed)*
+4. **`PipelineRunner` changes:**
+   - Production: use `~/Library/Application Support/SundayAlbum/venv/bin/python`
+   - Dev fallback: walk up from bundle looking for `.venv/` (existing logic)
+   - Remove the hardcoded `/Users/dev/dev/sundayalbum-claude` fallback
+   - `currentDirectoryURL`: for production, any writable directory works (no `src/` import needed); for dev, still uses project root
 
-Single binary embedded in bundle. Excludes dev-only packages (matplotlib, pytest, mypy, ruff, ipython, setuptools test utilities). Startup adds ~2s extraction overhead (PyInstaller `--onefile` temp-dir extraction), acceptable given 15–26s processing time.
+**Uninstall — clean removal of all data:**
 
-```bash
-source .venv/bin/activate && pip install pyinstaller
-pyinstaller \
-  --onefile --name sundayalbum-cli \
-  --hidden-import pillow_heif --hidden-import rawpy --hidden-import cv2 \
-  --collect-all anthropic --collect-all openai \
-  --exclude-module matplotlib --exclude-module pytest --exclude-module mypy \
-  --exclude-module ruff --exclude-module IPython --exclude-module tkinter \
-  src/cli.py
-# → dist/sundayalbum-cli  (~150–200 MB)
-```
+macOS has no system-level uninstaller, but the app owns everything under one directory. Add **"Uninstall Sunday Album…"** to the Help menu:
 
-Copy to `mac-app/SundayAlbum/Resources/sundayalbum-cli`, add to `project.yml` resources. `PipelineRunner` calls it directly: `sundayalbum-cli process <file> --output <dir>` (no `-m src.cli`).
+1. Show a confirmation sheet listing what will be removed:
+   ```
+   • Python runtime     ~/Library/Application Support/SundayAlbum/venv/    (~200 MB)
+   • Processed photos   ~/Library/Application Support/SundayAlbum/output/
+   • Debug images       ~/Library/Application Support/SundayAlbum/debug/
+   • App preferences    (UserDefaults)
+   • API keys           (Keychain)
+   ```
+2. On confirm: delete the entire `~/Library/Application Support/SundayAlbum/` directory, clear UserDefaults, delete Keychain entries
+3. Show a final notice: *"All data removed. Drag Sunday Album from Applications to Trash to finish uninstalling."*
+4. Quit the app
 
-*Download: ~150–200 MB self-contained*
+This means using AppCleaner or dragging to Trash alone leaves ~200MB behind — the in-app uninstaller is the correct path and should be documented in the README and beta invite.
 
----
-
-**Option C: Zip the stripped venv** *(middle ground — avoids PyInstaller quirks)*
-
-Build a runtime-only venv, zip it, embed in bundle, extract to App Support on first launch. No internet needed after download; no PyInstaller extraction overhead at runtime.
-
-```bash
-python3 -m venv venv-dist
-source venv-dist/bin/activate
-pip install -r requirements-runtime.txt
-zip -r venv-dist.zip venv-dist/
-# → venv-dist.zip  (~150–200 MB)
-```
-
-On first launch: unzip to `~/Library/Application Support/SundayAlbum/venv/`. `PipelineRunner` uses it the same way as Option A.
-
-*Download: ~150–200 MB; first launch extracts, subsequent launches start instantly*
-
----
-
-**Whichever option is chosen:**
-- Add `requirements-runtime.txt` (runtime-only, stripped of dev tools)
-- `PipelineRunner` uses `Bundle.main.resourceURL` to locate the bundled asset, falls back to `.venv/` for dev
-- Remove the hardcoded `/Users/dev/dev/sundayalbum-claude` fallback — fail with a clear error if Python is not found
-- Architecture: ARM64 only for v1 beta (Intel requires a separate build)
+**Architecture:** ARM64 only for v1 beta. Intel requires a separate build on an Intel Mac (defer).
 
 ---
 
 ### Phase 9: Settings Screen (API Keys + Storage)
 
-**Goal:** Friends can configure their own API keys and storage locations. Processing is blocked until the required Anthropic key is present. Keys are validated on entry and can be retested at any time.
+**Goal:** Friends configure their own API keys and choose where files are stored. Processing is blocked until the Anthropic key is validated. Keys can be tested or replaced at any time.
 
 **Python CLI change required first:**
-Add `--debug-dir <path>` flag to `src/cli.py` so the app can direct debug images to a user-chosen folder instead of the hardcoded `./debug/` relative to CWD:
+Add `--debug-dir <path>` to `src/cli.py` so the app can direct debug images to the user-chosen folder instead of the hardcoded `./debug/`:
 ```python
 @click.option('--debug-dir', type=click.Path(), default=None,
               help='Directory for debug visualizations (default: ./debug)')
@@ -550,7 +540,7 @@ Add `--debug-dir <path>` flag to `src/cli.py` so the app can direct debug images
 **1. `KeychainHelper.swift`** — thin `Security.framework` wrapper:
 ```swift
 enum KeychainHelper {
-    static func save(key: String, value: String)   // overwrites if exists
+    static func save(key: String, value: String)   // creates or overwrites
     static func load(key: String) -> String?
     static func delete(key: String)
 }
@@ -566,63 +556,78 @@ func value(for key: String) -> String? {
 }
 ```
 
-**3. `AppSettings.swift`** — `@Observable` singleton backed by `UserDefaults` + Keychain:
+**3. `AppSettings.swift`** — `@Observable` singleton, Keychain + UserDefaults:
 ```swift
 @Observable final class AppSettings {
-    // API keys (Keychain)
-    var anthropicKey: String   { get/set via KeychainHelper }
-    var openaiKey: String      { get/set via KeychainHelper }  // optional
-    var anthropicKeyStatus: KeyStatus  // .absent | .untested | .testing | .valid | .invalid(String)
+    var anthropicKeyStatus: KeyStatus   // .absent | .untested | .testing | .valid | .invalid(String)
     var openaiKeyStatus: KeyStatus
 
-    // Storage (UserDefaults)
-    var outputFolder: URL      // default: ~/Library/Application Support/SundayAlbum/output/
-    var debugFolder: URL       // default: ~/Library/Application Support/SundayAlbum/debug/
-    var debugOutputEnabled: Bool  // controls --debug flag passed to CLI
+    var outputFolder: URL      // UserDefaults; default: .../SundayAlbum/output/
+    var debugFolder: URL       // UserDefaults; default: .../SundayAlbum/debug/
+    var debugOutputEnabled: Bool
 
     var canProcess: Bool { anthropicKeyStatus == .valid }
 }
+
+enum KeyStatus: Equatable {
+    case absent, untested, testing
+    case valid
+    case invalid(String)   // error message from API
+}
 ```
 
-**4. `SettingsView.swift`** — opened by ⌘, or from the app menu — two sections:
+**4. `SettingsView.swift`** — two sections, opened by ⌘, :
 
-*API Keys section:*
-- **Anthropic API key** (required)
-  - `SecureField` showing masked key or placeholder `sk-ant-...`
-  - Status badge: `Absent` (red) / `Untested` (grey) / `Testing…` (amber spinner) / `Valid ✓` (green) / `Invalid — <reason>` (red)
-  - "Save" button: writes to Keychain, sets status to `.untested`, triggers auto-test
-  - "Test" button: fires `POST /v1/messages` with a minimal prompt, updates status
-  - "Remove" button (shown only when key is present): deletes from Keychain, resets status
-  - Footnote: "Get a key at console.anthropic.com" (plain text — user opens browser manually)
-- **OpenAI API key** (optional — enables higher-quality glare removal)
-  - Same layout as above
-  - Status badge adds: `Skipped` (stone) — shown when user clicks "Skip / Use OpenCV fallback"
-  - When skipped: CLI is called with `--no-openai-glare`
-  - Footnote: "Get a key at platform.openai.com"
+*API Keys section — one row per key:*
+
+Each row has this layout:
+```
+[Label]  [_____ text field _____]  [Test]  [Save]  [Discard]
+         [status badge]
+```
+
+- **Text field** (not SecureField — key is visible while editing, standard for API tools)
+  - Placeholder: `sk-ant-api03-...` / `sk-...`
+  - Pre-filled with the masked existing key when one is saved (`sk-ant-...••••1234`)
+  - Editing the field activates "Save" and "Discard"; both are disabled when field is unchanged
+- **"Save"** — writes new value to Keychain, triggers auto-test, disables both action buttons
+- **"Discard"** — reverts text field to the last saved value, disables both action buttons
+- **"Test"** — always enabled when a key is present; fires API call regardless of edit state
+- **Status badge** below the field:
+  - `No key saved` (red)
+  - `Not tested` (stone)
+  - `Testing…` (amber, spinner)
+  - `Valid ✓` (green)
+  - `Invalid — <reason from API>` (red)
+
+*Anthropic API key (required):*
+- Auto-test fires on Save
+- Footnote: `"Get a key at console.anthropic.com"`
+- `canProcess` requires this to be `.valid`
+
+*OpenAI API key (optional):*
+- Auto-test fires on Save
+- Additional toggle below the row: **"Use OpenCV fallback instead"** (replaces the key row entirely when toggled on) — passes `--no-openai-glare` to CLI
+- Footnote: `"Get a key at platform.openai.com — enables higher-quality glare removal"`
+
+**API test calls (Swift — no Python subprocess):**
+- Anthropic: `POST https://api.anthropic.com/v1/messages` with a 1-token prompt via `URLSession`
+- OpenAI: `GET https://api.openai.com/v1/models` via `URLSession`
+- Both are lightweight — no image data sent, just auth verification
 
 *Storage section:*
-- **Output folder** — `HStack` with path label + "Choose…" button (`NSOpenPanel` directory mode)
+- **Output folder** — path label + "Choose…" (`NSOpenPanel`, directory mode) + "Reset to default"
   - Default: `~/Library/Application Support/SundayAlbum/output/`
-  - "Reset to default" link
-- **Debug images folder** — same layout
-  - Default: `~/Library/Application Support/SundayAlbum/debug/`
-  - Only visible when "Save debug images" is on
-- **Save debug images** — `Toggle` — when on, passes `--debug --debug-dir <debugFolder>` to CLI; when off, omits both flags
+- **Debug images** — `Toggle` ("Save debug images at each step")
+  - When on: shows **Debug folder** picker below it (same layout as output folder)
+  - Default debug folder: `~/Library/Application Support/SundayAlbum/debug/`
+  - Passes `--debug --debug-dir <debugFolder>` to CLI when enabled
 
 **5. Blocking gate in `LibraryView`:**
-When `appSettings.canProcess == false` (Anthropic key absent or invalid):
-- Show an amber banner at the top of the library: `"Add your Anthropic API key to start processing  →  Open Settings"`
-- File drop and "Add Photos" still work (files enter the queue as `.queued`)
-- When the user taps "Add Photos" and starts a job with no valid key, the job immediately fails with: `"Anthropic API key required. Open Settings (⌘,) to add it."`
-
-**6. Auto-test on save:**
-Whenever a key field is saved, immediately fire a background test:
-- Anthropic: minimal `messages.create` call (`claude-haiku-4-5`, 1-token prompt)
-- OpenAI: minimal `models.list` call (no image processing, just auth check)
-- Update `keyStatus` to `.testing` while in flight, then `.valid` or `.invalid(errorMessage)`
-
-**7. Manual test button:**
-Always visible next to each key field (even after a prior successful test). Lets users re-verify after a key is rotated or suspected compromised.
+When `appSettings.canProcess == false`:
+- Amber banner at top of library: *"Add your Anthropic API key to start processing"* + "Open Settings →" button
+- File drop and "Add Photos" still work — files queue as `.queued`
+- Starting a job without a valid key fails immediately with: *"Anthropic API key required. Open Settings (⌘,)."*
 
 ---
 
