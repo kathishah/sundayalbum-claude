@@ -10,22 +10,31 @@ struct AlbumPageCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
 
-            // ── Thumbnail row — centered ─────────────────────────────
-            HStack(alignment: .center, spacing: 10) {
-                Spacer(minLength: 0)
+            // ── Thumbnail row — geometry-aware so after-thumbs fill remaining space ──
+            GeometryReader { geo in
+                let hPad: CGFloat = 12
+                let beforeW: CGFloat = 60
+                // HStack spacing (10) × 2 gaps + arrow icon (~11pt)
+                let fixedChrome: CGFloat = 10 + 11 + 10
+                let afterW = max(geo.size.width - hPad * 2 - beforeW - fixedChrome, 40)
 
-                ThumbBox(image: beforeImage)
-                    .frame(width: 60, height: 88)
+                HStack(alignment: .center, spacing: 10) {
+                    Spacer(minLength: 0)
 
-                Image(systemName: "arrow.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Color.saAmber400)
+                    ThumbBox(image: beforeImage)
+                        .frame(width: beforeW, height: 88)
 
-                AfterSection(job: job, thumbHeight: 88, maxVisible: 1)
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Color.saAmber400)
 
-                Spacer(minLength: 0)
+                    AfterSection(job: job, thumbHeight: 88, sectionWidth: afterW)
+
+                    Spacer(minLength: 0)
+                }
+                .frame(width: geo.size.width)
             }
-            .padding(12)
+            .frame(height: 88 + 24)  // thumbHeight + top/bottom padding
 
             Divider()
 
@@ -129,26 +138,40 @@ struct ThumbBox: View {
 struct AfterSection: View {
     let job: ProcessingJob
     let thumbHeight: CGFloat
-    /// Max number of thumbnails to show before collapsing into a "+N" badge.
-    var maxVisible: Int = 3
+    /// When set (compact card), all photos share this total width equally.
+    /// When nil (expanded card), thumbnails use natural aspect ratios up to 3 shown.
+    var sectionWidth: CGFloat? = nil
 
     var body: some View {
         if job.state == .complete, !job.extractedPhotos.isEmpty {
-            // Fully processed — show output thumbnails, capped at maxVisible
-            let visible = Array(job.extractedPhotos.prefix(maxVisible))
-            let overflow = job.extractedPhotos.count - visible.count
-            HStack(spacing: thumbHeight > 100 ? 8 : 5) {
-                ForEach(visible) { photo in
-                    AfterThumb(url: photo.imageURL, height: thumbHeight)
-                }
-                if overflow > 0 {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 6).fill(Color.saStone200)
-                        Text("+\(overflow)")
-                            .font(.dmSans(12, weight: .semibold))
-                            .foregroundStyle(Color.saStone500)
+            if let totalWidth = sectionWidth {
+                // Compact mode: every extracted photo gets an equal-width slot.
+                let photos = job.extractedPhotos
+                let gap: CGFloat = 4
+                let slotW = max((totalWidth - gap * CGFloat(photos.count - 1)) / CGFloat(photos.count), 20)
+                HStack(spacing: gap) {
+                    ForEach(photos) { photo in
+                        AfterThumb(url: photo.imageURL, height: thumbHeight, slotWidth: slotW)
                     }
-                    .frame(width: thumbHeight * 0.65, height: thumbHeight)
+                }
+                .frame(width: totalWidth)
+            } else {
+                // Expanded mode: natural aspect ratios, up to 3 shown.
+                let visible = Array(job.extractedPhotos.prefix(3))
+                let overflow = job.extractedPhotos.count - visible.count
+                HStack(spacing: 8) {
+                    ForEach(visible) { photo in
+                        AfterThumb(url: photo.imageURL, height: thumbHeight)
+                    }
+                    if overflow > 0 {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 6).fill(Color.saStone200)
+                            Text("+\(overflow)")
+                                .font(.dmSans(12, weight: .semibold))
+                                .foregroundStyle(Color.saStone500)
+                        }
+                        .frame(width: thumbHeight * 0.65, height: thumbHeight)
+                    }
                 }
             }
         } else {
@@ -158,16 +181,20 @@ struct AfterSection: View {
     }
 }
 
-// MARK: - AfterThumb (natural portrait / landscape aspect ratio)
+// MARK: - AfterThumb
 
 struct AfterThumb: View {
     let url: URL
     let height: CGFloat
+    /// When set (compact equal-slot mode), fills the given width with .fill cropping.
+    /// When nil (expanded mode), width is derived from the image's natural aspect ratio.
+    var slotWidth: CGFloat? = nil
+
     @State private var image: NSImage?
 
-    /// Width derived from actual image aspect ratio, capped at 3:2 landscape
     private var thumbWidth: CGFloat {
-        guard let img = image else { return height * 0.75 }  // default portrait while loading
+        if let w = slotWidth { return w }
+        guard let img = image else { return height * 0.75 }
         let ratio = img.size.width / img.size.height
         return height * min(ratio, 1.5)
     }
