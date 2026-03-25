@@ -19,6 +19,10 @@ final class ProcessingJob: Identifiable {
     var extractedPhotos: [ExtractedPhoto]
     var errorMessage: String?
     var processingTime: Double?
+    /// Human-readable name of the step currently executing (set by PipelineRunner from CLI output).
+    var currentStepName: String?
+    /// Number of individual photos the CLI reported finding on the page.
+    var photosExtractedCount: Int?
 
     /// All steps before the current one are considered complete
     var completedSteps: Set<PipelineStep> {
@@ -39,7 +43,9 @@ final class ProcessingJob: Identifiable {
         stepStatus: StepStatus = .pending,
         extractedPhotos: [ExtractedPhoto] = [],
         errorMessage: String? = nil,
-        processingTime: Double? = nil
+        processingTime: Double? = nil,
+        currentStepName: String? = nil,
+        photosExtractedCount: Int? = nil
     ) {
         self.id = id
         self.inputName = inputName
@@ -50,6 +56,8 @@ final class ProcessingJob: Identifiable {
         self.extractedPhotos = extractedPhotos
         self.errorMessage = errorMessage
         self.processingTime = processingTime
+        self.currentStepName = currentStepName
+        self.photosExtractedCount = photosExtractedCount
     }
 
     /// Advance to the next pipeline step (mock)
