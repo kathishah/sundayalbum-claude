@@ -105,13 +105,13 @@ struct FileImporterTests {
     // MARK: - AppState.addFiles
 
     @Test("addFiles creates queued jobs")
-    func addFilesCreatesJobs() throws {
+    @MainActor func addFilesCreatesJobs() throws {
         let dir = try tempDir()
         let file = dir.appendingPathComponent("photo.heic")
         try Data().write(to: file)
 
         let state = AppState()
-        state.addFiles([file])
+        state.addFiles([file], startProcessing: false)
 
         #expect(state.jobs.count == 1)
         #expect(state.jobs[0].inputURL == file)
@@ -120,20 +120,20 @@ struct FileImporterTests {
     }
 
     @Test("addFiles deduplicates by URL")
-    func addFilesDeduplicates() throws {
+    @MainActor func addFilesDeduplicates() throws {
         let dir = try tempDir()
         let file = dir.appendingPathComponent("photo.heic")
         try Data().write(to: file)
 
         let state = AppState()
-        state.addFiles([file])
-        state.addFiles([file])   // second call — same URL
+        state.addFiles([file], startProcessing: false)
+        state.addFiles([file], startProcessing: false)   // second call — same URL
 
         #expect(state.jobs.count == 1)
     }
 
     @Test("addFiles appends multiple new files")
-    func addFilesMultiple() throws {
+    @MainActor func addFilesMultiple() throws {
         let dir = try tempDir()
         let a = dir.appendingPathComponent("a.heic")
         let b = dir.appendingPathComponent("b.jpg")
@@ -141,7 +141,7 @@ struct FileImporterTests {
         try Data().write(to: b)
 
         let state = AppState()
-        state.addFiles([a, b])
+        state.addFiles([a, b], startProcessing: false)
 
         #expect(state.jobs.count == 2)
     }

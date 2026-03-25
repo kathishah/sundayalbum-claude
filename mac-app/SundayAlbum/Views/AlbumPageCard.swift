@@ -271,7 +271,8 @@ struct JobStatusLine: View {
                 .frame(width: 52, height: 3)
 
                 let stepNum = min(job.currentStep.rawValue + 1, totalSteps)
-                Text("Step \(stepNum) of \(totalSteps): \(job.currentStep.title)")
+                let stepLabel = job.currentStepName ?? job.currentStep.title
+                Text("Step \(stepNum) of \(totalSteps): \(stepLabel)")
                     .font(.dmSans(11))
                     .foregroundStyle(
                         job.stepStatus == .awaitingReview ? Color.saAmber600 : Color.saStone500

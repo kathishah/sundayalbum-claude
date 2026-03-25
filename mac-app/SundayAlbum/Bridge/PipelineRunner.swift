@@ -135,6 +135,23 @@ final class PipelineRunner {
 
         case .stepCompleted(let name):
             job.currentStepName = name
+            // Advance the UI progress wheel by mapping CLI step name → PipelineStep
+            switch name {
+            case "Load", "Normalize":
+                job.currentStep = .load
+            case "Page Detection":
+                job.currentStep = .pageDetect
+            case "Photo Detection":
+                job.currentStep = .photoSplit
+            case "AI Orientation":
+                job.currentStep = .orientation
+            case "Glare Removal":
+                job.currentStep = .glareRemoval
+            case "Geometry", "Color Restoration":
+                job.currentStep = .colorCorrection
+            default:
+                break
+            }
 
         case .photosExtracted(let count):
             job.photosExtractedCount = count

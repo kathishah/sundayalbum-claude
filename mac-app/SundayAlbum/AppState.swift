@@ -6,11 +6,15 @@ enum AppScreen: Equatable {
     case stepDetail(jobID: UUID)
 }
 
+@MainActor
 @Observable
 final class AppState {
     var jobs: [ProcessingJob] = []
     var expandedJobID: UUID?      // single-click expand in library
     var currentScreen: AppScreen = .library
+
+    /// Active PipelineRunners keyed by job ID.
+    private var runners: [UUID: PipelineRunner] = [:]
 
     var selectedJob: ProcessingJob? {
         if case .stepDetail(let id) = currentScreen {
@@ -34,11 +38,26 @@ final class AppState {
     }
 
     /// Enqueues new files, skipping any whose inputURL is already in the library.
-    func addFiles(_ urls: [URL]) {
+    /// Pass `startProcessing: false` in tests to suppress subprocess launch.
+    func addFiles(_ urls: [URL], startProcessing: Bool = true) {
         let existingURLs = Set(jobs.compactMap(\.inputURL))
         let newJobs = urls
             .filter { !existingURLs.contains($0) }
             .map { ProcessingJob(inputName: $0.lastPathComponent, inputURL: $0) }
         jobs.append(contentsOf: newJobs)
+
+        guard startProcessing else { return }
+
+        for job in newJobs {
+            let runner = PipelineRunner(job: job)
+            runners[job.id] = runner
+            runner.start()
+        }
+    }
+
+    /// Cancels a running job and removes its runner.
+    func cancel(jobID: UUID) {
+        runners[jobID]?.cancel()
+        runners.removeValue(forKey: jobID)
     }
 }
