@@ -16,6 +16,12 @@ final class AppState {
     /// Active PipelineRunners keyed by job ID.
     private var runners: [UUID: PipelineRunner] = [:]
 
+    init(loadDebugJobs: Bool = true) {
+        if loadDebugJobs {
+            jobs = DebugFolderScanner.loadJobs()
+        }
+    }
+
     var selectedJob: ProcessingJob? {
         if case .stepDetail(let id) = currentScreen {
             return jobs.first { $0.id == id }

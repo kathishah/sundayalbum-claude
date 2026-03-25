@@ -110,7 +110,7 @@ struct FileImporterTests {
         let file = dir.appendingPathComponent("photo.heic")
         try Data().write(to: file)
 
-        let state = AppState()
+        let state = AppState(loadDebugJobs: false)
         state.addFiles([file], startProcessing: false)
 
         #expect(state.jobs.count == 1)
@@ -125,7 +125,7 @@ struct FileImporterTests {
         let file = dir.appendingPathComponent("photo.heic")
         try Data().write(to: file)
 
-        let state = AppState()
+        let state = AppState(loadDebugJobs: false)
         state.addFiles([file], startProcessing: false)
         state.addFiles([file], startProcessing: false)   // second call — same URL
 
@@ -140,7 +140,7 @@ struct FileImporterTests {
         try Data().write(to: a)
         try Data().write(to: b)
 
-        let state = AppState()
+        let state = AppState(loadDebugJobs: false)
         state.addFiles([a, b], startProcessing: false)
 
         #expect(state.jobs.count == 2)
