@@ -383,20 +383,19 @@ Prove the Swift → Python subprocess integration. This is the highest technical
 
 ---
 
-### Phase 4: Output Parser
+### Phase 4: Output Parser + UI Wiring ✅ COMPLETE
 
 Turn raw stdout into typed Swift state and wire into the existing UI models.
 
-1. `CLIOutputParser.swift` — `parse(line:) -> PipelineEvent` (see parsing reference table above)
-2. `CLIOutputParserTests.swift` — copy real terminal output into test cases, cover all `PipelineEvent` cases
-3. Wire `PipelineRunner` to update `ProcessingJob` from parsed events:
-   - `.stepCompleted` → advance `currentStep`, increment `progressFraction`
-   - `.photosExtracted` → update count
-   - `.outputSaved` → create `ExtractedPhoto`, append to `job.extractedPhotos`
-   - `.processingComplete` → set `state = .complete`, `processingTime`
-   - `.errorLine` → set `state = .failed`, `errorMessage`
+**What was built:**
+- `AppState`: marked `@MainActor`, added `runners: [UUID: PipelineRunner]` dict; `addFiles` now starts a `PipelineRunner` per job immediately (`startProcessing: false` param for test isolation)
+- `PipelineRunner`: maps CLI step names → `PipelineStep` enum so the progress wheel advances in sync with real processing; `@MainActor` job state updates on each parsed line
+- `SundayAlbumApp`: uses real `AppState()` by default; set env var `MOCK_DATA=1` in Xcode scheme to restore mock data for UI work
+- `AlbumPageCard / JobStatusLine`: shows live `currentStepName` from CLI stdout when available
+- Compact card thumbnail layout: `GeometryReader` measures available width, divides it equally among all extracted photos — 1 photo fills full width, 2 split it, 3 split in thirds. All thumbnails use `.fill` cropping so cards are uniform width regardless of photo count
+- `FileImporterTests`: updated for `@MainActor` + `startProcessing: false`
 
-**Deliverable:** All parser tests pass. A real job in the library progresses step-by-step and reaches `.complete` with thumbnails.
+**Deliverable:** ✅ Drop a HEIC → library card shows live progress wheel step-by-step → reaches "N photos extracted" → all after-thumbnails appear scaled to fit the card.
 
 ---
 
@@ -545,7 +544,8 @@ open SundayAlbum.xcodeproj
 [x] Phase 3: CLIOutputParser, PipelineRunner, SecretsLoader built and compiling
 [x] Phase 3: All CLIOutputParserTests pass (16/16 parser tests + 29/29 total)
 [ ] Phase 3: Manual verify — Xcode console shows live per-line stdout from a real HEIC run
-[ ] Phase 4: PipelineRunner wired into UI — drop a file → progress wheel advances step-by-step
+[x] Phase 4: PipelineRunner wired into UI — drop a file → progress wheel advances step-by-step
+[x] Phase 4: After-thumbnails scale to fill card width for 1, 2, or 3 extracted photos
 [ ] Phase 5: Drop IMG_three_pics_normal.HEIC → progress wheel advances step-by-step → "✓ 3 photos"
 [ ] Phase 5: After thumbnails appear in card with natural portrait/landscape ratios
 [ ] Phase 6: "Add to Photos" → photos appear in Photos.app
