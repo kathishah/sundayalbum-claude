@@ -43,23 +43,23 @@ extension Color {
     // ── Semantic adaptive tokens ─────────────────────────────────────────────
     // Page / window background
     static let saBackground = dynamic(
-        light: Color(red: 0.878, green: 0.871, blue: 0.863),  // stone-300 — more distinct from cards
-        dark:  Color(red: 0.047, green: 0.039, blue: 0.035)   // stone-950 warm near-black
+        light: .white,
+        dark:  .black
     )
     // Card surfaces (album page cards, panels)
     static let saCard = dynamic(
-        light: .white,
-        dark:  Color(red: 0.110, green: 0.098, blue: 0.090)   // stone-900 warm dark
+        light: Color(red: 0.941, green: 0.937, blue: 0.933),  // soft warm light grey
+        dark:  Color(red: 0.137, green: 0.122, blue: 0.114)   // soft dark grey
     )
     // Inset surfaces (step strip, comparison pane, results pane)
     static let saSurface = dynamic(
-        light: Color(red: 0.961, green: 0.961, blue: 0.957),  // stone-100
-        dark:  Color(red: 0.157, green: 0.141, blue: 0.129)   // between stone-800/900
+        light: Color(red: 0.961, green: 0.961, blue: 0.957),  // stone-100, slightly lighter than card
+        dark:  Color(red: 0.094, green: 0.082, blue: 0.075)   // between black and card
     )
     // Card / panel borders
     static let saBorder = dynamic(
-        light: Color(red: 0.820, green: 0.812, blue: 0.804),  // stone-300
-        dark:  Color(red: 0.220, green: 0.200, blue: 0.184)   // warm dark border
+        light: Color(red: 0.859, green: 0.851, blue: 0.843),  // subtle on grey cards
+        dark:  Color(red: 0.216, green: 0.196, blue: 0.184)   // warm dark border
     )
 
     // ── Adaptive text tokens ─────────────────────────────────────────────────
