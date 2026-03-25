@@ -2,6 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct DropZoneView: View {
+    @Environment(AppState.self) private var appState
     @State private var isTargeted = false
 
     var body: some View {
@@ -36,7 +37,8 @@ struct DropZoneView: View {
                     .foregroundStyle(Color.saStone400)
 
                 Button("Choose Files…") {
-                    // mock: would open NSOpenPanel
+                    let urls = FileImporter.openPanel()
+                    appState.addFiles(urls)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Color.saAmber500)
@@ -53,8 +55,23 @@ struct DropZoneView: View {
                 .padding(32)
                 .animation(.saStandard, value: isTargeted)
         }
-        .onDrop(of: [UTType.fileURL], isTargeted: $isTargeted) { _ in
-            true // mock
+        .onDrop(of: [UTType.fileURL], isTargeted: $isTargeted) { providers in
+            handleDrop(providers)
         }
+    }
+
+    private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
+        guard !providers.isEmpty else { return false }
+        Task { @MainActor in
+            var dropped: [URL] = []
+            for provider in providers {
+                if let url = await provider.loadFileURL() {
+                    dropped.append(url)
+                }
+            }
+            let resolved = FileImporter.resolveURLs(dropped)
+            appState.addFiles(resolved)
+        }
+        return true
     }
 }

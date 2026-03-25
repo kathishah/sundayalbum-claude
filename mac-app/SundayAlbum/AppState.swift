@@ -32,4 +32,13 @@ final class AppState {
     func navigateBack() {
         currentScreen = .library
     }
+
+    /// Enqueues new files, skipping any whose inputURL is already in the library.
+    func addFiles(_ urls: [URL]) {
+        let existingURLs = Set(jobs.compactMap(\.inputURL))
+        let newJobs = urls
+            .filter { !existingURLs.contains($0) }
+            .map { ProcessingJob(inputName: $0.lastPathComponent, inputURL: $0) }
+        jobs.append(contentsOf: newJobs)
+    }
 }

@@ -1,7 +1,9 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct LibraryView: View {
     @Environment(AppState.self) private var appState
+    @State private var isDropTargeted = false
 
     let columns = [GridItem(.adaptive(minimum: 280, maximum: 400), spacing: 16)]
 
@@ -17,7 +19,8 @@ struct LibraryView: View {
                             .foregroundStyle(Color.saStone900)
                         Spacer()
                         Button {
-                            // mock: open NSOpenPanel
+                            let urls = FileImporter.openPanel()
+                            appState.addFiles(urls)
                         } label: {
                             Label("Add Photos", systemImage: "plus")
                                 .font(.dmSans(13, weight: .medium))
@@ -82,5 +85,33 @@ struct LibraryView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.saStone100)
+        // Drop target — active even when grid is populated (not just on DropZoneView)
+        .onDrop(of: [UTType.fileURL], isTargeted: $isDropTargeted) { providers in
+            handleDrop(providers)
+        }
+        .overlay {
+            if isDropTargeted {
+                RoundedRectangle(cornerRadius: 0)
+                    .strokeBorder(Color.saAmber500, lineWidth: 3)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+            }
+        }
+        .animation(.saStandard, value: isDropTargeted)
+    }
+
+    private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
+        guard !providers.isEmpty else { return false }
+        Task { @MainActor in
+            var dropped: [URL] = []
+            for provider in providers {
+                if let url = await provider.loadFileURL() {
+                    dropped.append(url)
+                }
+            }
+            let resolved = FileImporter.resolveURLs(dropped)
+            appState.addFiles(resolved)
+        }
+        return true
     }
 }
