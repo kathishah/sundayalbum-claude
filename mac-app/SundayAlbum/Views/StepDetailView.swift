@@ -1,70 +1,342 @@
 import SwiftUI
 import AppKit
 
+// MARK: - Selection model
+
+/// What the user is currently viewing in the step detail canvas.
+enum StepSelection: Equatable, Hashable {
+    /// Job-level pre-split steps (Load, Page Detect, Photo Split)
+    case preSplit(PipelineStep)
+    /// Per-photo post-split steps (Orient, Glare, Color, Done) for a given 0-based photo index
+    case photo(index: Int, step: PipelineStep)
+
+    var pipelineStep: PipelineStep {
+        switch self {
+        case .preSplit(let s):      return s
+        case .photo(_, let s):     return s
+        }
+    }
+}
+
 // MARK: - Main detail view
 
 struct StepDetailView: View {
     @Environment(AppState.self) private var appState
     @Bindable var job: ProcessingJob
-
-    // The step currently shown in the canvas (may differ from job.currentStep when browsing history)
-    @State private var selectedStep: PipelineStep
+    @State private var selection: StepSelection
 
     init(job: ProcessingJob) {
         self.job = job
-        // Start on current step (or last complete step if done)
-        let start = job.currentStep == .done ? .colorCorrection : job.currentStep
-        self._selectedStep = State(initialValue: start)
+        self._selection = State(initialValue: Self.startSelection(for: job))
+    }
+
+    private static func startSelection(for job: ProcessingJob) -> StepSelection {
+        switch job.currentStep {
+        case .load, .pageDetect, .photoSplit:
+            return .preSplit(job.currentStep)
+        case .done:
+            return .photo(index: 0, step: .colorCorrection)
+        default:
+            return .photo(index: 0, step: job.currentStep)
+        }
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            // ── Breadcrumb ───────────────────────────────────────────
+            // ── Breadcrumb ────────────────────────────────────────────
             BreadcrumbBar(crumbs: ["Library", job.inputName]) {
                 appState.navigateBack()
             }
 
             Divider()
 
-            // ── Step strip ───────────────────────────────────────────
-            StepStrip(job: job, selectedStep: $selectedStep)
-                .frame(height: 94)
-                .background(Color.saSurface)
+            // ── Left tree + right canvas ─────────────────────────────
+            HStack(spacing: 0) {
+                StepTree(job: job, selection: $selection)
+                    .frame(width: 196)
 
-            Divider()
+                Divider()
 
-            // ── Step canvas ──────────────────────────────────────────
-            Group {
-                switch selectedStep {
-                case .load:
-                    DebugImageView(step: selectedStep, inputName: job.inputName)
-                case .orientation:
-                    OrientationStepView(job: job)
-                case .pageDetect:
-                    PageDetectionStepView(job: job)
-                case .photoSplit:
-                    PhotoSplitStepView(job: job)
-                case .glareRemoval:
-                    GlareRemovalStepView(job: job)
-                case .colorCorrection:
-                    ColorCorrectionStepView(job: job)
-                case .done:
-                    ResultsStepView(job: job)
-                }
+                StepCanvas(job: job, selection: selection)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .id(selection)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .id(selectedStep)
 
             // ── Action bar ───────────────────────────────────────────
-            if selectedStep == job.currentStep && selectedStep.requiresReview {
-                // AI result ready — confirm or adjust
+            let selStep = selection.pipelineStep
+            if selStep == job.currentStep && selStep.requiresReview {
                 StepActionBar(job: job)
-            } else if selectedStep.rawValue < job.currentStep.rawValue && selectedStep != .done {
-                // User is browsing a past step — offer to re-process from here
-                ReprocessBar(job: job, fromStep: selectedStep)
+            } else if selStep.rawValue < job.currentStep.rawValue && selStep != .done {
+                ReprocessBar(job: job, fromStep: selStep)
             }
         }
         .background(Color.saBackground)
+        .onChange(of: job.currentStep) { _, newStep in
+            withAnimation(.saStandard) {
+                switch newStep {
+                case .load, .pageDetect, .photoSplit:
+                    selection = .preSplit(newStep)
+                case .done:
+                    break
+                default:
+                    selection = .photo(index: 0, step: newStep)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Step tree (left pane)
+
+private struct StepTree: View {
+    let job: ProcessingJob
+    @Binding var selection: StepSelection
+
+    private let preSplitSteps: [PipelineStep] = [.load, .pageDetect, .photoSplit]
+    private let perPhotoSteps: [PipelineStep] = [.orientation, .glareRemoval, .colorCorrection, .done]
+
+    var body: some View {
+        ScrollView(showsIndicators: true) {
+            VStack(alignment: .leading, spacing: 1) {
+                // Job-level steps
+                ForEach(preSplitSteps) { step in
+                    TreeRow(
+                        icon: step.systemImage,
+                        label: step.title,
+                        isSelected: selection == .preSplit(step),
+                        isComplete: job.completedSteps.contains(step),
+                        isCurrent: step == job.currentStep,
+                        isAccessible: canAccess(step)
+                    )
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        guard canAccess(step) else { return }
+                        withAnimation(.saStandard) { selection = .preSplit(step) }
+                    }
+                }
+
+                let photos = job.extractedPhotos
+
+                if photos.count > 1 {
+                    // Multi-photo branches
+                    ForEach(Array(photos.enumerated()), id: \.offset) { idx, photo in
+                        PhotoBranchGroup(
+                            photo: photo,
+                            photoIndex: idx,
+                            steps: perPhotoSteps,
+                            job: job,
+                            selection: $selection
+                        )
+                    }
+                } else {
+                    // Single photo or pre-split: flat per-photo list
+                    ForEach(perPhotoSteps) { step in
+                        TreeRow(
+                            icon: step.systemImage,
+                            label: step.title,
+                            isSelected: selection == .photo(index: 0, step: step),
+                            isComplete: job.completedSteps.contains(step),
+                            isCurrent: step == job.currentStep,
+                            isAccessible: canAccess(step)
+                        )
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            guard canAccess(step) else { return }
+                            withAnimation(.saStandard) { selection = .photo(index: 0, step: step) }
+                        }
+                    }
+                }
+            }
+            .padding(.top, 4)
+            .padding(.bottom, 20)
+        }
+        .background(Color.saSurface)
+    }
+
+    private func canAccess(_ step: PipelineStep) -> Bool {
+        job.completedSteps.contains(step) || step == job.currentStep
+    }
+}
+
+// MARK: - Photo branch group
+
+private struct PhotoBranchGroup: View {
+    let photo: ExtractedPhoto
+    let photoIndex: Int
+    let steps: [PipelineStep]
+    let job: ProcessingJob
+    @Binding var selection: StepSelection
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Photo header
+            HStack(spacing: 8) {
+                PhotoMiniThumb(url: photo.imageURL)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Photo \(photoIndex + 1)")
+                        .font(.dmSans(12, weight: .semibold))
+                        .foregroundStyle(Color.saTextPrimary)
+                    if let rot = photo.rotationOverride {
+                        Text("\(rot)° override")
+                            .font(.dmSans(9))
+                            .foregroundStyle(Color.saAmber600)
+                    }
+                }
+                Spacer()
+            }
+            .padding(.leading, 10)
+            .padding(.trailing, 8)
+            .padding(.top, 10)
+            .padding(.bottom, 4)
+
+            // Indented step rows with connector line
+            HStack(alignment: .top, spacing: 0) {
+                Rectangle()
+                    .fill(Color.saStone200)
+                    .frame(width: 1)
+                    .padding(.leading, 23)
+                    .padding(.bottom, 4)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    ForEach(steps) { step in
+                        TreeRow(
+                            icon: step.systemImage,
+                            label: step.title,
+                            isSelected: selection == .photo(index: photoIndex, step: step),
+                            isComplete: job.completedSteps.contains(step),
+                            isCurrent: step == job.currentStep,
+                            isAccessible: canAccess(step)
+                        )
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            guard canAccess(step) else { return }
+                            withAnimation(.saStandard) {
+                                selection = .photo(index: photoIndex, step: step)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func canAccess(_ step: PipelineStep) -> Bool {
+        job.completedSteps.contains(step) || step == job.currentStep
+    }
+}
+
+// MARK: - Photo mini thumbnail
+
+private struct PhotoMiniThumb: View {
+    let url: URL
+    @State private var image: NSImage?
+
+    var body: some View {
+        Group {
+            if let img = image {
+                Image(nsImage: img).resizable().aspectRatio(contentMode: .fill)
+            } else {
+                Rectangle().fill(Color.saStone300)
+            }
+        }
+        .frame(width: 30, height: 30)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .task { image = NSImage(contentsOf: url) }
+    }
+}
+
+// MARK: - Tree row
+
+private struct TreeRow: View {
+    let icon: String
+    let label: String
+    let isSelected: Bool
+    let isComplete: Bool
+    let isCurrent: Bool
+    let isAccessible: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ZStack {
+                Circle()
+                    .fill(isSelected ? Color.saAmber500 : Color.clear)
+                    .frame(width: 22, height: 22)
+                Image(systemName: isComplete ? "checkmark" : icon)
+                    .font(.system(
+                        size: isComplete ? 8 : 10,
+                        weight: isSelected ? .semibold : .regular
+                    ))
+                    .foregroundStyle(
+                        isSelected ? .white
+                        : isComplete ? Color.saSuccess
+                        : Color.saTextTertiary
+                    )
+            }
+
+            Text(label)
+                .font(.dmSans(12, weight: isSelected ? .semibold : .regular))
+                .foregroundStyle(isSelected ? Color.saAmber600 : Color.saTextPrimary)
+                .lineLimit(1)
+
+            Spacer()
+
+            if isCurrent && !isSelected {
+                Circle()
+                    .fill(Color.saAmber400)
+                    .frame(width: 5, height: 5)
+                    .padding(.trailing, 2)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(isSelected ? Color.saAmber500.opacity(0.10) : Color.clear)
+        .opacity(isAccessible ? 1.0 : 0.35)
+    }
+}
+
+// MARK: - Step canvas (right pane)
+
+private struct StepCanvas: View {
+    let job: ProcessingJob
+    let selection: StepSelection
+
+    var body: some View {
+        Group {
+            switch selection {
+            case .preSplit(let step):
+                preSplitCanvas(step)
+            case .photo(let idx, let step):
+                photoCanvas(idx, step)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func preSplitCanvas(_ step: PipelineStep) -> some View {
+        switch step {
+        case .load:
+            DebugImageView(step: .load, inputName: job.inputName)
+        case .pageDetect:
+            PageDetectionStepView(job: job)
+        default:
+            PhotoSplitStepView(job: job)
+        }
+    }
+
+    @ViewBuilder
+    private func photoCanvas(_ idx: Int, _ step: PipelineStep) -> some View {
+        switch step {
+        case .orientation:
+            OrientationStepView(job: job, photoIndex: idx)
+        case .glareRemoval:
+            GlareRemovalStepView(job: job, photoIndex: idx)
+        case .colorCorrection:
+            ColorCorrectionStepView(job: job, photoIndex: idx)
+        default:
+            ResultsStepView(job: job)
+        }
     }
 }
 
@@ -106,109 +378,6 @@ struct BreadcrumbBar: View {
         .padding(.horizontal, 20)
         .padding(.vertical, 11)
         .background(Color.saSurface)
-    }
-}
-
-// MARK: - Step strip
-
-struct StepStrip: View {
-    let job: ProcessingJob
-    @Binding var selectedStep: PipelineStep
-
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 0) {
-                ForEach(Array(PipelineStep.allCases.enumerated()), id: \.offset) { idx, step in
-                    if idx > 0 {
-                        // Connector line
-                        Rectangle()
-                            .fill(job.completedSteps.contains(step)
-                                  ? Color.saAmber400 : Color.saStone200)
-                            .frame(width: 18, height: 2)
-                    }
-                    StepTile(
-                        step: step,
-                        inputName: job.inputName,
-                        isSelected: step == selectedStep,
-                        isComplete: job.completedSteps.contains(step),
-                        isCurrent: step == job.currentStep,
-                        isAccessible: job.completedSteps.contains(step) || step == job.currentStep
-                    )
-                    .onTapGesture {
-                        guard job.completedSteps.contains(step) || step == job.currentStep else { return }
-                        withAnimation(.saStandard) { selectedStep = step }
-                    }
-                }
-            }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 14)
-        }
-    }
-}
-
-// MARK: - Step tile
-
-struct StepTile: View {
-    let step: PipelineStep
-    let inputName: String
-    let isSelected: Bool
-    let isComplete: Bool
-    let isCurrent: Bool
-    let isAccessible: Bool
-
-    @State private var thumb: NSImage?
-
-    var body: some View {
-        VStack(spacing: 5) {
-            ZStack(alignment: .bottomTrailing) {
-                // Thumbnail
-                Group {
-                    if let img = thumb {
-                        Image(nsImage: img).resizable().aspectRatio(contentMode: .fill)
-                    } else {
-                        Rectangle()
-                            .fill(Color.saSurface)
-                            .overlay {
-                                Image(systemName: step.systemImage)
-                                    .font(.system(size: 14))
-                                    .foregroundStyle(Color.saTextTertiary)
-                            }
-                    }
-                }
-                .frame(width: 72, height: 52)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(isSelected ? Color.saAmber500 : .clear, lineWidth: 2)
-                }
-                .shadow(color: isSelected ? Color.saAmber500.opacity(0.35) : .clear, radius: 6)
-
-                // Status badge
-                if isComplete {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 13))
-                        .foregroundStyle(Color.saSuccess)
-                        .background(Circle().fill(Color.saCard).padding(2))
-                        .offset(x: 4, y: 4)
-                } else if isCurrent {
-                    Circle()
-                        .fill(Color.saAmber500)
-                        .frame(width: 8, height: 8)
-                        .overlay(Circle().strokeBorder(.white, lineWidth: 1.5))
-                        .offset(x: 4, y: 4)
-                }
-            }
-
-            Text(step.title)
-                .font(.dmSans(9, weight: isSelected ? .semibold : .regular))
-                .foregroundStyle(isSelected ? Color.saAmber600 : Color.saTextSecondary)
-        }
-        .opacity(isAccessible ? 1.0 : 0.35)
-        .task {
-            if let url = step.debugImageURL(forInputName: inputName) {
-                thumb = NSImage(contentsOf: url)
-            }
-        }
     }
 }
 
@@ -279,12 +448,10 @@ struct ReprocessBar: View {
                     .foregroundStyle(Color.saStone500)
                 Spacer()
                 Button {
-                    // mock: reset pipeline to this step and re-run
                     withAnimation(.saStandard) {
                         job.currentStep = fromStep
                         job.stepStatus = fromStep.requiresReview ? .awaitingReview : .running
                         job.state = .running
-                        // Drop extracted photos produced after this step
                         if fromStep.rawValue <= PipelineStep.photoSplit.rawValue {
                             job.extractedPhotos = []
                         }
@@ -304,23 +471,7 @@ struct ReprocessBar: View {
     }
 }
 
-// MARK: - Auto-step view (load, orientation — no user action needed)
-
-struct AutoStepView: View {
-    let job: ProcessingJob
-    var body: some View {
-        VStack(spacing: 16) {
-            ProgressView().controlSize(.large)
-            Text(job.currentStep.title + "…")
-                .font(.dmSans(14))
-                .foregroundStyle(Color.saStone500)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.saStone100)
-    }
-}
-
-// MARK: - Debug image viewer (for load / orientation steps when browsing history)
+// MARK: - Debug image viewer (load step)
 
 struct DebugImageView: View {
     let step: PipelineStep

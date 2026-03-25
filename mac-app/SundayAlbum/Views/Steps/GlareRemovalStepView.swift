@@ -1,81 +1,54 @@
 import SwiftUI
 import AppKit
 
-/// Side-by-side before/after view for glare removal review.
-/// For multi-photo jobs, shows a thumbnail strip so the user can review each photo.
+/// Before/after glare removal view for a single extracted photo.
+/// The tree in StepDetailView handles photo selection; this view shows one photo's result.
 struct GlareRemovalStepView: View {
     let job: ProcessingJob
+    let photoIndex: Int   // 0-based
 
-    @State private var selectedIndex: Int = 0
     @State private var afterOpacity: Double = 0
     @State private var showGlow = false
 
-    var photos: [ExtractedPhoto] { job.extractedPhotos }
-    var hasMultiple: Bool { photos.count > 1 }
+    var photo: ExtractedPhoto? { job.extractedPhotos[safe: photoIndex] }
 
     var body: some View {
-        VStack(spacing: 0) {
-            if hasMultiple {
-                // Thumbnail strip for multi-photo jobs
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(Array(photos.enumerated()), id: \.offset) { idx, photo in
-                            ThumbnailStrip(photo: photo, isSelected: idx == selectedIndex)
-                                .onTapGesture {
-                                    withAnimation(.saStandard) {
-                                        selectedIndex = idx
-                                        afterOpacity = 0
-                                        showGlow = false
-                                    }
-                                    triggerReveal()
-                                }
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                }
-                .background(Color.saStone100)
-                Divider()
+        HStack(spacing: 0) {
+            // Before
+            VStack(spacing: 8) {
+                Text("BEFORE")
+                    .font(.dmSans(10, weight: .semibold))
+                    .foregroundStyle(Color.saStone400)
+                    .tracking(1.5)
+                ImagePane(url: photo?.jobInputURL)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(16)
 
-            // Before / After canvas
-            HStack(spacing: 0) {
-                // Before
-                VStack(spacing: 8) {
-                    Text("BEFORE")
-                        .font(.dmSans(10, weight: .semibold))
-                        .foregroundStyle(Color.saStone400)
-                        .tracking(1.5)
-                    ImagePane(url: photos[safe: selectedIndex]?.jobInputURL)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(16)
+            Divider()
 
-                Divider()
-
-                // After
-                VStack(spacing: 8) {
-                    Text("AFTER")
-                        .font(.dmSans(10, weight: .semibold))
-                        .foregroundStyle(Color.saAmber500)
-                        .tracking(1.5)
-                    ImagePane(url: photos[safe: selectedIndex]?.imageURL)
-                        .shadow(
-                            color: showGlow ? Color.saAmber500.opacity(0.2) : .clear,
-                            radius: 20
-                        )
-                        .opacity(afterOpacity)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(16)
+            // After
+            VStack(spacing: 8) {
+                Text("AFTER")
+                    .font(.dmSans(10, weight: .semibold))
+                    .foregroundStyle(Color.saAmber500)
+                    .tracking(1.5)
+                ImagePane(url: photo?.imageURL)
+                    .shadow(
+                        color: showGlow ? Color.saAmber500.opacity(0.2) : .clear,
+                        radius: 20
+                    )
+                    .opacity(afterOpacity)
             }
-            .background(Color.saStone900)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(16)
         }
+        .background(Color.saStone900)
         .onAppear { triggerReveal() }
-        .onChange(of: selectedIndex) { triggerReveal() }
+        .onChange(of: photoIndex) { triggerReveal() }
     }
 
-    func triggerReveal() {
+    private func triggerReveal() {
         afterOpacity = 0
         showGlow = false
         Task {
@@ -86,30 +59,7 @@ struct GlareRemovalStepView: View {
     }
 }
 
-// MARK: - Sub-views
-
-private struct ThumbnailStrip: View {
-    let photo: ExtractedPhoto
-    let isSelected: Bool
-    @State private var image: NSImage?
-
-    var body: some View {
-        Group {
-            if let img = image {
-                Image(nsImage: img).resizable().aspectRatio(contentMode: .fill)
-            } else {
-                Rectangle().fill(Color.saStone200)
-            }
-        }
-        .frame(width: 56, height: 56)
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-        .overlay {
-            RoundedRectangle(cornerRadius: 6)
-                .strokeBorder(isSelected ? Color.saAmber500 : Color.clear, lineWidth: 2)
-        }
-        .task { image = NSImage(contentsOf: photo.imageURL) }
-    }
-}
+// MARK: - Image pane
 
 private struct ImagePane: View {
     let url: URL?
@@ -140,4 +90,3 @@ private extension Array {
         indices.contains(index) ? self[index] : nil
     }
 }
-

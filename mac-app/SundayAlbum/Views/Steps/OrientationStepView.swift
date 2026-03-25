@@ -1,95 +1,24 @@
 import SwiftUI
 import AppKit
 
-/// Orientation review step — shows the AI-corrected orientation for each extracted photo
-/// and lets the user override the rotation and scene description before re-triggering.
+/// Orientation review for a single extracted photo.
+/// The tree in StepDetailView handles photo selection; this view shows one photo's controls.
 struct OrientationStepView: View {
     @Bindable var job: ProcessingJob
+    let photoIndex: Int   // 0-based
 
-    @State private var selectedIndex: Int = 0
-
-    var photos: [ExtractedPhoto] { job.extractedPhotos }
-    var hasMultiple: Bool { photos.count > 1 }
+    var photo: ExtractedPhoto? { job.extractedPhotos[safe: photoIndex] }
 
     var body: some View {
-        VStack(spacing: 0) {
-            if hasMultiple {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(Array(photos.enumerated()), id: \.offset) { idx, photo in
-                            OrientationThumbnail(
-                                photo: photo,
-                                inputName: job.inputName,
-                                photoIndex: idx + 1,
-                                isSelected: idx == selectedIndex
-                            )
-                            .onTapGesture {
-                                withAnimation(.saStandard) { selectedIndex = idx }
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                }
-                .background(Color.saStone100)
-                Divider()
-            }
-
-            if let photo = photos[safe: selectedIndex] {
-                OrientationPhotoPanel(
-                    photo: photo,
-                    inputName: job.inputName,
-                    photoIndex: selectedIndex + 1
-                )
-            } else {
-                OrientationPlaceholder()
-            }
+        if let photo {
+            OrientationPhotoPanel(
+                photo: photo,
+                inputName: job.inputName,
+                photoIndex: photoIndex + 1
+            )
+        } else {
+            OrientationPlaceholder()
         }
-    }
-}
-
-// MARK: - Thumbnail strip item
-
-private struct OrientationThumbnail: View {
-    let photo: ExtractedPhoto
-    let inputName: String
-    let photoIndex: Int
-    let isSelected: Bool
-
-    @State private var image: NSImage?
-
-    var body: some View {
-        VStack(spacing: 4) {
-            Group {
-                if let img = image {
-                    Image(nsImage: img).resizable().aspectRatio(contentMode: .fill)
-                } else {
-                    Rectangle().fill(Color.saStone200)
-                }
-            }
-            .frame(width: 56, height: 56)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .overlay {
-                RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(isSelected ? Color.saAmber500 : Color.clear, lineWidth: 2)
-            }
-            .rotationEffect(rotationAngle)
-
-            if photo.rotationOverride != nil {
-                Image(systemName: "pencil.circle.fill")
-                    .font(.system(size: 10))
-                    .foregroundStyle(Color.saAmber500)
-            }
-        }
-        .task {
-            let url = PipelineStep.orientation.debugImageURL(forInputName: inputName, photoIndex: photoIndex)
-                ?? photo.imageURL
-            image = NSImage(contentsOf: url)
-        }
-    }
-
-    var rotationAngle: Angle {
-        .degrees(Double(photo.rotationOverride ?? 0))
     }
 }
 
@@ -131,17 +60,14 @@ private struct OrientationPhotoPanel: View {
                     .font(.fraunces(18))
                     .foregroundStyle(Color.saTextPrimary)
 
-                // Rotation picker
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Rotation")
                         .font(.dmSans(12, weight: .semibold))
                         .foregroundStyle(Color.saTextSecondary)
-
                     RotationPicker(selected: $pendingRotation)
                         .onChange(of: pendingRotation) { checkDirty() }
                 }
 
-                // Scene description
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Scene description")
                         .font(.dmSans(12, weight: .semibold))
@@ -159,14 +85,13 @@ private struct OrientationPhotoPanel: View {
                         .frame(minHeight: 80, maxHeight: 120)
                         .onChange(of: pendingDescription) { checkDirty() }
 
-                    Text("Passed to glare removal as scene context. Leave blank to use the AI-generated description.")
+                    Text("Passed to glare removal as scene context. Leave blank to use the AI description.")
                         .font(.dmSans(11))
                         .foregroundStyle(Color.saTextTertiary)
                 }
 
                 Spacer()
 
-                // Action buttons
                 if isDirty {
                     HStack(spacing: 8) {
                         Button("Discard") {
@@ -194,12 +119,10 @@ private struct OrientationPhotoPanel: View {
             .background(Color.saBackground)
         }
         .task(id: photoIndex) {
-            // Load oriented debug image if available, fall back to output image
-            let url = PipelineStep.orientation.debugImageURL(forInputName: inputName, photoIndex: photoIndex)
-                ?? photo.imageURL
+            let url = PipelineStep.orientation.debugImageURL(
+                forInputName: inputName, photoIndex: photoIndex
+            ) ?? photo.imageURL
             image = NSImage(contentsOf: url)
-
-            // Sync pending state from photo model
             pendingRotation = photo.rotationOverride ?? 0
             pendingDescription = photo.sceneDescription ?? ""
             isDirty = false
@@ -207,9 +130,8 @@ private struct OrientationPhotoPanel: View {
     }
 
     private func checkDirty() {
-        let savedRotation = photo.rotationOverride ?? 0
-        let savedDesc = photo.sceneDescription ?? ""
-        isDirty = pendingRotation != savedRotation || pendingDescription != savedDesc
+        isDirty = pendingRotation != (photo.rotationOverride ?? 0)
+            || pendingDescription != (photo.sceneDescription ?? "")
     }
 }
 
@@ -227,35 +149,27 @@ private struct RotationPicker: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            ForEach(options, id: \.degrees) { option in
+            ForEach(options, id: \.degrees) { opt in
                 Button {
-                    withAnimation(.saStandard) { selected = option.degrees }
+                    withAnimation(.saStandard) { selected = opt.degrees }
                 } label: {
                     HStack(spacing: 4) {
-                        if option.degrees != 0 {
+                        if opt.degrees != 0 {
                             Image(systemName: "rotate.right")
                                 .font(.system(size: 10))
                         }
-                        Text(option.label)
-                            .font(.dmSans(12, weight: selected == option.degrees ? .semibold : .regular))
+                        Text(opt.label)
+                            .font(.dmSans(12, weight: selected == opt.degrees ? .semibold : .regular))
                     }
                     .padding(.horizontal, 8)
                     .padding(.vertical, 5)
-                    .background(
-                        selected == option.degrees
-                            ? Color.saAmber500
-                            : Color.saCard
-                    )
-                    .foregroundStyle(
-                        selected == option.degrees
-                            ? Color.white
-                            : Color.saTextPrimary
-                    )
+                    .background(selected == opt.degrees ? Color.saAmber500 : Color.saCard)
+                    .foregroundStyle(selected == opt.degrees ? Color.white : Color.saTextPrimary)
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                     .overlay {
                         RoundedRectangle(cornerRadius: 6)
                             .strokeBorder(
-                                selected == option.degrees ? Color.clear : Color.saStone200,
+                                selected == opt.degrees ? Color.clear : Color.saStone200,
                                 lineWidth: 1
                             )
                     }
@@ -266,7 +180,7 @@ private struct RotationPicker: View {
     }
 }
 
-// MARK: - Placeholder when no photos extracted yet
+// MARK: - Placeholder
 
 private struct OrientationPlaceholder: View {
     var body: some View {
