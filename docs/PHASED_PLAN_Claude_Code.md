@@ -720,3 +720,11 @@ Quality gates (must pass before moving to web UI / AWS):
 5. **Pin what works.** When a step works well, `git commit`. Run the full pipeline after each phase to catch regressions.
 
 6. **Focus on the album pages.** The three_pics and two_pics images are the critical benchmark — they exercise glare removal AND photo splitting together. If these look great, you have a product.
+
+---
+
+## What's Next: Web UI
+
+Phases 1–9 (local processing engine) and the macOS app are complete. The next major initiative is the **web UI**, which replicates the macOS app experience in the browser backed by AWS Lambda and S3 storage.
+
+See **[WEB_UI_PLAN.md](WEB_UI_PLAN.md)** for the full implementation plan, which starts with a codebase refactor (Phase 0) to introduce pluggable storage backends before building the cloud infrastructure.

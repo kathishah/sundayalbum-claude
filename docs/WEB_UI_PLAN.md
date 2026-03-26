@@ -1,0 +1,541 @@
+# Sunday Album Web UI — Implementation Plan
+
+**Version:** 1.0
+**Date:** March 2026
+**Status:** Approved
+**Companion Documents:** PRD_Album_Digitizer.md, UI_Design_Album_Digitizer.md, PHASED_PLAN_Claude_Code.md
+
+---
+
+## Context
+
+Sunday Album has a feature-complete Python CLI pipeline and a native macOS SwiftUI app. We're building a web UI backed by AWS Lambda (one per pipeline step), Step Functions orchestration, and S3 storage. Before building the web layer, we refactor the existing codebase to support pluggable storage backends so the CLI, macOS app, and web all share the same pipeline code.
+
+**Key decisions:**
+- **Refactor first** — abstract storage I/O so existing CLI + macOS app keep working
+- One Lambda per pipeline step (~10 Lambdas) for maximum granularity
+- Full step-detail UI (replicating macOS app) from the start
+- Next.js 14+ (App Router) + Tailwind CSS + Framer Motion
+- HEIC/JPEG/PNG only (no DNG on web)
+- Email-based auth with verification codes via SES
+- Flat S3 structure: `{user_hash}/uploads/`, `{user_hash}/debug/`, `{user_hash}/output/`
+- No job_id subfolders — filenames use input stem as prefix, DynamoDB tracks job→file mapping
+
+---
+
+## Phase 0: Refactor Existing Codebase for Pluggable Storage
+
+**Goal:** Abstract file I/O so the same pipeline code works with local filesystem (CLI/macOS) and S3 (web). Each step becomes independently callable with clear serializable I/O. CLI and macOS app continue to work unchanged.
+
+### 0.1 Storage Backend Abstraction
+
+Create `src/storage/` module:
+
+```
+src/storage/
+  __init__.py           # exports StorageBackend, LocalStorage, get_backend()
+  backend.py            # StorageBackend protocol (ABC)
+  local.py              # LocalStorage implementation (current behavior)
+  s3.py                 # S3Storage implementation (new, for Lambda)
+```
+
+**`src/storage/backend.py`** — Protocol defining the I/O contract:
+
+```python
+class StorageBackend(Protocol):
+    def read_image(self, key: str) -> np.ndarray:
+        """Read image from storage. Returns float32 RGB [0,1]."""
+        ...
+
+    def write_image(self, key: str, image: np.ndarray,
+                    format: str = "png", quality: int = 95) -> str:
+        """Write image to storage. Returns the key/path written."""
+        ...
+
+    def read_json(self, key: str) -> dict:
+        """Read JSON metadata from storage."""
+        ...
+
+    def write_json(self, key: str, data: dict) -> str:
+        """Write JSON metadata to storage."""
+        ...
+
+    def exists(self, key: str) -> bool:
+        ...
+
+    def get_url(self, key: str) -> str:
+        """Get a URL for the file (file:// for local, presigned for S3)."""
+        ...
+```
+
+**`src/storage/local.py`** — Wraps current `Path`-based I/O. `key` is a relative path resolved against a `base_dir`. This is what the CLI and macOS app use. No behavior change.
+
+**`src/storage/s3.py`** — Uses boto3. `key` is an S3 object key under a `prefix` (e.g., `{user_hash}/`). `get_url()` returns presigned URLs. Created later in Phase 2 but the interface is defined now.
+
+### 0.2 Refactor Pipeline to Use StorageBackend
+
+**Modify `src/pipeline.py`:**
+
+- `Pipeline.__init__()` accepts an optional `storage: StorageBackend` parameter (defaults to `LocalStorage(base_dir)`)
+- Each step in `process()` reads input from and writes output to `storage` using key conventions
+- Key naming uses input stem as prefix: `debug/{stem}_01_loaded.jpg`, `output/SundayAlbum_{stem}_Photo01.jpg`
+- Remove hardcoded `Path` operations from the pipeline body — delegate to storage backend
+
+**Key convention (flat, stem-prefixed):**
+
+```
+uploads/{original_filename}              # e.g., uploads/IMG_cave_normal.HEIC
+debug/{stem}_01_loaded.jpg               # e.g., debug/IMG_cave_normal_01_loaded.jpg
+debug/{stem}_02_normalized.jpg
+debug/{stem}_03_page_detected.jpg
+debug/{stem}_04_page_corrected.jpg
+debug/{stem}_05_photo_boundaries.jpg
+debug/{stem}_05_photo_01_raw.jpg
+debug/{stem}_05b_photo_01_oriented.jpg
+debug/{stem}_07_photo_01_deglared.jpg
+debug/{stem}_14_photo_01_enhanced.jpg
+output/SundayAlbum_{stem}_Photo01.jpg    # final output
+```
+
+Intermediate data between steps (metadata, not images displayed to user):
+
+```
+debug/{stem}_03_page_detection.json      # corners, confidence, quads
+debug/{stem}_05_photo_detections.json    # bounding boxes, corners per photo
+debug/{stem}_05b_photo_01_analysis.json  # rotation, scene_description
+```
+
+### 0.3 Refactor `save_debug_image`
+
+**Modify `src/utils/debug.py`:**
+
+- `save_debug_image()` accepts a `StorageBackend` instead of a raw `Path`
+- Signature: `save_debug_image(image, key, storage, description=None, quality=95)`
+- Internally converts float32→uint8→JPEG bytes, then calls `storage.write_image()`
+
+### 0.4 Extract Step Functions
+
+Each pipeline step should be callable as a standalone function that:
+1. Reads its input from storage (image + metadata from previous step)
+2. Runs the processing
+3. Writes its output to storage (image + metadata for next step)
+4. Returns a result dict (metadata summary, not the image itself)
+
+Create `src/steps/` module that wraps existing processing functions:
+
+```
+src/steps/
+  __init__.py
+  load.py               # wraps src/preprocessing/loader.load_image
+  normalize.py           # wraps src/preprocessing/normalizer.normalize
+  page_detect.py         # wraps src/page_detection/detector.detect_page
+  perspective.py         # wraps src/page_detection/perspective.correct_perspective
+  photo_detect.py        # wraps src/photo_detection/detector.detect_photos
+  photo_split.py         # wraps src/photo_detection/splitter.split_photos
+  ai_orient.py           # wraps src/ai/claude_vision.analyze_photo_for_processing
+  glare_remove.py        # wraps src/glare/remover_openai.remove_glare_openai
+  geometry.py            # wraps src/geometry (passthrough currently)
+  color_restore.py       # wraps src/color (all 4 sub-steps)
+```
+
+Each step module exports a `run()` function:
+
+```python
+def run(storage: StorageBackend, stem: str, config: PipelineConfig,
+        photo_index: Optional[int] = None) -> dict:
+    """Run this pipeline step.
+
+    Reads input from storage using key conventions.
+    Writes output to storage using key conventions.
+    Returns metadata dict (not image data).
+    """
+```
+
+### 0.5 Refactor `Pipeline.process()` to Use Steps
+
+Rewrite the body of `Pipeline.process()` to call `steps.load.run(storage, stem, config)`, `steps.normalize.run(storage, stem, config)`, etc. in sequence. This is a pure refactor — same behavior, same output, but using the storage abstraction and step functions.
+
+### 0.6 Verify CLI + macOS App Still Work
+
+- Run `python -m src.cli process test-images/IMG_three_pics_normal.HEIC --output ./output/ --debug`
+- Confirm all debug images and output JPEGs are identical to pre-refactor
+- Run existing tests: `pytest tests/ -v`
+
+**Files modified in Phase 0:**
+- `src/pipeline.py` — use StorageBackend + step functions
+- `src/utils/debug.py` — accept StorageBackend
+- New: `src/storage/__init__.py`, `backend.py`, `local.py`
+- New: `src/steps/__init__.py`, `load.py`, `normalize.py`, `page_detect.py`, `perspective.py`, `photo_detect.py`, `photo_split.py`, `ai_orient.py`, `glare_remove.py`, `geometry.py`, `color_restore.py`
+- `src/cli.py` — pass `LocalStorage` to Pipeline
+
+---
+
+## Phase 1: AWS Infrastructure + Auth + Upload
+
+### 1.1 S3 Bucket: `sundayalbum-data`
+
+Flat structure per user:
+
+```
+{user_hash}/
+  uploads/                    # original uploaded files
+  debug/                      # debug images + intermediate metadata JSONs
+  output/                     # final output JPEGs
+```
+
+- `user_hash` = SHA-256 of lowercase email
+- Files are prefixed with input stem to avoid collisions
+- DynamoDB `sa-jobs` tracks which files belong to which job
+- Lifecycle policies: uploads/ 30 days, debug/ 7 days, output/ 30 days
+
+### 1.2 DynamoDB Tables
+
+**`sa-sessions`** — email auth
+```
+PK: email (string)
+code: string (6-digit)
+code_expires_at: number (Unix timestamp, 10min TTL)
+session_token: string (UUID)
+token_expires_at: number (Unix timestamp, 7-day TTL)
+user_hash: string (SHA-256)
+```
+
+**`sa-jobs`** — job tracking
+```
+PK: user_hash (string)
+SK: job_id (string, ULID for ordering)
+status: string (uploading | processing | complete | failed)
+current_step: string (load | normalize | page_detect | ... | done)
+step_detail: string (e.g. "Photo 2 of 3: glare removal")
+input_filename: string
+input_stem: string                  # used as file prefix in S3
+photo_count: number
+output_keys: List[string]           # S3 keys of final output JPEGs
+debug_keys: Map[string, string]     # step_name → S3 key for debug images
+created_at: string (ISO)
+updated_at: string (ISO)
+error_message: string (optional)
+processing_time: number (optional)
+execution_arn: string (Step Functions ARN)
+ttl: number (30 days)
+```
+
+**`sa-ws-connections`** — WebSocket tracking
+```
+PK: connection_id
+job_id: string
+user_hash: string
+```
+
+### 1.3 Auth Flow
+
+1. User enters email → `POST /auth/send-code`
+2. Backend generates 6-digit code, stores in `sa-sessions` (10min TTL), sends via SES
+3. User enters code → `POST /auth/verify`
+4. Backend validates, creates session_token (UUID, 7-day TTL), returns `{ session_token, user_hash }`
+5. Frontend stores token in localStorage
+6. Rate limits: 3 code sends/email/hour, 5 verify attempts/code
+
+### 1.4 API Endpoints (API Gateway HTTP API)
+
+```
+POST   /auth/send-code         { email }
+POST   /auth/verify             { email, code } → { session_token, user_hash }
+POST   /auth/logout
+
+GET    /jobs                    → list user's jobs
+POST   /jobs                    { filename, format, size } → { job_id, upload_url }
+GET    /jobs/{jobId}            → job status + presigned URLs for debug/output images
+DELETE /jobs/{jobId}            → cancel/delete
+
+POST   /jobs/{jobId}/start      → trigger Step Functions after upload
+POST   /jobs/{jobId}/reprocess  { from_step, photo_index?, overrides? }
+```
+
+### 1.5 API Lambda Handlers
+
+New: `api/` directory at project root:
+- `api/auth.py` — send-code, verify, logout (SES + DynamoDB)
+- `api/jobs.py` — CRUD, presigned URLs, trigger Step Functions
+- `api/websocket.py` — connect, disconnect, subscribe, broadcast
+
+### 1.6 Infrastructure as Code
+
+AWS CDK stack defining all resources. New: `infra/` directory.
+
+### 1.7 Verification
+
+- Sign in with email, receive code, verify
+- Create job, get presigned upload URL, upload HEIC file
+- Confirm file lands in S3 at `{user_hash}/uploads/{filename}`
+
+---
+
+## Phase 2: Pipeline Lambdas + Step Functions
+
+### 2.1 Lambda Container Image
+
+Single Dockerfile, shared by all 10 Lambdas (different handler entry points):
+
+```dockerfile
+FROM public.ecr.aws/lambda/python:3.12
+RUN dnf install -y libheif-devel && dnf clean all
+COPY requirements-lambda.txt .
+RUN pip install --no-cache-dir -r requirements-lambda.txt
+COPY src/ ${LAMBDA_TASK_ROOT}/src/
+COPY handlers/ ${LAMBDA_TASK_ROOT}/handlers/
+```
+
+`requirements-lambda.txt` = production deps only (exclude torch, diffusers, transformers, pytest, mypy, ruff, matplotlib, rawpy).
+
+### 2.2 Lambda Handlers
+
+New: `handlers/` directory. Each handler:
+1. Receives event from Step Functions: `{ user_hash, job_id, stem, config, photo_index? }`
+2. Creates `S3Storage(bucket, prefix=user_hash)`
+3. Calls `steps.{step_name}.run(storage, stem, config, photo_index)`
+4. Updates DynamoDB job status via `handlers/common.py`
+5. Returns result dict for Step Functions
+
+```
+handlers/
+  common.py               # S3Storage init, DynamoDB status updates, config parsing
+  load.py                 # → steps.load.run()
+  normalize.py            # → steps.normalize.run()
+  page_detect.py          # → steps.page_detect.run()
+  perspective.py          # → steps.perspective.run()
+  photo_detect.py         # → steps.photo_detect.run()
+  photo_split.py          # → steps.photo_split.run()
+  ai_orient.py            # → steps.ai_orient.run()
+  glare_remove.py         # → steps.glare_remove.run()
+  geometry.py             # → steps.geometry.run()
+  color_restore.py        # → steps.color_restore.run()
+```
+
+### 2.3 S3Storage Implementation
+
+New: `src/storage/s3.py` — implements `StorageBackend` protocol using boto3.
+
+### 2.4 Step Functions State Machine
+
+```
+sa-load → sa-normalize → sa-page-detect → sa-perspective →
+sa-photo-detect → sa-photo-split →
+ProcessPhotosMap (parallel per photo):
+  sa-ai-orient → sa-glare-remove → sa-geometry → sa-color-restore
+→ Complete
+```
+
+Each state updates DynamoDB `sa-jobs.current_step`. DynamoDB Streams trigger WebSocket broadcaster.
+
+### 2.5 Lambda Specifications
+
+| Lambda | Handler | RAM | Timeout | Notes |
+|--------|---------|-----|---------|-------|
+| `sa-load` | `handlers/load.handler` | 2048MB | 60s | Loads HEIC/JPEG/PNG from S3 |
+| `sa-normalize` | `handlers/normalize.handler` | 1024MB | 30s | Resize + thumbnail |
+| `sa-page-detect` | `handlers/page_detect.handler` | 1024MB | 60s | GrabCut segmentation |
+| `sa-perspective` | `handlers/perspective.handler` | 1024MB | 30s | Homographic warp |
+| `sa-photo-detect` | `handlers/photo_detect.handler` | 1024MB | 60s | Contour detection |
+| `sa-photo-split` | `handlers/photo_split.handler` | 1024MB | 30s | Extract photo crops |
+| `sa-ai-orient` | `handlers/ai_orient.handler` | 512MB | 30s | Claude Haiku API call |
+| `sa-glare-remove` | `handlers/glare_remove.handler` | 1024MB | 120s | OpenAI API call (slow) |
+| `sa-geometry` | `handlers/geometry.handler` | 1024MB | 30s | Passthrough currently |
+| `sa-color-restore` | `handlers/color_restore.handler` | 1024MB | 30s | WB + deyellow + CLAHE + sharpen |
+
+### 2.6 Verification
+
+- Trigger pipeline via `POST /jobs/{jobId}/start` for a HEIC test image
+- All 10 Lambda steps run in sequence, per-photo steps fan out
+- Output JPEGs appear in `{user_hash}/output/`
+- Debug images appear in `{user_hash}/debug/`
+- DynamoDB job record shows `status: complete`
+
+---
+
+## Phase 3: Real-time Progress + Library UI
+
+### 3.1 WebSocket Progress
+
+- API Gateway WebSocket API + broadcaster Lambda
+- DynamoDB Streams on `sa-jobs` table → Lambda → push to connected clients
+- Frontend `useJobProgress` hook: WebSocket primary, polling `GET /jobs/{jobId}` every 3s fallback
+
+Progress message format:
+```json
+{
+  "type": "step_update",
+  "jobId": "...",
+  "step": "sa-glare-remove",
+  "detail": "Photo 2 of 3",
+  "progress": 0.55
+}
+```
+
+### 3.2 Frontend: Library Page
+
+Replicate `mac-app/SundayAlbum/Views/LibraryView.swift`:
+
+- Adaptive grid of `AlbumPageCard` components
+- `DropZone` when empty (drag-drop + "Choose Files" button)
+- Cards show: before thumbnail → progress wheel → after thumbnails
+- Single-click card → expanded overlay
+- Double-click card → navigate to step detail
+- Real-time progress updates from WebSocket → Zustand store → re-render
+
+### 3.3 Frontend: Auth Pages
+
+- `/login` — email input → code verification → redirect to `/library`
+
+### 3.4 Design System (Tailwind config)
+
+Translate from `mac-app/SundayAlbum/Theme/DesignSystem.swift`:
+- Colors: `sa-amber-{50..700}`, `sa-stone-{50..950}`, `sa-success`, `sa-error`
+- Fonts: Fraunces (display), DM Sans (body), JetBrains Mono (mono)
+- Animations: `sa-standard` (200ms), `sa-slide` (350ms), `sa-reveal` (600ms)
+
+### 3.5 Verification
+
+- Upload file from browser, watch card progress update in real-time
+- See output thumbnails appear when processing completes
+
+---
+
+## Phase 4: Step Detail Views
+
+Replicate `mac-app/SundayAlbum/Views/StepDetailView.swift` and all step-specific views.
+
+### 4.1 StepDetailLayout
+
+3-pane layout: breadcrumb (top), StepTree (left 196px), StepCanvas (right).
+
+### 4.2 Step-Specific Views
+
+| View | macOS Reference | Key Interactions |
+|------|----------------|------------------|
+| PageDetectionView | `Views/Steps/PageDetectionStepView.swift` | SVG overlay with draggable corner handles |
+| PhotoSplitView | `Views/Steps/PhotoSplitStepView.swift` | Colored region rectangles |
+| OrientationView | `Views/Steps/OrientationStepView.swift` | Rotation picker (0/90/180/270) + scene desc editor |
+| GlareRemovalView | `Views/Steps/GlareRemovalStepView.swift` | Before/after with `.saReveal` animation |
+| ColorCorrectionView | `Views/Steps/ColorCorrectionStepView.swift` | Sliders (brightness, saturation, warmth, sharpness) |
+| ResultsView | `Views/Steps/ResultsStepView.swift` | Photo grid + ComparisonView + export/download |
+
+All images loaded from S3 via presigned URLs from `GET /jobs/{jobId}` response (which includes `debug_keys` map).
+
+### 4.3 Verification
+
+- Navigate to step detail for a completed job
+- Click through all steps in the tree, see corresponding images
+- Verify animations match macOS app timing
+
+---
+
+## Phase 5: Re-processing + Polish
+
+### 5.1 Re-process from Step
+
+- `POST /jobs/{jobId}/reprocess { from_step, photo_index, overrides }`
+- Backend starts a new Step Functions execution with `start_from` parameter
+- State machine uses Choice states to skip steps before `start_from`
+- Overrides (e.g., adjusted corners, rotation change) saved to `debug/{stem}_overrides.json`
+
+### 5.2 Wire Up Interactive Controls
+
+- PageDetectionView corner drag → reprocess from perspective
+- OrientationView rotation change → reprocess from ai_orient
+- ColorCorrectionView slider change → reprocess from color_restore
+
+### 5.3 Polish
+
+- Error handling: retry buttons, error messages per step
+- Mobile responsive: library + step detail adapt to smaller screens
+- Loading states and skeleton placeholders for images
+
+### 5.4 Verification
+
+- Adjust corners in PageDetectionView, see pipeline re-run from perspective step
+- Change rotation, see glare removal re-run with correct orientation
+
+---
+
+## Phase 6: Production Hardening
+
+- CloudFront distribution for frontend (S3 static hosting)
+- CORS configuration on API Gateway
+- Per-user rate limiting (3 concurrent jobs, 50 photos/day)
+- CloudWatch dashboards + alarms
+- "Delete my data" endpoint
+- Provisioned concurrency on critical Lambdas (optional, for cold start mitigation)
+
+---
+
+## Frontend File Structure
+
+```
+web/
+  src/
+    app/
+      layout.tsx                    # root: fonts, providers
+      page.tsx                      # landing → /login or /library
+      (auth)/login/page.tsx         # email + code verification
+      (app)/
+        layout.tsx                  # authenticated wrapper
+        library/page.tsx            # library grid
+        jobs/[jobId]/page.tsx       # step detail
+
+    components/
+      ui/                           # Button, Input, Slider, Card, ProgressWheel
+      auth/                         # EmailForm, CodeVerification
+      library/
+        DropZone.tsx
+        AlbumPageCard.tsx
+        ExpandedCard.tsx
+      step-detail/
+        StepDetailLayout.tsx
+        StepTree.tsx
+        StepCanvas.tsx
+        ActionBar.tsx
+        ReprocessBar.tsx
+      steps/
+        PageDetectionView.tsx
+        PhotoSplitView.tsx
+        OrientationView.tsx
+        GlareRemovalView.tsx
+        ColorCorrectionView.tsx
+        ResultsView.tsx
+        ComparisonView.tsx
+      shared/
+        ImagePane.tsx
+        BeforeAfterReveal.tsx
+
+    lib/
+      api.ts
+      auth.ts
+      websocket.ts
+      s3-upload.ts
+      types.ts
+      constants.ts
+
+    stores/
+      auth-store.ts
+      jobs-store.ts
+      step-store.ts
+
+    hooks/
+      useJobProgress.ts
+      usePresignedUpload.ts
+      useStepImages.ts
+```
+
+---
+
+## Risks and Mitigations
+
+| Risk | Mitigation |
+|------|------------|
+| S3 round-trips between every Lambda add ~1-2s overhead per step | Accept for granularity; intermediate PNGs are <5MB |
+| Lambda cold starts (5-15s for container) | Provisioned concurrency or show "warming up" message |
+| HEIC can't be previewed in `<img>` tags | Use `debug/{stem}_02_normalized.jpg` thumbnail as "before" preview |
+| OpenAI rate limits with parallel per-photo calls | Step Functions Map MaxConcurrency:4 + existing backoff logic |
+| `pillow-heif` on Lambda Linux | Test container build early in Phase 1; fallback: convert on upload |
+| Phase 0 refactor breaks CLI/macOS | Run existing tests after each refactor step; compare debug output |

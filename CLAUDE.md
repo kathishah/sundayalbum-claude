@@ -119,6 +119,7 @@ sundayalbum-claude/
 │   ├── PHASED_PLAN_Claude_Code.md          # Phased plan of implementation starting with a local image processing engine
 │   ├── Implementation_Album_Digitizer.md   # Implementation guide for the full project
 │   ├── UI_Design_Album_Digitizer.md        # UI Design for the full project
+│   ├── WEB_UI_PLAN.md                      # Web UI implementation plan (Lambda + S3 + Next.js)
 │   ├── IMG_harbor_prores.DNG
 │
 ├── journal/                     # Phase summaries and development journal
@@ -238,12 +239,14 @@ python -m src.cli status
 - Detailed descriptions of each step
 - Comprehensive usage examples
 
-**Current Progress (as of 2026-02-19):**
-- **Overall:** All major pipeline steps implemented and producing quality output
+**Current Progress (as of 2026-03-25):**
+- **Overall:** All major pipeline steps implemented and producing quality output. macOS app built (SwiftUI). Web UI planned (see `docs/WEB_UI_PLAN.md`).
 - **Priority 1 (Glare):** OpenAI `gpt-image-1.5` removal is the default path. OpenCV inpainting is the fallback when no OpenAI key is available. Multi-shot compositing deferred (needs multi-angle images).
-- **Priority 2 (Splitting):** 2/2 steps complete. GrabCut page detection + contour photo detection working on all test images.
+- **Priority 2 (Splitting):** 2/2 steps complete. GrabCut page detection + contour photo detection working on all test images including spine-separated album pages (fixed 2026-03-04).
 - **Priority 3 (Geometry):** AI orientation correction (Step 4.5) handles gross 90°/180°/270° errors per-photo. Small-angle Hough-line rotation disabled (fires on image content; border-based replacement pending).
 - **Priority 4 (Color):** 4/4 steps complete (white balance, deyellowing, CLAHE fade restore, sharpening).
+- **macOS App:** Native SwiftUI app with Python CLI bridge, step-by-step UI, drag-drop input. See `mac-app/`.
+- **Web UI (next):** AWS Lambda per pipeline step + Step Functions orchestration + S3 storage + Next.js frontend. Requires codebase refactor first (pluggable storage backend). See `docs/WEB_UI_PLAN.md`.
 
 ### Process Command
 
