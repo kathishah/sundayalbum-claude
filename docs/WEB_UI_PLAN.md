@@ -455,6 +455,67 @@ Two environments only — dev and prod. No local Docker Compose backend stack.
 - Push to `main` branch → build image → push to ECR → deploy to `sundayalbum-web-prod`
 - Backend (CDK) deployments remain manual (`cdk deploy`) — infrastructure changes are deliberate, not automatic
 
+### 3.0 CDK Stage Parameterization (prerequisite)
+
+Before any Phase 3 infrastructure is added, the CDK stack must be parameterized so the same code deploys both environments. This is the only change needed from Phase 1/2 — all Lambda handler code (`api/`, `handlers/`) already reads resource names from environment variables injected by CDK, so no application code changes are required.
+
+**What changes:**
+
+`infra/app.py` — read `stage` from CDK context, use it as the stack name suffix:
+```python
+stage = app.node.try_get_context("stage") or "prod"
+SundayAlbumStack(app, f"SundayAlbumStack-{stage}",
+    stage=stage,
+    env=cdk.Environment(account="680073251743", region="us-west-2"))
+```
+
+`infra/infra/sundayalbum_stack.py` — accept `stage` parameter, suffix all hardcoded resource names:
+```python
+# stage="prod" → suffix="" (prod resources keep current names for continuity)
+# stage="dev"  → suffix="-dev"
+suffix = "" if stage == "prod" else f"-{stage}"
+
+bucket_name = f"sundayalbum-data-{self.account}-{self.region}{suffix}"
+table_name  = f"sa-sessions{suffix}"
+# ... all Lambda function names, role names, state machine name, API name
+```
+
+`RemovalPolicy` per stage:
+```python
+removal_policy = RemovalPolicy.RETAIN if stage == "prod" else RemovalPolicy.DESTROY
+```
+
+CfnOutput export names also suffixed so both stacks can coexist in the same account:
+```python
+export_name=f"SundayAlbumApiUrl-{stage}"
+```
+
+**Deployment commands:**
+```bash
+# Deploy / update prod (current production stack — no resource renames)
+cdk deploy --context stage=prod
+
+# Deploy dev stack (new isolated environment)
+cdk deploy --context stage=dev
+
+# Tear down dev stack cleanly (DESTROY policy)
+cdk destroy --context stage=dev
+```
+
+**Post-deploy: set API keys on dev pipeline Lambdas** (same as prod, done once via CLI):
+```bash
+for fn in sa-pipeline-load-dev sa-pipeline-ai-orient-dev sa-pipeline-glare-remove-dev ...; do
+  aws lambda update-function-configuration --function-name $fn \
+    --environment "Variables={...,ANTHROPIC_API_KEY=...,OPENAI_API_KEY=...}"
+done
+```
+
+**Verification:** two fully isolated stacks visible in CloudFormation console — `SundayAlbumStack-prod` and `SundayAlbumStack-dev`. Each has its own S3 bucket, DynamoDB tables, Lambda functions, API Gateway URL, and Step Functions state machine. A job submitted to the dev API touches only dev resources.
+
+**Files modified in Phase 3.0:**
+- `infra/app.py`
+- `infra/infra/sundayalbum_stack.py`
+
 ### 3.1 WebSocket Progress (backend)
 
 Wire up the DynamoDB Streams → Lambda → WebSocket push path that is already stubbed in `api/websocket.py`:
