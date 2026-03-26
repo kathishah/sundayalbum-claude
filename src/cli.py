@@ -228,10 +228,14 @@ def process(
         debug_dir.mkdir(parents=True, exist_ok=True)
         logger.info(f"Debug output will be saved to: {debug_dir}")
 
+    from src.utils.secrets import load_secrets
+    _secrets = load_secrets()
     config = PipelineConfig(
         use_openai_glare_removal=not no_openai_glare,
         use_ai_orientation=not no_ai_orientation,
         forced_scene_description=scene_desc,
+        anthropic_api_key=_secrets.anthropic_api_key or "",
+        openai_api_key=_secrets.openai_api_key or "",
     )
 
     def _process_one(input_file: Path) -> Optional[object]:

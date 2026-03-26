@@ -71,10 +71,24 @@ def make_storage(user_hash: str):
 
 # ── Pipeline config ───────────────────────────────────────────────────────────
 
-def make_config(overrides: dict | None = None):
-    """Return a PipelineConfig with optional overrides from the Step Functions event."""
+def make_config(overrides: dict | None = None, user_keys: dict | None = None):
+    """Return a PipelineConfig with API keys and optional overrides.
+
+    API keys are resolved here — user-supplied keys take priority over system
+    keys fetched from Secrets Manager — and injected as explicit fields on the
+    config so that pipeline steps are pure functions with no env-var reads.
+
+    Args:
+        overrides: Optional dict of PipelineConfig field overrides from the
+                   Step Functions event ``config`` payload.
+        user_keys: Optional dict with ``anthropic_api_key`` and/or
+                   ``openai_api_key`` supplied by the user via the settings UI.
+    """
     from src.pipeline import PipelineConfig
-    cfg = PipelineConfig()
+    cfg = PipelineConfig(
+        anthropic_api_key=get_anthropic_key(user_keys),
+        openai_api_key=get_openai_key(user_keys),
+    )
     if overrides:
         for k, v in overrides.items():
             if hasattr(cfg, k):

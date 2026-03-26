@@ -60,18 +60,14 @@ def run(
             pass
 
     use_openai = config.use_openai_glare_removal
-    openai_key = None
+    openai_key = config.openai_api_key or None
 
-    if use_openai:
-        from src.utils.secrets import load_secrets
-        secrets = load_secrets()
-        openai_key = secrets.openai_api_key
-        if not openai_key:
-            logger.warning(
-                "glare_remove[%d]: OPENAI_API_KEY not set — falling back to OpenCV",
-                photo_index,
-            )
-            use_openai = False
+    if use_openai and not openai_key:
+        logger.warning(
+            "glare_remove[%d]: openai_api_key not set in config — falling back to OpenCV",
+            photo_index,
+        )
+        use_openai = False
 
     if use_openai and openai_key:
         from src.glare.remover_openai import remove_glare_openai

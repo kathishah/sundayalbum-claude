@@ -61,13 +61,11 @@ def run(
         return result
 
     from src.ai.claude_vision import analyze_photo_for_processing, apply_orientation
-    from src.utils.secrets import load_secrets
 
-    secrets = load_secrets()
-    api_key = secrets.anthropic_api_key
+    api_key = config.anthropic_api_key
 
     if not api_key:
-        logger.warning("ai_orient[%d]: ANTHROPIC_API_KEY not set — passing through", photo_index)
+        logger.warning("ai_orient[%d]: anthropic_api_key not set in config — passing through", photo_index)
         storage.write_image(out_key, image, format="jpeg", quality=95)
         result = {
             "rotation_degrees": 0,

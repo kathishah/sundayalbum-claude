@@ -1,9 +1,8 @@
 """Step Functions handler: glare_remove (per-photo, runs inside Map state)."""
 from __future__ import annotations
 import logging
-import os
 from typing import Any
-from handlers.common import fail_job, get_openai_key, make_config, make_storage, update_step
+from handlers.common import fail_job, make_config, make_storage, update_step
 import src.steps.glare_remove as step
 
 logger = logging.getLogger(__name__)
@@ -13,14 +12,9 @@ logger.setLevel(logging.INFO)
 def handler(event: dict, context: Any) -> dict:
     user_hash, job_id, stem = event["user_hash"], event["job_id"], event["stem"]
     photo_index: int = int(event["photo_index"])
-
-    # Resolve API key: user-supplied key takes priority, falls back to system key
-    # from Secrets Manager. Set in env so the step module picks it up transparently.
-    os.environ["OPENAI_API_KEY"] = get_openai_key(event.get("user_keys"))
-
     update_step(user_hash, job_id, "glare_remove", f"Removing glare from photo {photo_index}")
     storage = make_storage(user_hash)
-    config = make_config(event.get("config"))
+    config = make_config(event.get("config"), user_keys=event.get("user_keys"))
     try:
         result = step.run(storage, stem, config, photo_index=photo_index)
     except Exception as exc:

@@ -202,6 +202,12 @@ class PipelineConfig:
     openai_glare_input_fidelity: str = "high"
     forced_scene_description: Optional[str] = None
 
+    # API keys — passed explicitly so steps are pure functions with no env-var reads.
+    # Set by the caller (CLI, Lambda handler, macOS bridge) before running the pipeline.
+    # Empty string means "not provided" — steps will skip or fall back as configured.
+    anthropic_api_key: str = ""
+    openai_api_key: str = ""
+
 
 # ---------------------------------------------------------------------------
 # Result
