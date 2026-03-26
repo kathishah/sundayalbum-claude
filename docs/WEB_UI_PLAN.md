@@ -413,18 +413,47 @@ Each state updates DynamoDB `sa-jobs.current_step`. DynamoDB Streams trigger Web
 
 **Why App Runner won:** The `workorder-invoice` app on App Runner is already serving `veritasa.ai` with a custom domain and ACM cert — the exact pattern needed here. No unknowns. The pipeline Lambdas already use ECR, so the Docker build and push workflow is established. Amplify's SSR support is real but untested in this account.
 
+**Environments (decided 2026-03-26):**
+
+Two environments only — dev and prod. No local Docker Compose backend stack.
+
+| Environment | Branch | App URL | API | Purpose |
+|-------------|--------|---------|-----|---------|
+| **Dev** | `dev` | `dev.sundayalbum.com` | dev API Gateway | Development + testing against real AWS |
+| **Prod** | `main` | `app.sundayalbum.com` | prod API Gateway | Live users |
+
+**Rationale:** Sunday Album is being built for public distribution, not just personal use. Dev needs to run against real AWS services (real DynamoDB, real S3, real Lambda) to catch AWS-specific issues before they reach prod users — the Phase 2 bugs (presigned URL 307 redirects, OCI manifest format) would not have been caught by a local emulator. Docker on the dev Mac is used only to build and test the Next.js container image before pushing to ECR, not to run a local backend stack.
+
+**Local development workflow:**
+- `npm run dev` in `web/` → Next.js dev server on `localhost:3000`
+- `.env.local` → `NEXT_PUBLIC_API_URL` points at dev API Gateway URL
+- Real dev DynamoDB, real dev S3, real dev Lambda — all suffixed `-dev` via CDK `stage` context
+- Docker used only for `docker build` + `docker run` to verify the container before pushing
+
+**CDK stage parameterization:**
+- Single CDK stack parameterized with `stage` context (default: `prod`)
+- `cdk deploy --context stage=dev` → all resources suffixed `-dev` (tables, bucket, Lambdas, state machine)
+- `cdk deploy --context stage=prod` → production resources (current naming)
+- Each stage is fully isolated: separate S3 bucket, DynamoDB tables, Lambda functions, API Gateway, Step Functions
+
 **Domain setup:**
 - `sundayalbum.com` registered on Namecheap (no hosting configured yet)
 - Create Route 53 hosted zone for `sundayalbum.com`
-- Update Namecheap custom DNS to use Route 53 NS records
-- App Runner custom domain → ACM cert auto-provisioned and validated via Route 53
-- `www.sundayalbum.com` → CNAME to App Runner domain; apex `sundayalbum.com` → ALIAS
+- Update Namecheap custom DNS to Route 53 NS records (one-time)
+- `app.sundayalbum.com` → prod App Runner service
+- `dev.sundayalbum.com` → dev App Runner service (or App Runner default URL is fine for dev)
+- Future: `sundayalbum.com` and `www.sundayalbum.com` → public marketing site (separate repo, Phase 6+)
 
 **Infrastructure:**
 - Separate ECR repo: `sundayalbum-web` (distinct from CDK pipeline asset repo)
-- App Runner service: `sundayalbum-web`, 0.25 vCPU / 0.5 GB to start, auto-scale to 1 vCPU
-- Environment variables: `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_REGION`, `NEXT_PUBLIC_S3_BUCKET`
-- Deployments: GitHub Actions → `docker build` → `docker push` → `aws apprunner start-deployment`
+- App Runner service per stage: `sundayalbum-web-prod`, `sundayalbum-web-dev`
+- Each service: 0.25 vCPU / 0.5 GB to start, auto-scale to 1 vCPU / 2 GB
+- Environment variables per stage: `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_REGION`, `NEXT_PUBLIC_S3_BUCKET`
+
+**CI/CD (GitHub Actions):**
+- Push to `dev` branch → build image → push to ECR → deploy to `sundayalbum-web-dev`
+- Push to `main` branch → build image → push to ECR → deploy to `sundayalbum-web-prod`
+- Backend (CDK) deployments remain manual (`cdk deploy`) — infrastructure changes are deliberate, not automatic
 
 ### 3.1 WebSocket Progress (backend)
 
