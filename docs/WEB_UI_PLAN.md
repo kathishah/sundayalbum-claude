@@ -1,8 +1,8 @@
 # Sunday Album Web UI — Implementation Plan
 
-**Version:** 1.1
+**Version:** 1.2
 **Date:** March 2026
-**Status:** Phase 0 complete — branch `web-ui-implementation`
+**Status:** Phase 1 complete — branch `web-ui-implementation`
 **Companion Documents:** PRD_Album_Digitizer.md, UI_Design_Album_Digitizer.md, PHASED_PLAN_Claude_Code.md
 
 ---
@@ -176,7 +176,7 @@ Rewrite the body of `Pipeline.process()` to call `steps.load.run(storage, stem, 
 
 ---
 
-## Phase 1: AWS Infrastructure + Auth + Upload
+## Phase 1: AWS Infrastructure + Auth + Upload ✅ COMPLETE (2026-03-25)
 
 ### 1.1 S3 Bucket: `sundayalbum-data`
 
@@ -269,11 +269,30 @@ New: `api/` directory at project root:
 
 AWS CDK stack defining all resources. New: `infra/` directory.
 
-### 1.7 Verification
+### 1.7 Verification ✅
 
-- Sign in with email, receive code, verify
-- Create job, get presigned upload URL, upload HEIC file
-- Confirm file lands in S3 at `{user_hash}/uploads/{filename}`
+- Sign in with email, receive code, verify ✅
+- Create job, get presigned upload URL, upload HEIC file ✅
+- Confirm file lands in S3 at `{user_hash}/uploads/{filename}` ✅
+- POST /jobs/{jobId}/start responds with processing status ✅
+- GET /jobs/{jobId} returns job state with correct metadata ✅
+- GET /jobs lists all user jobs in reverse-ULID order ✅
+- POST /auth/logout revokes token; subsequent requests return 401 ✅
+
+**Implementation notes:**
+- CDK stack name: `SundayAlbumStack` in `infra/infra/sundayalbum_stack.py`
+- API base URL: `https://e1f6o1ah49.execute-api.us-west-2.amazonaws.com`
+- S3 bucket: `sundayalbum-data-680073251743-us-west-2`
+- DynamoDB tables: `sa-sessions` (GSI: `token-index`), `sa-jobs` (DynamoDB Streams enabled), `sa-ws-connections` (GSI: `job-index`)
+- Lambda code in `api/` directory — shared zip across all 3 functions
+- SES sender uses verified identity; configured via `ses_sender_email` CDK context key
+- S3 client uses regional endpoint (`s3.{REGION}.amazonaws.com`) + SigV4 to avoid 307 redirects on presigned PUT URLs
+- `session_token` omitted from DynamoDB Item when not yet set (GSI key cannot be empty string)
+- `POST /jobs/{jobId}/start` is a no-op placeholder until Step Functions state machine is added in Phase 2
+
+**Files added in Phase 1:**
+- New: `infra/app.py` (updated), `infra/infra/sundayalbum_stack.py`
+- New: `api/__init__.py`, `api/common.py`, `api/auth.py`, `api/jobs.py`, `api/websocket.py`
 
 ---
 
