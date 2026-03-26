@@ -1,8 +1,8 @@
 # Sunday Album Web UI — Implementation Plan
 
-**Version:** 1.0
+**Version:** 1.1
 **Date:** March 2026
-**Status:** Approved
+**Status:** Phase 0 complete — branch `web-ui-implementation`
 **Companion Documents:** PRD_Album_Digitizer.md, UI_Design_Album_Digitizer.md, PHASED_PLAN_Claude_Code.md
 
 ---
@@ -23,7 +23,7 @@ Sunday Album has a feature-complete Python CLI pipeline and a native macOS Swift
 
 ---
 
-## Phase 0: Refactor Existing Codebase for Pluggable Storage
+## Phase 0: Refactor Existing Codebase for Pluggable Storage ✅ COMPLETE (2026-03-25)
 
 **Goal:** Abstract file I/O so the same pipeline code works with local filesystem (CLI/macOS) and S3 (web). Each step becomes independently callable with clear serializable I/O. CLI and macOS app continue to work unchanged.
 
@@ -155,18 +155,24 @@ def run(storage: StorageBackend, stem: str, config: PipelineConfig,
 
 Rewrite the body of `Pipeline.process()` to call `steps.load.run(storage, stem, config)`, `steps.normalize.run(storage, stem, config)`, etc. in sequence. This is a pure refactor — same behavior, same output, but using the storage abstraction and step functions.
 
-### 0.6 Verify CLI + macOS App Still Work
+### 0.6 Verify CLI + macOS App Still Work ✅
 
-- Run `python -m src.cli process test-images/IMG_three_pics_normal.HEIC --output ./output/ --debug`
-- Confirm all debug images and output JPEGs are identical to pre-refactor
-- Run existing tests: `pytest tests/ -v`
+- Run `python -m src.cli process test-images/IMG_cave_normal.HEIC --output ./output/ --no-openai-glare --no-ai-orientation`
+- All debug images written flat to `debug/` with stem prefix (e.g. `IMG_cave_normal_01_loaded.jpg`)
+- Output JPEG written to `output/SundayAlbum_IMG_cave_normal_Photo01.jpg`
+- `pytest tests/ -v` — 72 passed, 6 skipped ✅
 
-**Files modified in Phase 0:**
-- `src/pipeline.py` — use StorageBackend + step functions
-- `src/utils/debug.py` — accept StorageBackend
-- New: `src/storage/__init__.py`, `backend.py`, `local.py`
-- New: `src/steps/__init__.py`, `load.py`, `normalize.py`, `page_detect.py`, `perspective.py`, `photo_detect.py`, `photo_split.py`, `ai_orient.py`, `glare_remove.py`, `geometry.py`, `color_restore.py`
-- `src/cli.py` — pass `LocalStorage` to Pipeline
+**Implementation notes vs original plan:**
+- `src/utils/debug.py` was NOT modified — pipeline steps now write to storage directly; `save_debug_image` is only used by CLI utility commands (compare, check).
+- Debug images are always written (even without `--debug` flag) because intermediate images serve as inter-step state. This is intentional for the storage-driven architecture.
+- Output filenames always use `_PhotoNN` suffix (e.g. `SundayAlbum_{stem}_Photo01.jpg`), even for single photos, matching the S3 key convention.
+
+**Files added/modified in Phase 0:**
+- New: `src/storage/__init__.py`, `src/storage/backend.py`, `src/storage/local.py`
+- New: `src/steps/__init__.py`, `src/steps/load.py`, `src/steps/normalize.py`, `src/steps/page_detect.py`, `src/steps/perspective.py`, `src/steps/photo_detect.py`, `src/steps/photo_split.py`, `src/steps/ai_orient.py`, `src/steps/glare_remove.py`, `src/steps/geometry.py`, `src/steps/color_restore.py`
+- Modified: `src/pipeline.py` — uses StorageBackend + step functions
+- Modified: `src/cli.py` — creates LocalStorage per file, passes to pipeline
+- Modified: `.gitignore` — added `uploads/`
 
 ---
 

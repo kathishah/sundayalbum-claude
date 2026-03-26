@@ -10,6 +10,7 @@ import click
 from dotenv import load_dotenv
 
 from src.pipeline import Pipeline, PipelineConfig, PIPELINE_STEPS
+from src.storage.local import LocalStorage
 from src.utils.debug import save_debug_image
 
 # Build the canonical list of step IDs once at import time so the --steps help
@@ -240,35 +241,27 @@ def process(
             logger.info(f"Processing: {input_file.name}")
             logger.info(f"{'=' * 60}")
 
-            # Each worker gets its own Pipeline instance (not thread-safe to share state)
+            # Each worker gets its own Pipeline + LocalStorage (not thread-safe to share)
+            file_storage = LocalStorage(
+                base_dir=Path("."),
+                debug_dir=debug_dir if debug else None,
+                output_dir=output_path,
+            )
             pipeline = Pipeline(config)
-
-            file_debug_dir = None
-            if debug_dir:
-                file_debug_dir = debug_dir / input_file.stem
-                file_debug_dir.mkdir(parents=True, exist_ok=True)
 
             result = pipeline.process(
                 str(input_file),
-                debug_output_dir=str(file_debug_dir) if file_debug_dir else None,
                 steps_filter=steps_filter,
+                storage=file_storage,
             )
 
-            num_outputs = len(result.output_images)
-            for i, output_image in enumerate(result.output_images, 1):
-                if num_outputs > 1:
-                    output_filename = f"SundayAlbum_{input_file.stem}_Photo{i:02d}.jpg"
-                else:
-                    output_filename = f"SundayAlbum_{input_file.stem}.jpg"
-
-                output_file_path = output_path / output_filename
-                save_debug_image(
-                    output_image,
-                    output_file_path,
-                    f"Final output {i}",
-                    quality=config.jpeg_quality,
-                )
-                logger.info(f"Saved: {output_file_path.name}")
+            # The pipeline has already written output files to output_path via storage.
+            # Report what was saved.
+            stem = input_file.stem
+            for i in range(1, result.num_photos_extracted + 1):
+                out_name = f"SundayAlbum_{stem}_Photo{i:02d}.jpg"
+                if (output_path / out_name).exists():
+                    logger.info(f"Saved: {out_name}")
 
             logger.info(
                 f"\nProcessing Summary [{input_file.name}]:\n"
@@ -658,9 +651,8 @@ def validate(
         debug_dir = Path('./debug')
         debug_dir.mkdir(parents=True, exist_ok=True)
 
-    # Create pipeline
+    # Create pipeline config
     config = PipelineConfig()
-    pipeline = Pipeline(config)
 
     # Process all files and collect results
     validation_results = []
@@ -670,39 +662,29 @@ def validate(
         click.echo("-" * 80)
 
         try:
-            # Set up debug directory for this file
-            if debug_dir:
-                file_debug_dir = debug_dir / test_file.stem
-                file_debug_dir.mkdir(parents=True, exist_ok=True)
-            else:
-                file_debug_dir = None
+            file_storage = LocalStorage(
+                base_dir=Path("."),
+                debug_dir=debug_dir if debug else None,
+                output_dir=output_path,
+            )
+            pipeline = Pipeline(config)
 
             # Process the image
             result = pipeline.process(
                 str(test_file),
-                debug_output_dir=str(file_debug_dir) if file_debug_dir else None,
-                steps_filter=None
+                steps_filter=None,
+                storage=file_storage,
             )
 
-            # Save output images
+            # Report saved outputs (written to output_path via storage)
             saved_outputs = []
-            for photo_idx, output_image in enumerate(result.output_images, 1):
-                if len(result.output_images) > 1:
-                    output_filename = f"SundayAlbum_{test_file.stem}_Photo{photo_idx:02d}.jpg"
-                else:
-                    output_filename = f"SundayAlbum_{test_file.stem}.jpg"
-
-                output_file_path = output_path / output_filename
-
-                save_debug_image(
-                    output_image,
-                    output_file_path,
-                    f"Final output {photo_idx}",
-                    quality=config.jpeg_quality
-                )
-
-                saved_outputs.append(output_file_path)
-                click.echo(f"  ✓ Saved: {output_filename}")
+            stem = test_file.stem
+            for photo_idx in range(1, result.num_photos_extracted + 1):
+                out_name = f"SundayAlbum_{stem}_Photo{photo_idx:02d}.jpg"
+                out_path = output_path / out_name
+                if out_path.exists():
+                    saved_outputs.append(out_path)
+                    click.echo(f"  ✓ Saved: {out_name}")
 
             # Quality assessment (on first extracted photo)
             quality_report = None
