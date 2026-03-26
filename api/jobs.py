@@ -239,6 +239,8 @@ def _handle_start(job_id: str, user_hash: str) -> dict:
                 "job_id": job_id,
                 "stem": item["input_stem"],
                 "upload_key": upload_key,
+                "start_time": time.time(),
+                "config": {},
             }
         )
         try:

@@ -1,4 +1,4 @@
-"""CDK stack for Sunday Album Web UI — Phase 1: Infrastructure + Auth + Upload."""
+"""CDK stack for Sunday Album Web UI — Phase 1 + Phase 2."""
 
 from aws_cdk import (
     CfnOutput,
@@ -7,9 +7,12 @@ from aws_cdk import (
     Stack,
     aws_apigatewayv2 as apigw,
     aws_dynamodb as dynamodb,
+    aws_ecr_assets as ecr_assets,
     aws_iam as iam,
     aws_lambda as lambda_,
     aws_s3 as s3,
+    aws_stepfunctions as sfn,
+    aws_stepfunctions_tasks as sfn_tasks,
 )
 from aws_cdk.aws_apigatewayv2_integrations import HttpLambdaIntegration
 from constructs import Construct
@@ -116,7 +119,7 @@ class SundayAlbumStack(Stack):
             projection_type=dynamodb.ProjectionType.ALL,
         )
 
-        # ── Shared Lambda execution role ─────────────────────────────────────
+        # ── Shared Lambda execution role (API + pipeline) ────────────────────
         ses_sender = (
             self.node.try_get_context("ses_sender_email") or "noreply@sundayalbum.com"
         )
@@ -150,7 +153,7 @@ class SundayAlbumStack(Stack):
             )
         )
 
-        # Step Functions: start executions (state machine ARN added in Phase 2)
+        # Step Functions: start executions (state machine ARN wired below)
         lambda_role.add_to_policy(
             iam.PolicyStatement(
                 sid="StepFunctionsStart",
@@ -170,8 +173,7 @@ class SundayAlbumStack(Stack):
             "AWS_DEPLOY_REGION": self.region,
         }
 
-        # ── Lambda functions ─────────────────────────────────────────────────
-        # All three share the same code asset (api/ directory); different handler
+        # ── API Lambda functions (zip-based) ─────────────────────────────────
         lambda_code = lambda_.Code.from_asset("../api")
         py312 = lambda_.Runtime.PYTHON_3_12
 
@@ -216,6 +218,215 @@ class SundayAlbumStack(Stack):
             memory_size=256,
             description="Sunday Album WebSocket: connect, disconnect, broadcast",
         )
+
+        # ── Pipeline Lambda functions (container image) ───────────────────────
+        # One image, all 11 step handlers. CMD overridden per function via
+        # DockerImageCode.from_image_asset(cmd=...).
+        # CDK deduplicates the Docker build when directory + platform are identical.
+        pipeline_env = {
+            "JOBS_TABLE": jobs_table.table_name,
+            "S3_BUCKET": bucket.bucket_name,
+            "AWS_DEPLOY_REGION": self.region,
+            # API keys come from Lambda environment (set manually or via Secrets Manager)
+            # ANTHROPIC_API_KEY and OPENAI_API_KEY must be set post-deploy
+        }
+
+        def pipeline_fn(
+            construct_id: str,
+            fn_name: str,
+            handler: str,
+            timeout_secs: int = 300,
+            memory_mb: int = 1024,
+            description: str = "",
+        ) -> lambda_.DockerImageFunction:
+            return lambda_.DockerImageFunction(
+                self,
+                construct_id,
+                function_name=fn_name,
+                code=lambda_.DockerImageCode.from_image_asset(
+                    "../",  # build context = repo root (Dockerfile is there)
+                    cmd=[handler],
+                    platform=ecr_assets.Platform.LINUX_ARM64,
+                ),
+                role=lambda_role,
+                environment=pipeline_env,
+                timeout=Duration.seconds(timeout_secs),
+                memory_size=memory_mb,
+                architecture=lambda_.Architecture.ARM_64,
+                description=description or fn_name,
+            )
+
+        load_fn = pipeline_fn(
+            "LoadFunction", "sa-pipeline-load", "handlers.load.handler",
+            timeout_secs=60, memory_mb=3008, description="Load & decode source image",
+        )
+        normalize_fn = pipeline_fn(
+            "NormalizeFunction", "sa-pipeline-normalize", "handlers.normalize.handler",
+            timeout_secs=60, memory_mb=3008, description="Resize & orient image",
+        )
+        page_detect_fn = pipeline_fn(
+            "PageDetectFunction", "sa-pipeline-page-detect", "handlers.page_detect.handler",
+            timeout_secs=120, memory_mb=3008, description="Detect album page boundary",
+        )
+        perspective_fn = pipeline_fn(
+            "PerspectiveFunction", "sa-pipeline-perspective", "handlers.perspective.handler",
+            timeout_secs=120, memory_mb=3008, description="Perspective / keystone correction",
+        )
+        photo_detect_fn = pipeline_fn(
+            "PhotoDetectFunction", "sa-pipeline-photo-detect", "handlers.photo_detect.handler",
+            timeout_secs=120, memory_mb=3008, description="Detect individual photo boundaries",
+        )
+        photo_split_fn = pipeline_fn(
+            "PhotoSplitFunction", "sa-pipeline-photo-split", "handlers.photo_split.handler",
+            timeout_secs=120, memory_mb=3008, description="Extract individual photo crops",
+        )
+        ai_orient_fn = pipeline_fn(
+            "AiOrientFunction", "sa-pipeline-ai-orient", "handlers.ai_orient.handler",
+            timeout_secs=60, memory_mb=1024, description="AI orientation correction (Claude Haiku)",
+        )
+        glare_remove_fn = pipeline_fn(
+            "GlareRemoveFunction", "sa-pipeline-glare-remove", "handlers.glare_remove.handler",
+            timeout_secs=300, memory_mb=3008, description="Glare removal (OpenAI gpt-image-1.5)",
+        )
+        geometry_fn = pipeline_fn(
+            "GeometryFunction", "sa-pipeline-geometry", "handlers.geometry.handler",
+            timeout_secs=120, memory_mb=3008, description="Geometry correction (dewarp, rotation)",
+        )
+        color_restore_fn = pipeline_fn(
+            "ColorRestoreFunction", "sa-pipeline-color-restore", "handlers.color_restore.handler",
+            timeout_secs=120, memory_mb=3008, description="Color restoration (WB, deyellow, CLAHE, sharpen)",
+        )
+        finalize_fn = pipeline_fn(
+            "FinalizeFunction", "sa-pipeline-finalize", "handlers.finalize.handler",
+            timeout_secs=60, memory_mb=512, description="Collect results, mark job complete",
+        )
+
+        # ── Step Functions State Machine ─────────────────────────────────────
+        # Helper: wrap a Lambda in a LambdaInvoke task (passes full state through).
+        #
+        # Step Functions Lambda:Invoke wraps the result:
+        #   {"StatusCode": 200, "Payload": {...handler_return...}}
+        # Using output_path="$.Payload" extracts just the handler's return value
+        # as the effective output sent to the next state — no wrapper key.
+        def invoke(task_id: str, fn: lambda_.IFunction, comment: str = "") -> sfn_tasks.LambdaInvoke:
+            return sfn_tasks.LambdaInvoke(
+                self,
+                task_id,
+                lambda_function=fn,
+                payload=sfn.TaskInput.from_json_path_at("$"),
+                output_path="$.Payload",
+                comment=comment or task_id,
+            )
+
+        # Sequential steps (whole-page)
+        load_task = invoke("Load", load_fn, "Decode source image from S3")
+        normalize_task = invoke("Normalize", normalize_fn, "Resize & fix orientation")
+        page_detect_task = invoke("PageDetect", page_detect_fn, "Detect album page boundary")
+        perspective_task = invoke("Perspective", perspective_fn, "Apply perspective correction")
+        photo_detect_task = invoke("PhotoDetect", photo_detect_fn, "Detect individual photo regions")
+        photo_split_task = invoke("PhotoSplit", photo_split_fn, "Extract individual photo crops")
+
+        # Build per-photo task array: [1, 2, ..., photo_count]
+        # States.ArrayRange(1, photo_count, 1) generates [1, 2, ..., N]
+        prepare_map = sfn.Pass(
+            self,
+            "PrepareMap",
+            comment="Generate photo index array for Map state",
+            parameters={
+                "user_hash.$": "$.user_hash",
+                "job_id.$": "$.job_id",
+                "stem.$": "$.stem",
+                "start_time.$": "$.start_time",
+                "photo_count.$": "$.photo_count",
+                "config.$": "$.config",
+                # Array of integers [1..photo_count] for Map state iterator
+                "photo_indices.$": "States.ArrayRange(1, $.photo_count, 1)",
+            },
+        )
+
+        # Per-photo pipeline (runs inside Map state)
+        ai_orient_task = invoke("AiOrient", ai_orient_fn, "AI orientation correction")
+        glare_remove_task = invoke("GlareRemove", glare_remove_fn, "Glare removal")
+        geometry_task = invoke("Geometry", geometry_fn, "Geometry correction")
+        color_restore_task = invoke("ColorRestore", color_restore_fn, "Color restoration")
+
+        per_photo_chain = (
+            ai_orient_task
+            .next(glare_remove_task)
+            .next(geometry_task)
+            .next(color_restore_task)
+        )
+
+        # Map state: iterate over photo_indices, run per-photo chain in parallel
+        # Each iteration receives {user_hash, job_id, stem, start_time, config, photo_index}
+        process_photos_map = sfn.Map(
+            self,
+            "ProcessPhotos",
+            comment="Process each photo in parallel (AI orient → glare → geometry → color)",
+            items_path="$.photo_indices",
+            item_selector={
+                # $$.Map.Item.Value = current photo index integer (1, 2, 3 ...)
+                "photo_index.$": "$$.Map.Item.Value",
+                # $ = parent state (PrepareMap output)
+                "user_hash.$": "$.user_hash",
+                "job_id.$": "$.job_id",
+                "stem.$": "$.stem",
+                "start_time.$": "$.start_time",
+                "config.$": "$.config",
+            },
+            max_concurrency=4,
+            result_path="$.photo_results",
+        )
+        process_photos_map.item_processor(per_photo_chain)
+
+        finalize_task = invoke("Finalize", finalize_fn, "Collect results, mark job complete")
+
+        # Chain everything together
+        definition = (
+            load_task
+            .next(normalize_task)
+            .next(page_detect_task)
+            .next(perspective_task)
+            .next(photo_detect_task)
+            .next(photo_split_task)
+            .next(prepare_map)
+            .next(process_photos_map)
+            .next(finalize_task)
+        )
+
+        # Step Functions execution role
+        sfn_role = iam.Role(
+            self,
+            "StateMachineRole",
+            role_name="sa-state-machine-role",
+            assumed_by=iam.ServicePrincipal("states.amazonaws.com"),
+            managed_policies=[
+                iam.ManagedPolicy.from_aws_managed_policy_name(
+                    "service-role/AWSLambdaRole"
+                )
+            ],
+        )
+        # Allow state machine to invoke all pipeline Lambdas
+        for fn in [
+            load_fn, normalize_fn, page_detect_fn, perspective_fn,
+            photo_detect_fn, photo_split_fn, ai_orient_fn, glare_remove_fn,
+            geometry_fn, color_restore_fn, finalize_fn,
+        ]:
+            fn.grant_invoke(sfn_role)
+
+        state_machine = sfn.StateMachine(
+            self,
+            "PipelineStateMachine",
+            state_machine_name="sa-pipeline",
+            state_machine_type=sfn.StateMachineType.STANDARD,
+            definition_body=sfn.DefinitionBody.from_chainable(definition),
+            role=sfn_role,
+            timeout=Duration.minutes(30),
+            comment="Sunday Album photo processing pipeline",
+        )
+
+        # Wire state machine ARN into sa-jobs Lambda
+        jobs_fn.add_environment("STATE_MACHINE_ARN", state_machine.state_machine_arn)
 
         # ── API Gateway HTTP API ─────────────────────────────────────────────
         http_api = apigw.HttpApi(
@@ -282,40 +493,40 @@ class SundayAlbumStack(Stack):
 
         # ── Outputs ──────────────────────────────────────────────────────────
         CfnOutput(
-            self,
-            "ApiUrl",
+            self, "ApiUrl",
             value=http_api.api_endpoint,
             export_name="SundayAlbumApiUrl",
             description="HTTP API base URL",
         )
         CfnOutput(
-            self,
-            "BucketName",
+            self, "BucketName",
             value=bucket.bucket_name,
             export_name="SundayAlbumBucketName",
             description="S3 data bucket",
         )
         CfnOutput(
-            self,
-            "SessionsTableName",
+            self, "SessionsTableName",
             value=sessions_table.table_name,
             export_name="SundayAlbumSessionsTable",
         )
         CfnOutput(
-            self,
-            "JobsTableName",
+            self, "JobsTableName",
             value=jobs_table.table_name,
             export_name="SundayAlbumJobsTable",
         )
         CfnOutput(
-            self,
-            "AuthFunctionName",
+            self, "StateMachineArn",
+            value=state_machine.state_machine_arn,
+            export_name="SundayAlbumStateMachineArn",
+            description="Step Functions state machine ARN",
+        )
+        CfnOutput(
+            self, "AuthFunctionName",
             value=auth_fn.function_name,
             export_name="SundayAlbumAuthFunction",
         )
         CfnOutput(
-            self,
-            "JobsFunctionName",
+            self, "JobsFunctionName",
             value=jobs_fn.function_name,
             export_name="SundayAlbumJobsFunction",
         )
@@ -329,3 +540,4 @@ class SundayAlbumStack(Stack):
         self.auth_fn = auth_fn
         self.jobs_fn = jobs_fn
         self.ws_fn = ws_fn
+        self.state_machine = state_machine

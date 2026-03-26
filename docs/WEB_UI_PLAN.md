@@ -1,8 +1,8 @@
 # Sunday Album Web UI — Implementation Plan
 
-**Version:** 1.2
+**Version:** 1.3
 **Date:** March 2026
-**Status:** Phase 1 complete — branch `web-ui-implementation`
+**Status:** Phase 2 complete — branch `web-ui-implementation`
 **Companion Documents:** PRD_Album_Digitizer.md, UI_Design_Album_Digitizer.md, PHASED_PLAN_Claude_Code.md
 
 ---
@@ -296,7 +296,7 @@ AWS CDK stack defining all resources. New: `infra/` directory.
 
 ---
 
-## Phase 2: Pipeline Lambdas + Step Functions
+## Phase 2: Pipeline Lambdas + Step Functions ✅ COMPLETE (2026-03-26)
 
 ### 2.1 Lambda Container Image
 
@@ -368,13 +368,31 @@ Each state updates DynamoDB `sa-jobs.current_step`. DynamoDB Streams trigger Web
 | `sa-geometry` | `handlers/geometry.handler` | 1024MB | 30s | Passthrough currently |
 | `sa-color-restore` | `handlers/color_restore.handler` | 1024MB | 30s | WB + deyellow + CLAHE + sharpen |
 
-### 2.6 Verification
+### 2.6 Verification ✅
 
-- Trigger pipeline via `POST /jobs/{jobId}/start` for a HEIC test image
-- All 10 Lambda steps run in sequence, per-photo steps fan out
-- Output JPEGs appear in `{user_hash}/output/`
-- Debug images appear in `{user_hash}/debug/`
-- DynamoDB job record shows `status: complete`
+- Trigger pipeline via `POST /jobs/{jobId}/start` for `IMG_three_pics_normal.HEIC` ✅
+- All 11 Lambda steps run in sequence, per-photo steps fan out in Map state (MaxConcurrency=4) ✅
+- 3 photos detected and processed ✅
+- Output JPEGs appear at `{user_hash}/output/SundayAlbum_{stem}_PhotoNN.jpg` ✅
+- DynamoDB job record shows `status: complete`, `photo_count: 3`, `processing_time: 44s` ✅
+- Presigned GET URLs in `GET /jobs/{jobId}` response work for all 3 output photos ✅
+
+**Implementation notes:**
+- Lambda container image built from repo root with `--platform linux/arm64 --provenance=false` (OCI attestation manifests are not supported by Lambda)
+- Docker CMD override set via `DockerImageCode.from_image_asset(cmd=[handler])` — CDK deduplicates the image build; each function gets its own Lambda imageConfig.command override
+- Step Functions `OutputPath: "$.Payload"` unwraps the Lambda response wrapper so each handler receives `{user_hash, job_id, stem, ...}` directly (not `{Payload: {...}}`)
+- Memory raised to 3008MB for all image-processing Lambdas (24MP HEIC decoding requires ~600MB float32 array + Python overhead; 1024MB caused OOM in Load step)
+- `start_time` and `config` must be included in Step Functions execution input from `_handle_start()` — the PrepareMap Pass state passes them through to each per-photo task
+- `finalize_job()` prefixes `output_keys` with `{user_hash}/` so DynamoDB stores full S3 paths; `jobs.py` `presign_get()` can then generate correct presigned URLs
+- Step Functions state machine ARN: `arn:aws:states:us-west-2:680073251743:stateMachine:sa-pipeline`
+- ECR repo: `680073251743.dkr.ecr.us-west-2.amazonaws.com/cdk-hnb659fds-container-assets-680073251743-us-west-2`
+
+**Files added in Phase 2:**
+- New: `src/storage/s3.py` — S3Storage backend (boto3, regional endpoint, SigV4)
+- New: `handlers/__init__.py`, `handlers/common.py`, `handlers/load.py`, `handlers/normalize.py`, `handlers/page_detect.py`, `handlers/perspective.py`, `handlers/photo_detect.py`, `handlers/photo_split.py`, `handlers/ai_orient.py`, `handlers/glare_remove.py`, `handlers/geometry.py`, `handlers/color_restore.py`, `handlers/finalize.py`
+- New: `Dockerfile`, `requirements-lambda.txt`, `.dockerignore`
+- Modified: `infra/infra/sundayalbum_stack.py` — added 11 container Lambda functions + Step Functions state machine
+- Modified: `api/jobs.py` — `_handle_start()` now sends `start_time` + `config` in execution input
 
 ---
 
