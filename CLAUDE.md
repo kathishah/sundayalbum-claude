@@ -491,6 +491,19 @@ class PipelineConfig:
     openai_glare_input_fidelity: str = "high"
     forced_scene_description: Optional[str] = None  # override Claude's description
 
+    # API keys — injected explicitly at the pipeline boundary; steps never read
+    # environment variables or call load_secrets() directly (functional pattern).
+    #
+    # CLI / macOS app:  load_secrets() is called once at startup; keys are set here.
+    # Lambda handlers:  make_config(user_keys) in handlers/common.py resolves keys
+    #                   (user-supplied keys from DynamoDB > system keys from Secrets
+    #                   Manager) and sets them here before calling any step.
+    #
+    # Empty string means "not provided" — steps will skip the AI call or fall back
+    # to OpenCV (glare) / pass-through (orientation) as appropriate.
+    anthropic_api_key: str = ""
+    openai_api_key: str = ""
+
     # Legacy AI flags (not used in active pipeline)
     use_ai_quality_check: bool = False
     use_ai_fallback_detection: bool = False
@@ -505,7 +518,19 @@ class PipelineConfig:
 }
 ```
 
-Loaded by `src/utils/secrets.py` → `load_secrets()`. Falls back to environment variables `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` if the file is absent. File is gitignored.
+Used **only at the CLI/macOS boundary**. `src/utils/secrets.py` → `load_secrets()` reads this file (falling back to `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` env vars if absent) and populates `PipelineConfig.anthropic_api_key` and `PipelineConfig.openai_api_key` once at startup. File is gitignored.
+
+**Pipeline steps never read environment variables or call `load_secrets()` directly.** They only consume what is in `config`. This keeps every step a pure function — given the same `(storage, stem, config)` inputs it always does the same thing.
+
+**In Lambda (web pipeline):** API keys are stored in AWS Secrets Manager (`sundayalbum/api-keys{suffix}`). `handlers/common.py` → `make_config(overrides, user_keys)` fetches the system keys once on cold start (cached via `lru_cache`) and resolves the final key following this priority:
+
+```
+user-supplied key (sa-user-settings DynamoDB)
+  → system key (Secrets Manager)
+  → empty string (step skips / falls back)
+```
+
+The resolved keys are injected into `PipelineConfig` before any step runs.
 
 ## Key Technical Decisions
 
@@ -519,7 +544,29 @@ Two glare patterns still exist in the test images and must be understood when ev
 
 2. **Glossy print glare** (cave, harbor, skydiving images): Contoured highlights that follow the curvature of the print surface. More complex shape, tied to the physical surface.
 
-The OpenCV inpainting fallback (`remover_single.py`) is retained for when the OpenAI key is absent or `--no-openai-glare` is passed. It uses the glare detector mask. Quality is significantly worse than the OpenAI path on both glare types.
+The OpenCV inpainting fallback (`remover_single.py`) is retained for when `config.openai_api_key` is empty or `--no-openai-glare` is passed. It uses the glare detector mask. Quality is significantly worse than the OpenAI path on both glare types.
+
+### Pipeline Steps as Pure Functions
+
+All pipeline steps (`src/steps/*.py`) are pure functions — they receive all inputs explicitly and have no hidden reads from environment variables, global state, or `load_secrets()`. The signature is always:
+
+```python
+def run(storage: StorageBackend, stem: str, config: PipelineConfig,
+        photo_index: Optional[int] = None) -> dict:
+```
+
+API keys are part of `PipelineConfig` (`anthropic_api_key`, `openai_api_key`). They are resolved exactly once at the **boundary** of each execution context:
+
+| Context | Where keys come from | How they reach the step |
+|---|---|---|
+| **CLI** | `secrets.json` / env vars via `load_secrets()` | Set on `PipelineConfig` at CLI startup |
+| **macOS app** | `secrets.json` / env vars via `load_secrets()` | Set on `PipelineConfig` before pipeline runs |
+| **Lambda (web)** | User keys (DynamoDB `sa-user-settings`) or system keys (Secrets Manager `sundayalbum/api-keys`) | `make_config(overrides, user_keys)` in `handlers/common.py` resolves and injects |
+
+This design means:
+- Steps are independently testable with any key value, including empty strings (testing fallback paths)
+- There is no implicit coupling between Lambda execution environment and step behaviour
+- Adding a new execution context (e.g. a CLI batch mode with per-user keys) requires no changes to step code — only the boundary setup changes
 
 ### AI Orientation Correction (Step 4.5)
 

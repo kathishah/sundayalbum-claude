@@ -502,13 +502,13 @@ cdk deploy --context stage=dev
 cdk destroy --context stage=dev
 ```
 
-**Post-deploy: set API keys on dev pipeline Lambdas** (same as prod, done once via CLI):
+**Post-deploy: populate the Secrets Manager secret** (done once per environment, not per Lambda):
 ```bash
-for fn in sa-pipeline-load-dev sa-pipeline-ai-orient-dev sa-pipeline-glare-remove-dev ...; do
-  aws lambda update-function-configuration --function-name $fn \
-    --environment "Variables={...,ANTHROPIC_API_KEY=...,OPENAI_API_KEY=...}"
-done
+aws secretsmanager put-secret-value \
+  --secret-id sundayalbum/api-keys-dev \
+  --secret-string '{"ANTHROPIC_API_KEY":"sk-ant-...","OPENAI_API_KEY":"sk-proj-..."}'
 ```
+API keys are no longer set as Lambda environment variables — they are stored in Secrets Manager and fetched by `handlers/common.py` at cold start (see Phase 3.1).
 
 **Verification:** two fully isolated stacks visible in CloudFormation console — `SundayAlbumStack-prod` and `SundayAlbumStack-dev`. Each has its own S3 bucket, DynamoDB tables, Lambda functions, API Gateway URL, and Step Functions state machine. A job submitted to the dev API touches only dev resources.
 
@@ -528,7 +528,7 @@ The pipeline uses two external AI APIs:
 - **Anthropic** (`claude-haiku-4-5`) — orientation correction step, once per photo
 - **OpenAI** (`gpt-image-1.5`) — glare removal step, once per photo
 
-Currently, both keys are injected as Lambda environment variables (plain text). They need to be stored in Secrets Manager and fetched at runtime, and usage must be rate-limited per user for cost control.
+Both keys are stored in AWS Secrets Manager (one secret per environment) and fetched by the Lambda handler at cold start. Usage is rate-limited per user for cost control. Users can supply their own keys to lift the limit.
 
 #### Decisions
 
@@ -564,26 +564,42 @@ CDK creates the secret and grants `secretsmanager:GetSecretValue` to the pipelin
 
 **CDK changes:**
 - Add `secretsmanager.Secret` resource per stage in `sundayalbum_stack.py`
-- Grant pipeline Lambda execution role `GetSecretValue` on the secret
-- Pass secret ARN as `SECRET_ARN` env var to `sa-pipeline-ai-orient` and `sa-pipeline-glare-remove` Lambdas
-- Remove `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` from Lambda env vars (they come from the secret now)
+- Grant Lambda execution role `GetSecretValue` on the secret (all Lambdas share the same role)
+- Pass `SECRET_ARN` as an env var to **all** Lambdas via `common_env` (not just ai-orient / glare-remove)
+- API keys are never stored in Lambda env vars — only the secret ARN reference
 
-**`handlers/common.py` changes:**
+**`handlers/common.py` — key resolution and config injection:**
 ```python
 import boto3, json, functools
 
 @functools.lru_cache(maxsize=1)
 def _get_system_api_keys() -> dict:
     """Fetch system API keys from Secrets Manager (cached per Lambda instance)."""
-    client = boto3.client("secretsmanager", region_name=REGION)
-    secret = client.get_secret_value(SecretId=os.environ["SECRET_ARN"])
-    return json.loads(secret["SecretString"])
+    return json.loads(
+        boto3.client("secretsmanager").get_secret_value(SecretId=SECRET_ARN)["SecretString"]
+    )
 
 def get_anthropic_key(user_keys: dict | None = None) -> str:
-    return (user_keys or {}).get("anthropic_api_key") or _get_system_api_keys()["ANTHROPIC_API_KEY"]
+    """User-supplied key takes priority; falls back to system key from Secrets Manager."""
+    return (user_keys or {}).get("anthropic_api_key") or _get_system_api_keys().get("ANTHROPIC_API_KEY", "")
 
 def get_openai_key(user_keys: dict | None = None) -> str:
-    return (user_keys or {}).get("openai_api_key") or _get_system_api_keys()["OPENAI_API_KEY"]
+    return (user_keys or {}).get("openai_api_key") or _get_system_api_keys().get("OPENAI_API_KEY", "")
+
+def make_config(overrides: dict | None = None, user_keys: dict | None = None) -> PipelineConfig:
+    """Build PipelineConfig with resolved API keys injected as explicit fields.
+
+    Pipeline steps are pure functions — they read keys from config, never from
+    env vars. make_config() is the single point where key resolution happens.
+    """
+    cfg = PipelineConfig(
+        anthropic_api_key=get_anthropic_key(user_keys),
+        openai_api_key=get_openai_key(user_keys),
+    )
+    for k, v in (overrides or {}).items():
+        if hasattr(cfg, k):
+            setattr(cfg, k, v)
+    return cfg
 ```
 
 #### 3.1.2 DynamoDB — User Settings Table
@@ -601,46 +617,25 @@ updated_at:        string (ISO)
 
 No TTL — user settings persist indefinitely. KMS encryption uses the AWS-managed DynamoDB CMK (`aws/dynamodb`) — no extra cost, encryption is transparent.
 
-#### 3.1.3 DynamoDB — Daily Usage Tracking
+#### 3.1.3 Daily Usage Tracking
 
-Add a `daily_job_count` attribute to the existing `sa-sessions` table (avoid a new table for a single counter):
-
-```
-PK: email (existing)
-
-daily_job_count:       number  (jobs submitted today, UTC)
-daily_count_date:      string  (UTC date string "2026-03-26"; reset on date mismatch)
-```
-
-Usage check logic in `api/jobs.py` `_handle_start()`:
+Rate limiting uses the existing `sa-jobs` table — no new table or counter needed. On each `POST /jobs/{jobId}/start`, `_count_jobs_today(user_hash)` queries the jobs table for records with `created_at` beginning with today's UTC date prefix:
 
 ```python
-DAILY_JOB_LIMIT = 20
-ADMIN_EMAILS = set(os.environ.get("ADMIN_EMAILS", "").split(","))
+DAILY_JOB_LIMIT = 20  # constant in api/common.py
 
-def _check_rate_limit(email: str) -> tuple[bool, int]:
-    """Returns (allowed, jobs_used_today). Increments counter if allowed."""
-    if email in ADMIN_EMAILS:
-        return True, 0
-
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    result = sessions_table.update_item(
-        Key={"email": email},
-        UpdateExpression="""
-            SET daily_job_count = if_not_exists(daily_job_count, :zero) + :one,
-                daily_count_date = :today
-            REMOVE daily_job_count  # cleared below if date changed
-        """,
-        # Real implementation: conditional expression checks daily_count_date
-        # If date != today, reset count to 1; otherwise increment
-        ...
-        ReturnValues="ALL_NEW",
+def _count_jobs_today(user_hash: str) -> int:
+    today_prefix = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    resp = jobs_table.query(
+        KeyConditionExpression=Key("user_hash").eq(user_hash),
+        FilterExpression=Attr("created_at").begins_with(today_prefix),
+        Select="COUNT",
+        Limit=100,
     )
-    count = result["Attributes"]["daily_job_count"]
-    return count <= DAILY_JOB_LIMIT, count
+    return int(resp.get("Count", 0))
 ```
 
-Actual implementation uses a conditional update: if `daily_count_date != today` reset count to 1 (new day), otherwise increment and check `<= 20`.
+The check runs only when the user has no user-supplied keys (partial or missing). If the count fails (DynamoDB unavailable), the function returns `0` — rate limiting fails open so users are never incorrectly blocked by an infrastructure issue.
 
 When the limit is exceeded, `POST /jobs/{jobId}/start` returns:
 ```json
@@ -669,11 +664,21 @@ Keys are stored in `sa-user-settings`, never returned to the client (only `has_*
 #### 3.1.5 Pipeline Key Resolution
 
 When a job starts, `_handle_start()` in `api/jobs.py`:
-1. Looks up `sa-user-settings` for the user
-2. Passes `user_keys: { anthropic_api_key?, openai_api_key? }` into the Step Functions execution input
-3. Rate limit check only applies when user has **no** user-supplied keys (or both are missing)
+1. Fetches user-supplied keys from `sa-user-settings` (`_get_user_keys(user_hash)`)
+2. Checks rate limit — skipped if user is an admin **or** has both keys supplied
+3. Passes `user_keys: { anthropic_api_key, openai_api_key }` into the Step Functions execution input alongside the rest of the job context
 
-The `ai_orient` and `glare_remove` handlers receive `user_keys` from the Step Functions event and call `get_anthropic_key(user_keys)` / `get_openai_key(user_keys)` respectively. System keys are fetched from Secrets Manager only when user has none.
+All pipeline handlers call `make_config(event.get("config"), user_keys=event.get("user_keys"))`. This single call resolves the final key for each service and injects both into `PipelineConfig` as explicit fields. Steps receive `config` and read `config.anthropic_api_key` / `config.openai_api_key` directly — **no handler ever sets `os.environ` or calls `load_secrets()`**.
+
+```
+Step Functions event
+  └─ user_keys: { anthropic_api_key, openai_api_key }
+       └─ make_config(overrides, user_keys)
+            ├─ get_anthropic_key(user_keys) → user key OR Secrets Manager key
+            ├─ get_openai_key(user_keys)    → user key OR Secrets Manager key
+            └─ PipelineConfig(anthropic_api_key=..., openai_api_key=...)
+                 └─ step.run(storage, stem, config)  ← pure function
+```
 
 **Rate limit logic:**
 - User has **both** keys → skip rate limit check entirely
@@ -700,12 +705,14 @@ user_settings_table = dynamodb.Table(self, "UserSettingsTable",
     removal_policy=removal_policy,
 )
 
-# New env vars on ai-orient + glare-remove pipeline Lambdas
-{"SECRET_ARN": api_keys_secret.secret_arn}
-
-# New env vars on api Lambda (auth, jobs)
-{"ADMIN_EMAILS": "kathi.shah@gmail.com",
- "USER_SETTINGS_TABLE": user_settings_table.table_name}
+# SECRET_ARN added to common_env → all Lambdas (not just ai-orient / glare-remove)
+# ADMIN_EMAILS and USER_SETTINGS_TABLE also in common_env → all API Lambdas
+common_env = {
+    ...,
+    "SECRET_ARN": api_keys_secret.secret_arn,
+    "USER_SETTINGS_TABLE": user_settings_table.table_name,
+    "ADMIN_EMAILS": "kathi.shah@gmail.com",
+}
 
 # New API routes
 http_api.add_routes(path="/settings/api-keys", methods=[GET, PUT, DELETE], integration=settings_int)
@@ -733,12 +740,17 @@ Then remove `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` from Lambda env vars (CDK dep
 - `DELETE /settings/api-keys` removes keys; user reverts to system keys + rate limit ✓
 - Dev environment uses `sundayalbum/api-keys-dev` secret, never touches prod secret ✓
 
-**Files to add/modify:**
-- Modified: `infra/infra/sundayalbum_stack.py` — Secrets Manager secret, `sa-user-settings` table, new env vars, new API routes
-- Modified: `handlers/common.py` — Secrets Manager fetch, `get_anthropic_key()`, `get_openai_key()`
-- Modified: `api/jobs.py` — rate limit check in `_handle_start()`, user key lookup, `user_keys` in execution input
-- Modified: `handlers/ai_orient.py` — call `get_anthropic_key(event.get("user_keys"))`
-- Modified: `handlers/glare_remove.py` — call `get_openai_key(event.get("user_keys"))`
+**Files added/modified:**
+- Modified: `infra/infra/sundayalbum_stack.py` — Secrets Manager secret, `sa-user-settings` table, `common_env` updated, `sa-settings` Lambda, new API routes
+- Modified: `handlers/common.py` — `_get_system_api_keys()` (Secrets Manager, lru_cache), `get_anthropic_key()`, `get_openai_key()`, `make_config()` now accepts `user_keys` and injects resolved keys into `PipelineConfig`
+- Modified: `src/pipeline.py` — `PipelineConfig` gains `anthropic_api_key: str` and `openai_api_key: str` fields
+- Modified: `src/steps/ai_orient.py` — removed `load_secrets()` call; reads `config.anthropic_api_key`
+- Modified: `src/steps/glare_remove.py` — removed `load_secrets()` call; reads `config.openai_api_key`
+- Modified: `src/cli.py` — calls `load_secrets()` once at CLI boundary; populates both `PipelineConfig` key fields
+- Modified: `api/common.py` — `USER_SETTINGS_TABLE`, `ADMIN_EMAILS`, `DAILY_JOB_LIMIT`, `user_settings_table`, `is_admin()`, `too_many_requests()`
+- Modified: `api/jobs.py` — `_handle_start()` checks rate limit, fetches user keys, passes `user_keys` in execution input
+- Modified: `handlers/ai_orient.py` — removed `os.environ` mutation; passes `user_keys` to `make_config()`
+- Modified: `handlers/glare_remove.py` — removed `os.environ` mutation; passes `user_keys` to `make_config()`
 - New: `api/settings.py` — GET/PUT/DELETE `/settings/api-keys`
 
 ---
