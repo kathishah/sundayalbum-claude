@@ -36,6 +36,7 @@
 		B4A16F5F0919EE4572CCB50A /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F7AAAE450D303F3206E05E /* AppState.swift */; };
 		B698C274FD8127A44C3D5CCA /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A5720AF7D5DE1A3342FBBE2 /* AppSettings.swift */; };
 		C8E91D42D70A7AAA0749CD02 /* PhotoSplitStepView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E34FB3B4953E05D514C82659 /* PhotoSplitStepView.swift */; };
+		D1F4D266B183442A27B8D832 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 3AC970064BFD826F40DAF9CA /* Assets.xcassets */; };
 		D9522D6C500C74A04B6F614B /* OrientationStepView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D4169E4221B02FC7A4A96F3 /* OrientationStepView.swift */; };
 		E07709B8D3EE6F81E690A1A6 /* requirements-runtime.txt in Resources */ = {isa = PBXBuildFile; fileRef = A5F35C286EC1F00606976D31 /* requirements-runtime.txt */; };
 		E354C5EF8D2C3F39B24E648B /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0951113F67BB8DBCE8DAAC83 /* SettingsView.swift */; };
@@ -69,6 +70,7 @@
 		3624BAE96CBC4C90714A3769 /* Photos.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Photos.framework; path = System/Library/Frameworks/Photos.framework; sourceTree = SDKROOT; };
 		379914ED2B9199F7EB66783E /* ProcessingJob.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingJob.swift; sourceTree = "<group>"; };
 		3A669CA7ED2A89229225CD89 /* DropZoneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DropZoneView.swift; sourceTree = "<group>"; };
+		3AC970064BFD826F40DAF9CA /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		489C36443BB9E6BD1E91209B /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
 		4A79A30A46DFBAEF6263C415 /* CLIOutputParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLIOutputParser.swift; sourceTree = "<group>"; };
 		4D4169E4221B02FC7A4A96F3 /* OrientationStepView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrientationStepView.swift; sourceTree = "<group>"; };
@@ -116,6 +118,7 @@
 			isa = PBXGroup;
 			children = (
 				E4F7AAAE450D303F3206E05E /* AppState.swift */,
+				3AC970064BFD826F40DAF9CA /* Assets.xcassets */,
 				AB4099DAE2D726871919696D /* SundayAlbumApp.swift */,
 				16E2641257C82D28ACA7A52F /* Bridge */,
 				50D39EDBF711FFE739EDD009 /* Mock */,
@@ -347,6 +350,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D1F4D266B183442A27B8D832 /* Assets.xcassets in Resources */,
 				E07709B8D3EE6F81E690A1A6 /* requirements-runtime.txt in Resources */,
 				9D9263B1B3162D29D3067D11 /* setup-runtime.sh in Resources */,
 				8F76B4DC1CDA0E98D3F433B8 /* src in Resources */,
