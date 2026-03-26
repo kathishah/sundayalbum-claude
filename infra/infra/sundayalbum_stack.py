@@ -15,7 +15,8 @@ from aws_cdk import (
     aws_stepfunctions as sfn,
     aws_stepfunctions_tasks as sfn_tasks,
 )
-from aws_cdk.aws_apigatewayv2_integrations import HttpLambdaIntegration
+from aws_cdk import aws_lambda_event_sources as event_sources
+from aws_cdk.aws_apigatewayv2_integrations import HttpLambdaIntegration, WebSocketLambdaIntegration
 from constructs import Construct
 
 
@@ -428,6 +429,31 @@ class SundayAlbumStack(Stack):
             description=f"Sunday Album settings ({stage}): user API key management",
         )
 
+        broadcaster_fn = lambda_.Function(
+            self,
+            "BroadcasterFunction",
+            function_name=f"sa-broadcaster{suffix}",
+            runtime=py312,
+            handler="broadcaster.handler",
+            code=lambda_code,
+            role=lambda_role,
+            environment=common_env,  # WS_ENDPOINT added post-creation below
+            timeout=Duration.seconds(30),
+            memory_size=256,
+            description=f"Sunday Album broadcaster ({stage}): DDB Streams → WebSocket push",
+        )
+
+        # DynamoDB Streams trigger: sa-jobs → broadcaster
+        broadcaster_fn.add_event_source(
+            event_sources.DynamoEventSource(
+                jobs_table,
+                starting_position=lambda_.StartingPosition.LATEST,
+                batch_size=10,
+                bisect_batch_on_error=True,
+                retry_attempts=2,
+            )
+        )
+
         # ── API Gateway HTTP API ─────────────────────────────────────────────
         http_api = apigw.HttpApi(
             self,
@@ -458,9 +484,54 @@ class SundayAlbumStack(Stack):
         http_api.add_routes(path="/settings/api-keys", methods=[apigw.HttpMethod.PUT],    integration=HttpLambdaIntegration("SettingsApiKeysPut",    settings_fn))
         http_api.add_routes(path="/settings/api-keys", methods=[apigw.HttpMethod.DELETE], integration=HttpLambdaIntegration("SettingsApiKeysDelete", settings_fn))
 
+        # ── API Gateway WebSocket API ─────────────────────────────────────────
+        ws_api = apigw.WebSocketApi(
+            self,
+            "WebSocketApi",
+            api_name=f"sundayalbum-ws{suffix}",
+            connect_route_options=apigw.WebSocketRouteOptions(
+                integration=WebSocketLambdaIntegration("WsConnect", ws_fn),
+            ),
+            disconnect_route_options=apigw.WebSocketRouteOptions(
+                integration=WebSocketLambdaIntegration("WsDisconnect", ws_fn),
+            ),
+            default_route_options=apigw.WebSocketRouteOptions(
+                integration=WebSocketLambdaIntegration("WsDefault", ws_fn),
+            ),
+        )
+
+        ws_stage = apigw.WebSocketStage(
+            self,
+            "WebSocketStage",
+            web_socket_api=ws_api,
+            stage_name="$default",
+            auto_deploy=True,
+        )
+
+        # Management endpoint for posting to connections (https, not wss)
+        ws_mgmt_endpoint = (
+            f"https://{ws_api.api_id}.execute-api.{self.region}.amazonaws.com/$default"
+        )
+
+        # Inject WS_ENDPOINT into ws_fn and broadcaster_fn after ws_api exists
+        ws_fn.add_environment("WS_ENDPOINT", ws_mgmt_endpoint)
+        broadcaster_fn.add_environment("WS_ENDPOINT", ws_mgmt_endpoint)
+
+        # Grant ManageConnections so both Lambdas can push to WebSocket clients
+        lambda_role.add_to_policy(
+            iam.PolicyStatement(
+                sid="WebSocketManageConnections",
+                actions=["execute-api:ManageConnections"],
+                resources=[
+                    f"arn:aws:execute-api:{self.region}:{self.account}:{ws_api.api_id}/*"
+                ],
+            )
+        )
+
         # ── Outputs ──────────────────────────────────────────────────────────
         # Export names are stage-suffixed so both stacks can coexist in the same account.
         CfnOutput(self, "ApiUrl",                value=http_api.api_endpoint,               export_name=f"SundayAlbumApiUrl-{stage}",               description=f"HTTP API base URL ({stage})")
+        CfnOutput(self, "WebSocketUrl",          value=ws_stage.url,                        export_name=f"SundayAlbumWebSocketUrl-{stage}",          description=f"WebSocket URL (wss://) for clients ({stage})")
         CfnOutput(self, "BucketName",            value=bucket.bucket_name,                  export_name=f"SundayAlbumBucketName-{stage}",            description=f"S3 data bucket ({stage})")
         CfnOutput(self, "SessionsTableName",     value=sessions_table.table_name,           export_name=f"SundayAlbumSessionsTable-{stage}")
         CfnOutput(self, "JobsTableName",         value=jobs_table.table_name,               export_name=f"SundayAlbumJobsTable-{stage}")
@@ -483,4 +554,7 @@ class SundayAlbumStack(Stack):
         self.jobs_fn = jobs_fn
         self.ws_fn = ws_fn
         self.settings_fn = settings_fn
+        self.broadcaster_fn = broadcaster_fn
+        self.ws_api = ws_api
+        self.ws_stage = ws_stage
         self.state_machine = state_machine
