@@ -1,0 +1,99 @@
+#!/bin/bash
+# build-release.sh — Build a distributable Sunday Album .dmg (and .zip fallback).
+#
+# Usage:
+#   cd mac-app && ./build-release.sh
+#
+# Output:
+#   ~/Desktop/SundayAlbum-<version>-beta1.dmg   ← primary artifact (drag-to-install)
+#   ~/Desktop/SundayAlbum-<version>.zip          ← fallback zip
+#
+# Prerequisites:
+#   brew install create-dmg     (for the .dmg step)
+#   brew install xcodegen       (regenerates project before build)
+#
+# NOTE: The .app is ad-hoc signed (no Apple Developer account required).
+# Recipients must right-click → Open on first launch to clear Gatekeeper quarantine,
+# OR run: xattr -d com.apple.quarantine /Applications/SundayAlbum.app
+# For notarization (Phase 11), get an Apple Developer account and switch
+# CODE_SIGN_IDENTITY in project.yml to "Developer ID Application: <Name>".
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ARCHIVE_PATH="$SCRIPT_DIR/.build/SundayAlbum.xcarchive"
+EXPORT_PATH="$SCRIPT_DIR/.build/export"
+VERSION=$(grep MARKETING_VERSION "$SCRIPT_DIR/project.yml" | head -1 | awk -F'"' '{print $2}')
+DMG_NAME="SundayAlbum-${VERSION}-beta1"
+OUT_DMG="$HOME/Desktop/${DMG_NAME}.dmg"
+OUT_ZIP="$HOME/Desktop/SundayAlbum-${VERSION}.zip"
+
+echo "==> Regenerating Xcode project..."
+cd "$SCRIPT_DIR"
+xcodegen generate
+
+echo "==> Archiving (Release)..."
+xcodebuild -scheme SundayAlbum \
+           -configuration Release \
+           -archivePath "$ARCHIVE_PATH" \
+           archive \
+           | grep -E "error:|Archive Succeeded|Build Succeeded" || true
+
+echo "==> Exporting .app..."
+xcodebuild -exportArchive \
+           -archivePath "$ARCHIVE_PATH" \
+           -exportOptionsPlist "$SCRIPT_DIR/ExportOptions.plist" \
+           -exportPath "$EXPORT_PATH" \
+           | grep -E "error:|Export Succeeded" || true
+
+APP_PATH="$EXPORT_PATH/SundayAlbum.app"
+if [ ! -d "$APP_PATH" ]; then
+    echo "✗ Export failed — .app not found at $APP_PATH"
+    exit 1
+fi
+
+# ── DMG ───────────────────────────────────────────────────────────────────
+if command -v create-dmg &>/dev/null; then
+    echo "==> Creating .dmg..."
+    # Remove stale DMG if present (create-dmg refuses to overwrite)
+    rm -f "$OUT_DMG"
+
+    BG="$SCRIPT_DIR/assets/dmg-background.png"
+    BG_ARG=""
+    [ -f "$BG" ] && BG_ARG="--background $BG"
+
+    # shellcheck disable=SC2086
+    create-dmg \
+        --volname "Sunday Album" \
+        $BG_ARG \
+        --window-pos  200 120 \
+        --window-size 660 400 \
+        --icon-size   128 \
+        --icon        "SundayAlbum.app" 180 170 \
+        --app-drop-link                 480 170 \
+        --hide-extension "SundayAlbum.app" \
+        --no-internet-enable \
+        "$OUT_DMG" \
+        "$APP_PATH"
+
+    echo ""
+    echo "✓ DMG → $OUT_DMG"
+else
+    echo "  (create-dmg not found — skipping .dmg, falling back to .zip)"
+    echo "  Install with: brew install create-dmg"
+fi
+
+# ── ZIP fallback ──────────────────────────────────────────────────────────
+echo "==> Zipping .app to Desktop..."
+cd "$EXPORT_PATH"
+zip -r "$OUT_ZIP" "SundayAlbum.app"
+echo "✓ ZIP → $OUT_ZIP"
+
+echo ""
+echo "Share with friends:"
+echo "  • Preferred: drag SundayAlbum-*.dmg to them (mounts, shows drag-to-Applications)"
+echo "  • Fallback:  send SundayAlbum-*.zip (unzip → drag to /Applications)"
+echo ""
+echo "Recipients: right-click → Open on first launch to clear Gatekeeper."
+echo "            OR: xattr -d com.apple.quarantine /Applications/SundayAlbum.app"
+echo "The app will install its Python environment automatically on first run (~2-3 min)."

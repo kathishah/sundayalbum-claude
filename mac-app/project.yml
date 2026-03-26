@@ -1,0 +1,66 @@
+name: SundayAlbum
+
+options:
+  bundleIdPrefix: com.sundayalbum
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+
+targets:
+  SundayAlbum:
+    type: application
+    platform: macOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: SundayAlbum
+      # ── Production bundle resources ─────────────────────────────────────────
+      # Copied into Contents/Resources/ so the app can bootstrap its own venv.
+      #
+      # setup-runtime.sh   — called by RuntimeManager on first launch to create the
+      #                       production venv at ~/Library/AS/SundayAlbum/venv/
+      # requirements-runtime.txt — pip deps list read by setup-runtime.sh
+      # src/               — Python package; PYTHONPATH is set to Contents/Resources/
+      #                       in production so `python -m src.cli` resolves correctly
+      - path: ../scripts/setup-runtime.sh
+      - path: ../requirements-runtime.txt
+      - path: ../src
+        type: folder
+    dependencies:
+      - sdk: Photos.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.sundayalbum.mac
+        MACOSX_DEPLOYMENT_TARGET: "26.0"
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGNING_REQUIRED: NO
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        GENERATE_INFOPLIST_FILE: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        INFOPLIST_KEY_CFBundleDisplayName: "Sunday Album"
+        INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.photography"
+        INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription: "Sunday Album saves your processed photos to the Photos library."
+        SWIFT_STRICT_CONCURRENCY: targeted
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+
+  SundayAlbumTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: SundayAlbumTests
+    dependencies:
+      - target: SundayAlbum
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.sundayalbum.mac.tests
+        MACOSX_DEPLOYMENT_TARGET: "26.0"
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGNING_REQUIRED: NO
+        SWIFT_STRICT_CONCURRENCY: targeted

@@ -98,6 +98,14 @@ def main() -> None:
     help='Save debug visualizations at each pipeline step',
 )
 @click.option(
+    '--debug-dir',
+    'debug_dir_path',
+    type=click.Path(),
+    default=None,
+    metavar='DIR',
+    help='Directory for debug visualizations (default: ./debug)',
+)
+@click.option(
     '--batch', '-b',
     is_flag=True,
     help='Process all images found inside a directory argument',
@@ -152,6 +160,7 @@ def process(
     input_paths: tuple,
     output_dir: str,
     debug: bool,
+    debug_dir_path: Optional[str],
     batch: bool,
     filter_pattern: Optional[str],
     steps: Optional[str],
@@ -214,7 +223,7 @@ def process(
     # Create debug directory if requested
     debug_dir = None
     if debug:
-        debug_dir = Path('./debug')
+        debug_dir = Path(debug_dir_path) if debug_dir_path else Path('./debug')
         debug_dir.mkdir(parents=True, exist_ok=True)
         logger.info(f"Debug output will be saved to: {debug_dir}")
 
