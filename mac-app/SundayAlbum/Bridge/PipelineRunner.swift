@@ -6,26 +6,13 @@ import Foundation
 ///
 /// All `@MainActor` updates ensure `@Observable` model mutations happen on the main thread,
 /// which is required for SwiftUI observation to work correctly.
+///
+/// Python path resolution is delegated to `RuntimeManager`:
+/// - **Dev** (Xcode): `.venv/` found by walking up from the bundle; CWD = project root.
+/// - **Production**: `~/Library/AS/SundayAlbum/venv/bin/python`; CWD = `Contents/Resources/`
+///   with `PYTHONPATH` injected so `src.*` imports resolve against the bundled package.
 @MainActor
 final class PipelineRunner {
-
-    // MARK: - Configuration
-
-    /// Absolute path to the project root (contains `.venv/` and `src/`).
-    static let projectRoot: URL = {
-        // When running from Xcode, the bundle is inside mac-app/. Walk up to find the repo root.
-        // Repo root contains both `src/` and `.venv/`.
-        var url = Bundle.main.bundleURL
-        for _ in 0..<6 {
-            url = url.deletingLastPathComponent()
-            let venv = url.appendingPathComponent(".venv")
-            if FileManager.default.fileExists(atPath: venv.path) {
-                return url
-            }
-        }
-        // Fallback: use the hardcoded path (development machine)
-        return URL(fileURLWithPath: "/Users/dev/dev/sundayalbum-claude")
-    }()
 
     private let job: ProcessingJob
     private var process: Process?
@@ -50,15 +37,16 @@ final class PipelineRunner {
             return
         }
 
-        let pythonPath = Self.projectRoot.appendingPathComponent(".venv/bin/python").path
-        guard FileManager.default.fileExists(atPath: pythonPath) else {
+        let runtime = RuntimeManager.shared
+
+        guard let pythonURL = runtime.pythonURL else {
             job.state = .failed
-            job.errorMessage = "Python venv not found at \(pythonPath)"
+            job.errorMessage = "Python runtime not ready. Complete setup first (launch the app and follow the setup screen)."
             return
         }
 
         let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: pythonPath)
+        proc.executableURL = pythonURL
         var args = ["-m", "src.cli", "process", inputURL.path, "--output", outputDir.path]
 
         let s = AppSettings.shared
@@ -69,10 +57,19 @@ final class PipelineRunner {
         }
 
         proc.arguments = args
-        proc.currentDirectoryURL = Self.projectRoot
+        proc.currentDirectoryURL = runtime.cliWorkingDirectory
 
-        let secrets = SecretsLoader(projectRoot: Self.projectRoot)
-        proc.environment = secrets.environment()
+        // Build environment: inherit process env + secrets.json/SettingsStorage keys + PYTHONUNBUFFERED.
+        let secrets = SecretsLoader(projectRoot: runtime.cliWorkingDirectory)
+        var env = secrets.environment()
+
+        // Production only: inject PYTHONPATH so `import src.*` resolves against the bundled package.
+        if let extraPath = runtime.extraPythonPath {
+            let existing = env["PYTHONPATH"] ?? ""
+            env["PYTHONPATH"] = existing.isEmpty ? extraPath : "\(extraPath):\(existing)"
+        }
+
+        proc.environment = env
 
         let pipe = Pipe()
         proc.standardOutput = pipe

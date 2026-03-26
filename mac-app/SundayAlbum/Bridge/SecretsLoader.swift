@@ -35,10 +35,21 @@ struct SecretsLoader {
     }
 
     /// Builds the environment dictionary to inject into a subprocess.
-    /// Inherits the current process environment and overlays the secrets.
+    ///
+    /// Priority (highest → lowest):
+    /// 1. Keys stored via `AppSettings` / `SettingsStorage` (user entered in ⌘, Settings)
+    /// 2. Keys from `secrets.json` at the project root  (dev convenience file)
+    /// 3. Inherited process environment variables
     func environment() -> [String: String] {
         var env = ProcessInfo.processInfo.environment
+        // Layer 2: secrets.json (dev)
         for (k, v) in keys { env[k] = v }
+        // Layer 1: user-configured keys from Settings take priority over secrets.json
+        for key in ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"] {
+            if let stored = SettingsStorage.load(key: key), !stored.isEmpty {
+                env[key] = stored
+            }
+        }
         env["PYTHONUNBUFFERED"] = "1"
         return env
     }

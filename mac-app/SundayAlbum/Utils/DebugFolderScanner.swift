@@ -10,11 +10,11 @@ import Foundation
 struct DebugFolderScanner {
 
     @MainActor private static var debugRoot: URL {
-        PipelineRunner.projectRoot.appendingPathComponent("debug")
+        RuntimeManager.shared.cliWorkingDirectory.appendingPathComponent("debug")
     }
 
     @MainActor private static var testImagesRoot: URL {
-        PipelineRunner.projectRoot.appendingPathComponent("test-images")
+        RuntimeManager.shared.cliWorkingDirectory.appendingPathComponent("test-images")
     }
 
     // MARK: - Public

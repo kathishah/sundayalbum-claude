@@ -458,7 +458,7 @@ Polish work added after Phase 6 export.
 
 ---
 
-### Phase 9: Bundle Python Runtime (Option A — Guided Setup)
+### Phase 9: Bundle Python Runtime (Option A — Guided Setup) ✅ COMPLETE
 
 **Goal:** Make the app self-contained with the smallest possible download. Friends don't have `.venv/`, `src/`, or Python.
 
@@ -521,6 +521,68 @@ macOS has no system-level uninstaller, but the app owns everything under one dir
 This means using AppCleaner or dragging to Trash alone leaves ~200MB behind — the in-app uninstaller is the correct path and should be documented in the README and beta invite.
 
 **Architecture:** ARM64 only for v1 beta. Intel requires a separate build on an Intel Mac (defer).
+
+**What was built:**
+
+**`requirements-runtime.txt`** — repo root, runtime-only pip deps (no pytest/mypy/ruff/matplotlib/torch).
+
+**`scripts/setup-runtime.sh`** — `set -euo pipefail` bash script; args: `<venv_dir> <requirements_file>`. Creates venv via `python3 -m venv`, upgrades pip, pip-installs the requirements file. Bundled in `Contents/Resources/` via `project.yml`.
+
+**`RuntimeManager.swift`** — `@MainActor @Observable` singleton:
+- `SetupState` enum: `.needsSetup` / `.installing` / `.ready` / `.failed(String)`
+- State computed synchronously in `init()` — no first-frame flash
+- **Dev mode**: detects `.venv/` walking up from bundle URL (+ hardcoded fallback); state immediately `.ready`
+- **Production mode**: checks for `~/Library/AS/SundayAlbum/venv/bin/python`
+- `startInstallation()` — streams `setup-runtime.sh` stdout line-by-line into `installLog`; estimates progress from "Downloading" + "Successfully installed" pip lines
+- `cancelInstallation()` — terminates process, deletes partial venv, resets to `.needsSetup`
+- `retrySetup()` — resets from `.failed` to `.needsSetup`
+- `extraPythonPath` — returns `Bundle.main.resourceURL` for production (injected as `PYTHONPATH` so `import src.*` resolves against the bundled `src/` folder); `nil` in dev
+- `promptAndUninstall()` — NSAlert confirmation → removes `~/Library/AS/SundayAlbum/` + UserDefaults → final notice → `NSApp.terminate`
+
+**`SetupView.swift`** — full-window branded first-launch screen with three sub-states:
+- **NeedsSetupBody**: descriptive text + amber "Set Up Sunday Album" CTA button
+- **InstallingBody**: determinate progress bar + scrolling pip log (`ScrollViewReader` auto-scrolls to bottom) + Cancel button
+- **FailedBody**: error icon + message + last 60 log lines + "Try Again" button
+
+**`SundayAlbumApp.swift`** — gated root:
+- `Group { if runtime.setupState == .ready { ContentView() } else { SetupView() } }` with `.animation(.saStandard, value:)` for smooth transition once setup completes
+- `RuntimeManager.shared` injected via `.environment(runtime)`
+- `.commands { CommandGroup(after: .help) { "Uninstall Sunday Album…" } }` calls `RuntimeManager.shared.promptAndUninstall()`
+
+**`PipelineRunner.swift`** — path resolution delegated to `RuntimeManager`:
+- `pythonURL` from `RuntimeManager.shared.pythonURL`
+- `cliWorkingDirectory` from `RuntimeManager.shared.cliWorkingDirectory`
+- `PYTHONPATH` env var set to `runtime.extraPythonPath` (production only)
+- Removed static `projectRoot` computed property
+
+**`SecretsLoader.swift`** — bug fix: `environment()` now layers SettingsStorage keys (highest priority) over `secrets.json` keys, so API keys saved in ⌘, Settings actually reach the subprocess.
+
+**`project.yml`** — added three resource entries under the `SundayAlbum` target:
+- `../scripts/setup-runtime.sh`
+- `../requirements-runtime.txt`
+- `../src` (type: folder) — Python package copied as folder reference into `Contents/Resources/src/`
+
+**`DebugFolderScanner.swift`** — bug fix (2026-03-25): replaced `PipelineRunner.projectRoot` (removed in Phase 9 refactor) with `RuntimeManager.shared.cliWorkingDirectory`. In dev mode this is the project root (same value as before); in production it gracefully finds no `debug/` folder and returns `[]`.
+
+**`mac-app/ExportOptions.plist`** — xcodebuild export config for ad-hoc distribution (no Apple Developer account required). Uses `method: mac-application` and `signingStyle: automatic`. Switch to `method: developer-id` when notarization is needed (Phase 10).
+
+**`mac-app/build-release.sh`** — one-command release builder:
+1. Runs `xcodegen generate`
+2. Archives in Release config (`xcodebuild archive`)
+3. Exports `.app` via `ExportOptions.plist`
+4. Zips to `~/Desktop/SundayAlbum-<version>.zip`
+
+Usage: `cd mac-app && ./build-release.sh`
+
+**How to test:**
+
+| Goal | How |
+|------|-----|
+| Dev mode (instant, no setup) | Build & Run in Xcode — `devProjectRoot` finds `.venv/` automatically |
+| Production first-launch flow | `mv .venv .venv-hidden` then build & run; app shows SetupView and installs to `~/Library/Application Support/SundayAlbum/venv/`. Restore with `mv .venv-hidden .venv` |
+| Test the actual distributable | `cd mac-app && ./build-release.sh` → unzip on Desktop → right-click Open |
+
+**Deliverable:** ✅ App is self-contained. A new user receives a ~5 MB .app, sees the setup screen on first launch, waits ~3–5 min for pip to install ~200 MB of deps, then proceeds normally. The Help menu > "Uninstall Sunday Album…" removes all data cleanly. `build-release.sh` produces a shareable zip in one command.
 
 ---
 

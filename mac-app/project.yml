@@ -18,6 +18,18 @@ targets:
     deploymentTarget: "26.0"
     sources:
       - path: SundayAlbum
+      # ── Production bundle resources ─────────────────────────────────────────
+      # Copied into Contents/Resources/ so the app can bootstrap its own venv.
+      #
+      # setup-runtime.sh   — called by RuntimeManager on first launch to create the
+      #                       production venv at ~/Library/AS/SundayAlbum/venv/
+      # requirements-runtime.txt — pip deps list read by setup-runtime.sh
+      # src/               — Python package; PYTHONPATH is set to Contents/Resources/
+      #                       in production so `python -m src.cli` resolves correctly
+      - path: ../scripts/setup-runtime.sh
+      - path: ../requirements-runtime.txt
+      - path: ../src
+        type: folder
     dependencies:
       - sdk: Photos.framework
     settings:
