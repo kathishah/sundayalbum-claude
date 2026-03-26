@@ -1,6 +1,6 @@
 # Sunday Album Web UI — Implementation Plan
 
-**Version:** 1.3
+**Version:** 1.4
 **Date:** March 2026
 **Status:** Phase 2 complete — branch `web-ui-implementation`
 **Companion Documents:** PRD_Album_Digitizer.md, UI_Design_Album_Digitizer.md, PHASED_PLAN_Claude_Code.md
@@ -516,7 +516,234 @@ done
 - `infra/app.py`
 - `infra/infra/sundayalbum_stack.py`
 
-### 3.1 WebSocket Progress (backend)
+---
+
+### 3.1 API Key Management + Usage Rate Limiting
+
+**Goal:** Store system API credentials securely, enforce per-user daily limits, and let users supply their own keys to lift those limits.
+
+#### Background
+
+The pipeline uses two external AI APIs:
+- **Anthropic** (`claude-haiku-4-5`) — orientation correction step, once per photo
+- **OpenAI** (`gpt-image-1.5`) — glare removal step, once per photo
+
+Currently, both keys are injected as Lambda environment variables (plain text). They need to be stored in Secrets Manager and fetched at runtime, and usage must be rate-limited per user for cost control.
+
+#### Decisions
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Secret storage for system keys | AWS Secrets Manager | Auditable, rotatable, IAM-controlled; Lambda env vars are plaintext in console |
+| Separate secrets per env | Yes — `sundayalbum/api-keys` (prod), `sundayalbum/api-keys-dev` (dev) | Isolated cost tracking; prod keys can be rotated without touching dev |
+| What counts as "1 use" | 1 job (regardless of how many photos it contains) | Users understand "albums processed", not "API calls made" |
+| Rate limit window | UTC midnight reset (calendar day) | Simpler to reason about than rolling 24h; matches user expectation of "20 per day" |
+| Default daily limit | 20 jobs/user/day | Generous for normal use; cost-controlled at scale |
+| Admin users (no limit) | Hardcoded `ADMIN_EMAILS` Lambda env var | Simple; no extra infra; adding new admins is a CDK redeploy (deliberate) |
+| System admin email | `kathi.shah@gmail.com` | Identified by email, consistent with existing email auth |
+| User-supplied key storage | DynamoDB `sa-user-settings` table + KMS encryption | ~$0 vs ~$0.40/month per user for Secrets Manager; keys encrypted at rest via AWS-owned KMS CMK |
+| User key scope | Full replacement — user pays for all their usage | Cleaner UX; no confusion about which key is used for which call |
+| Behavior at limit | Job rejected with clear error; frontend shows "Add your own API keys to continue" | AI steps are core to quality; a degraded pipeline (OpenCV fallback) is not the product |
+
+#### 3.1.1 AWS Secrets Manager — System API Keys
+
+Store both keys in a single JSON secret per environment:
+
+```
+Secret name (prod): sundayalbum/api-keys
+Secret name (dev):  sundayalbum/api-keys-dev
+
+Secret value (JSON):
+{
+  "ANTHROPIC_API_KEY": "sk-ant-...",
+  "OPENAI_API_KEY": "sk-proj-..."
+}
+```
+
+CDK creates the secret and grants `secretsmanager:GetSecretValue` to the pipeline Lambda IAM role. Lambdas fetch the secret once on cold start and cache it in the module-level scope (re-fetching only on cache miss or rotation).
+
+**CDK changes:**
+- Add `secretsmanager.Secret` resource per stage in `sundayalbum_stack.py`
+- Grant pipeline Lambda execution role `GetSecretValue` on the secret
+- Pass secret ARN as `SECRET_ARN` env var to `sa-pipeline-ai-orient` and `sa-pipeline-glare-remove` Lambdas
+- Remove `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` from Lambda env vars (they come from the secret now)
+
+**`handlers/common.py` changes:**
+```python
+import boto3, json, functools
+
+@functools.lru_cache(maxsize=1)
+def _get_system_api_keys() -> dict:
+    """Fetch system API keys from Secrets Manager (cached per Lambda instance)."""
+    client = boto3.client("secretsmanager", region_name=REGION)
+    secret = client.get_secret_value(SecretId=os.environ["SECRET_ARN"])
+    return json.loads(secret["SecretString"])
+
+def get_anthropic_key(user_keys: dict | None = None) -> str:
+    return (user_keys or {}).get("anthropic_api_key") or _get_system_api_keys()["ANTHROPIC_API_KEY"]
+
+def get_openai_key(user_keys: dict | None = None) -> str:
+    return (user_keys or {}).get("openai_api_key") or _get_system_api_keys()["OPENAI_API_KEY"]
+```
+
+#### 3.1.2 DynamoDB — User Settings Table
+
+New table `sa-user-settings` (suffixed per stage):
+
+```
+PK: user_hash (string)
+
+anthropic_api_key: string (encrypted via KMS, optional)
+openai_api_key:    string (encrypted via KMS, optional)
+created_at:        string (ISO)
+updated_at:        string (ISO)
+```
+
+No TTL — user settings persist indefinitely. KMS encryption uses the AWS-managed DynamoDB CMK (`aws/dynamodb`) — no extra cost, encryption is transparent.
+
+#### 3.1.3 DynamoDB — Daily Usage Tracking
+
+Add a `daily_job_count` attribute to the existing `sa-sessions` table (avoid a new table for a single counter):
+
+```
+PK: email (existing)
+
+daily_job_count:       number  (jobs submitted today, UTC)
+daily_count_date:      string  (UTC date string "2026-03-26"; reset on date mismatch)
+```
+
+Usage check logic in `api/jobs.py` `_handle_start()`:
+
+```python
+DAILY_JOB_LIMIT = 20
+ADMIN_EMAILS = set(os.environ.get("ADMIN_EMAILS", "").split(","))
+
+def _check_rate_limit(email: str) -> tuple[bool, int]:
+    """Returns (allowed, jobs_used_today). Increments counter if allowed."""
+    if email in ADMIN_EMAILS:
+        return True, 0
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    result = sessions_table.update_item(
+        Key={"email": email},
+        UpdateExpression="""
+            SET daily_job_count = if_not_exists(daily_job_count, :zero) + :one,
+                daily_count_date = :today
+            REMOVE daily_job_count  # cleared below if date changed
+        """,
+        # Real implementation: conditional expression checks daily_count_date
+        # If date != today, reset count to 1; otherwise increment
+        ...
+        ReturnValues="ALL_NEW",
+    )
+    count = result["Attributes"]["daily_job_count"]
+    return count <= DAILY_JOB_LIMIT, count
+```
+
+Actual implementation uses a conditional update: if `daily_count_date != today` reset count to 1 (new day), otherwise increment and check `<= 20`.
+
+When the limit is exceeded, `POST /jobs/{jobId}/start` returns:
+```json
+HTTP 429
+{
+  "error": "rate_limit_exceeded",
+  "detail": "You've used all 20 free jobs for today. Add your own API keys in Settings to continue.",
+  "jobs_used": 20,
+  "limit": 20,
+  "resets_at": "2026-03-27T00:00:00Z"
+}
+```
+
+#### 3.1.4 User API Keys — API Endpoints
+
+New endpoints (added to `api/jobs.py` or new `api/settings.py`):
+
+```
+GET  /settings/api-keys   → { has_anthropic_key: bool, has_openai_key: bool }
+PUT  /settings/api-keys   { anthropic_api_key?, openai_api_key? } → 200
+DELETE /settings/api-keys → 200 (remove user keys, revert to system keys + rate limit)
+```
+
+Keys are stored in `sa-user-settings`, never returned to the client (only `has_*` booleans). The `PUT` validates that provided keys are non-empty strings before storing.
+
+#### 3.1.5 Pipeline Key Resolution
+
+When a job starts, `_handle_start()` in `api/jobs.py`:
+1. Looks up `sa-user-settings` for the user
+2. Passes `user_keys: { anthropic_api_key?, openai_api_key? }` into the Step Functions execution input
+3. Rate limit check only applies when user has **no** user-supplied keys (or both are missing)
+
+The `ai_orient` and `glare_remove` handlers receive `user_keys` from the Step Functions event and call `get_anthropic_key(user_keys)` / `get_openai_key(user_keys)` respectively. System keys are fetched from Secrets Manager only when user has none.
+
+**Rate limit logic:**
+- User has **both** keys → skip rate limit check entirely
+- User has **partial** keys (e.g., only OpenAI) → rate limit still applies (system key still needed for Anthropic)
+- User has **no** keys → rate limit applies; both system keys used
+
+#### 3.1.6 CDK Infrastructure Changes
+
+```python
+# New: Secrets Manager secret per stage
+api_keys_secret = secretsmanager.Secret(self, "ApiKeysSecret",
+    secret_name=f"sundayalbum/api-keys{suffix}",
+    description=f"System Anthropic + OpenAI API keys ({stage})",
+    removal_policy=removal_policy,
+)
+api_keys_secret.grant_read(pipeline_role)
+
+# New: user-settings DynamoDB table
+user_settings_table = dynamodb.Table(self, "UserSettingsTable",
+    table_name=f"sa-user-settings{suffix}",
+    partition_key=dynamodb.Attribute(name="user_hash", type=dynamodb.AttributeType.STRING),
+    billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+    encryption=dynamodb.TableEncryption.AWS_MANAGED,  # KMS
+    removal_policy=removal_policy,
+)
+
+# New env vars on ai-orient + glare-remove pipeline Lambdas
+{"SECRET_ARN": api_keys_secret.secret_arn}
+
+# New env vars on api Lambda (auth, jobs)
+{"ADMIN_EMAILS": "kathi.shah@gmail.com",
+ "USER_SETTINGS_TABLE": user_settings_table.table_name}
+
+# New API routes
+http_api.add_routes(path="/settings/api-keys", methods=[GET, PUT, DELETE], integration=settings_int)
+```
+
+#### 3.1.7 Migration: Move Existing Keys into Secrets Manager
+
+One-time: after CDK deploys the secret, populate it:
+```bash
+aws secretsmanager put-secret-value \
+  --secret-id sundayalbum/api-keys \
+  --secret-string '{"ANTHROPIC_API_KEY":"sk-ant-...","OPENAI_API_KEY":"sk-proj-..."}'
+```
+
+Then remove `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` from Lambda env vars (CDK deploy handles this).
+
+#### 3.1.8 Verification
+
+- System keys fetched from Secrets Manager (not env vars) ✓
+- Admin user (`kathi.shah@gmail.com`) can submit unlimited jobs ✓
+- Regular user blocked after 20 jobs with 429 + clear error message ✓
+- Counter resets at UTC midnight ✓
+- User adds own keys via `PUT /settings/api-keys` → rate limit bypassed ✓
+- `GET /settings/api-keys` returns `{ has_anthropic_key: true, has_openai_key: false }` (never actual key values) ✓
+- `DELETE /settings/api-keys` removes keys; user reverts to system keys + rate limit ✓
+- Dev environment uses `sundayalbum/api-keys-dev` secret, never touches prod secret ✓
+
+**Files to add/modify:**
+- Modified: `infra/infra/sundayalbum_stack.py` — Secrets Manager secret, `sa-user-settings` table, new env vars, new API routes
+- Modified: `handlers/common.py` — Secrets Manager fetch, `get_anthropic_key()`, `get_openai_key()`
+- Modified: `api/jobs.py` — rate limit check in `_handle_start()`, user key lookup, `user_keys` in execution input
+- Modified: `handlers/ai_orient.py` — call `get_anthropic_key(event.get("user_keys"))`
+- Modified: `handlers/glare_remove.py` — call `get_openai_key(event.get("user_keys"))`
+- New: `api/settings.py` — GET/PUT/DELETE `/settings/api-keys`
+
+---
+
+### 3.2 WebSocket Progress (backend)
 
 Wire up the DynamoDB Streams → Lambda → WebSocket push path that is already stubbed in `api/websocket.py`:
 
@@ -537,7 +764,7 @@ Progress message format:
 
 Frontend fallback: poll `GET /jobs/{jobId}` every 3s if WebSocket is unavailable.
 
-### 3.2 Next.js App Scaffold
+### 3.3 Next.js App Scaffold
 
 ```
 web/
@@ -547,11 +774,13 @@ web/
     login/page.tsx          # auth flow
     library/page.tsx        # main library view
     library/[jobId]/page.tsx  # step detail (Phase 4)
+    settings/page.tsx       # API key management (added for 3.1)
   components/
     AlbumPageCard.tsx       # job card (before → progress → after)
     DropZone.tsx            # drag-drop upload
     ProgressWheel.tsx       # animated step progress
     AuthForm.tsx            # email + code entry
+    ApiKeySettings.tsx      # add/remove personal API keys
   lib/
     api.ts                  # typed wrappers around API Gateway endpoints
     store.ts                # Zustand: jobs, auth, WebSocket
@@ -561,14 +790,14 @@ web/
   tailwind.config.ts
 ```
 
-### 3.3 Design System
+### 3.4 Design System
 
 Translate from `mac-app/SundayAlbum/Theme/DesignSystem.swift` into Tailwind config:
 - Colors: `sa-amber-{50..700}`, `sa-stone-{50..950}`, `sa-success`, `sa-error`
 - Fonts: Fraunces (display), DM Sans (body) via `next/font`
 - Animations: `sa-standard` (200ms ease), `sa-slide` (350ms ease-out), `sa-reveal` (600ms ease-in-out)
 
-### 3.4 Library Page
+### 3.5 Library Page
 
 Replicate `mac-app/SundayAlbum/Views/LibraryView.swift`:
 
@@ -578,12 +807,12 @@ Replicate `mac-app/SundayAlbum/Views/LibraryView.swift`:
 - Single-click → expanded overlay; double-click → step detail (Phase 4)
 - Real-time updates: WebSocket event → Zustand store → card re-renders
 
-### 3.5 Auth Pages
+### 3.6 Auth Pages
 
 - `/login` — email input → send code → 6-digit code entry → redirect to `/library`
 - Session token in `localStorage`; auth guard on `/library` and `/library/[jobId]`
 
-### 3.6 Verification
+### 3.7 Verification
 
 - `sundayalbum.com` resolves to App Runner service ✓
 - Login flow works end-to-end (email → code → session) ✓
