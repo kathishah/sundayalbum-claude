@@ -398,49 +398,109 @@ Each state updates DynamoDB `sa-jobs.current_step`. DynamoDB Streams trigger Web
 
 ## Phase 3: Real-time Progress + Library UI
 
-### 3.1 WebSocket Progress
+### Hosting Decision (decided 2026-03-26)
 
-- API Gateway WebSocket API + broadcaster Lambda
-- DynamoDB Streams on `sa-jobs` table → Lambda → push to connected clients
-- Frontend `useJobProgress` hook: WebSocket primary, polling `GET /jobs/{jobId}` every 3s fallback
+**Choice: AWS App Runner** for the Next.js frontend.
+
+**Options considered:**
+
+| Option | Pros | Cons | Verdict |
+|--------|------|------|---------|
+| **Amplify Hosting** | Native Next.js SSR, Git CI/CD, free tier | SSR on Lambda@Edge (cold starts); Amplify Gen1/Gen2 doc confusion; SSR untested in this account — only `caboose` (static HTML/JS) is deployed on Amplify here | Rejected |
+| **App Runner** | Already proven in this account (`workorder-invoice` → `veritasa.ai`); Docker-based like pipeline Lambdas; same ECR repo; no cold starts; managed HTTPS | ~$15-20/month minimum; manual CI/CD setup | **Selected** |
+| **EC2 + Nginx** | Full control, simple to reason about | Manual OS/cert/PM2 management; single point of failure; `vix-trading-monitor` and `SuperTrendBot` on EC2 are bots, not web frontends — no proven pattern for web | Rejected |
+| **CloudFront + S3** | Pennies/month | Requires `output: 'export'`; loses SSR, server components, streaming; wrong for dynamic auth + real-time app | Rejected |
+
+**Why App Runner won:** The `workorder-invoice` app on App Runner is already serving `veritasa.ai` with a custom domain and ACM cert — the exact pattern needed here. No unknowns. The pipeline Lambdas already use ECR, so the Docker build and push workflow is established. Amplify's SSR support is real but untested in this account.
+
+**Domain setup:**
+- `sundayalbum.com` registered on Namecheap (no hosting configured yet)
+- Create Route 53 hosted zone for `sundayalbum.com`
+- Update Namecheap custom DNS to use Route 53 NS records
+- App Runner custom domain → ACM cert auto-provisioned and validated via Route 53
+- `www.sundayalbum.com` → CNAME to App Runner domain; apex `sundayalbum.com` → ALIAS
+
+**Infrastructure:**
+- Separate ECR repo: `sundayalbum-web` (distinct from CDK pipeline asset repo)
+- App Runner service: `sundayalbum-web`, 0.25 vCPU / 0.5 GB to start, auto-scale to 1 vCPU
+- Environment variables: `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_REGION`, `NEXT_PUBLIC_S3_BUCKET`
+- Deployments: GitHub Actions → `docker build` → `docker push` → `aws apprunner start-deployment`
+
+### 3.1 WebSocket Progress (backend)
+
+Wire up the DynamoDB Streams → Lambda → WebSocket push path that is already stubbed in `api/websocket.py`:
+
+- Add DynamoDB Stream trigger on `sa-jobs` table → broadcaster Lambda
+- Broadcaster queries `sa-ws-connections` GSI `job-index`, pushes step update to all connected clients via `apigatewaymanagementapi`
+- Add API Gateway WebSocket API alongside existing HTTP API (separate CDK construct)
 
 Progress message format:
 ```json
 {
   "type": "step_update",
   "jobId": "...",
-  "step": "sa-glare-remove",
-  "detail": "Photo 2 of 3",
+  "step": "glare_remove",
+  "detail": "Photo 2 of 3: glare removal",
   "progress": 0.55
 }
 ```
 
-### 3.2 Frontend: Library Page
+Frontend fallback: poll `GET /jobs/{jobId}` every 3s if WebSocket is unavailable.
+
+### 3.2 Next.js App Scaffold
+
+```
+web/
+  app/
+    layout.tsx              # root layout, fonts, providers
+    page.tsx                # redirect → /library or /login
+    login/page.tsx          # auth flow
+    library/page.tsx        # main library view
+    library/[jobId]/page.tsx  # step detail (Phase 4)
+  components/
+    AlbumPageCard.tsx       # job card (before → progress → after)
+    DropZone.tsx            # drag-drop upload
+    ProgressWheel.tsx       # animated step progress
+    AuthForm.tsx            # email + code entry
+  lib/
+    api.ts                  # typed wrappers around API Gateway endpoints
+    store.ts                # Zustand: jobs, auth, WebSocket
+    useJobProgress.ts       # WebSocket hook with polling fallback
+  Dockerfile                # FROM node:20-alpine, next build + next start
+  next.config.ts
+  tailwind.config.ts
+```
+
+### 3.3 Design System
+
+Translate from `mac-app/SundayAlbum/Theme/DesignSystem.swift` into Tailwind config:
+- Colors: `sa-amber-{50..700}`, `sa-stone-{50..950}`, `sa-success`, `sa-error`
+- Fonts: Fraunces (display), DM Sans (body) via `next/font`
+- Animations: `sa-standard` (200ms ease), `sa-slide` (350ms ease-out), `sa-reveal` (600ms ease-in-out)
+
+### 3.4 Library Page
 
 Replicate `mac-app/SundayAlbum/Views/LibraryView.swift`:
 
 - Adaptive grid of `AlbumPageCard` components
-- `DropZone` when empty (drag-drop + "Choose Files" button)
-- Cards show: before thumbnail → progress wheel → after thumbnails
-- Single-click card → expanded overlay
-- Double-click card → navigate to step detail
-- Real-time progress updates from WebSocket → Zustand store → re-render
+- `DropZone` when library is empty (drag-drop + "Choose Files" button)
+- Cards show: before thumbnail → animated progress wheel with step label → output thumbnails grid
+- Single-click → expanded overlay; double-click → step detail (Phase 4)
+- Real-time updates: WebSocket event → Zustand store → card re-renders
 
-### 3.3 Frontend: Auth Pages
+### 3.5 Auth Pages
 
-- `/login` — email input → code verification → redirect to `/library`
+- `/login` — email input → send code → 6-digit code entry → redirect to `/library`
+- Session token in `localStorage`; auth guard on `/library` and `/library/[jobId]`
 
-### 3.4 Design System (Tailwind config)
+### 3.6 Verification
 
-Translate from `mac-app/SundayAlbum/Theme/DesignSystem.swift`:
-- Colors: `sa-amber-{50..700}`, `sa-stone-{50..950}`, `sa-success`, `sa-error`
-- Fonts: Fraunces (display), DM Sans (body), JetBrains Mono (mono)
-- Animations: `sa-standard` (200ms), `sa-slide` (350ms), `sa-reveal` (600ms)
-
-### 3.5 Verification
-
-- Upload file from browser, watch card progress update in real-time
-- See output thumbnails appear when processing completes
+- `sundayalbum.com` resolves to App Runner service ✓
+- Login flow works end-to-end (email → code → session) ✓
+- Upload HEIC from browser → card enters processing state ✓
+- Step labels update in real-time as pipeline runs ✓
+- Output thumbnails appear when job completes ✓
+- Presigned URLs load correctly in `<img>` tags ✓
 
 ---
 
