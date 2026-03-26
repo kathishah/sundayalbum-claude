@@ -19,9 +19,18 @@ logger.setLevel(logging.INFO)
 SESSIONS_TABLE = os.environ["SESSIONS_TABLE"]
 JOBS_TABLE = os.environ["JOBS_TABLE"]
 WS_CONNECTIONS_TABLE = os.environ["WS_CONNECTIONS_TABLE"]
+USER_SETTINGS_TABLE = os.environ["USER_SETTINGS_TABLE"]
 S3_BUCKET = os.environ["S3_BUCKET"]
 SES_SENDER = os.environ["SES_SENDER"]
 REGION = os.environ.get("AWS_DEPLOY_REGION", "us-west-2")
+# ADMIN_EMAILS: comma-separated list of emails exempt from rate limits
+ADMIN_EMAILS: set[str] = {
+    e.strip().lower()
+    for e in os.environ.get("ADMIN_EMAILS", "").split(",")
+    if e.strip()
+}
+# Daily job limit for non-admin users (UTC midnight reset)
+DAILY_JOB_LIMIT = 20
 
 # ── AWS clients (module-level for Lambda container reuse) ─────────────────────
 dynamodb = boto3.resource("dynamodb", region_name=REGION)
@@ -37,6 +46,7 @@ ses_client = boto3.client("ses", region_name=REGION)
 sessions_table = dynamodb.Table(SESSIONS_TABLE)
 jobs_table = dynamodb.Table(JOBS_TABLE)
 ws_table = dynamodb.Table(WS_CONNECTIONS_TABLE)
+user_settings_table = dynamodb.Table(USER_SETTINGS_TABLE)
 
 
 # ── ULID generation (no external deps) ───────────────────────────────────────
@@ -110,6 +120,10 @@ def internal(msg: str = "Internal server error") -> dict:
     return error(500, "internal_error", msg)
 
 
+def too_many_requests(msg: str = "Daily job limit reached") -> dict:
+    return error(429, "rate_limit_exceeded", msg)
+
+
 # ── Auth middleware ───────────────────────────────────────────────────────────
 def get_session(event: dict) -> Optional[tuple[str, str]]:
     """Extract and validate Bearer token from Authorization header.
@@ -154,6 +168,11 @@ def require_auth(event: dict) -> tuple[str, str] | dict:
     if session is None:
         return unauthorized()
     return session
+
+
+def is_admin(email: str) -> bool:
+    """Return True if the email is in the ADMIN_EMAILS set."""
+    return email.strip().lower() in ADMIN_EMAILS
 
 
 # ── Body parsing ──────────────────────────────────────────────────────────────

@@ -11,6 +11,7 @@ from aws_cdk import (
     aws_iam as iam,
     aws_lambda as lambda_,
     aws_s3 as s3,
+    aws_secretsmanager as secretsmanager,
     aws_stepfunctions as sfn,
     aws_stepfunctions_tasks as sfn_tasks,
 )
@@ -129,6 +130,30 @@ class SundayAlbumStack(Stack):
             projection_type=dynamodb.ProjectionType.ALL,
         )
 
+        # ── User settings table (API keys, encrypted at rest) ────────────────
+        user_settings_table = dynamodb.Table(
+            self,
+            "UserSettingsTable",
+            table_name=f"sa-user-settings{suffix}",
+            partition_key=dynamodb.Attribute(
+                name="user_hash", type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            encryption=dynamodb.TableEncryption.AWS_MANAGED,
+            removal_policy=removal_policy,
+        )
+
+        # ── Secrets Manager: system API keys ─────────────────────────────────
+        # Secret value populated post-deploy via CLI (see migration steps).
+        # Lambdas fetch at cold start and cache; never exposed in env vars.
+        api_keys_secret = secretsmanager.Secret(
+            self,
+            "ApiKeysSecret",
+            secret_name=f"sundayalbum/api-keys{suffix}",
+            description=f"System Anthropic + OpenAI API keys ({stage})",
+            removal_policy=removal_policy,
+        )
+
         # ── Shared Lambda execution role ─────────────────────────────────────
         ses_sender = (
             self.node.try_get_context("ses_sender_email") or "noreply@sundayalbum.com"
@@ -149,7 +174,9 @@ class SundayAlbumStack(Stack):
         sessions_table.grant_read_write_data(lambda_role)
         jobs_table.grant_read_write_data(lambda_role)
         ws_table.grant_read_write_data(lambda_role)
+        user_settings_table.grant_read_write_data(lambda_role)
         bucket.grant_read_write(lambda_role)
+        api_keys_secret.grant_read(lambda_role)
 
         lambda_role.add_to_policy(
             iam.PolicyStatement(
@@ -167,14 +194,21 @@ class SundayAlbumStack(Stack):
         )
 
         # ── Shared environment variables ─────────────────────────────────────
+        # ADMIN_EMAILS: comma-separated list of emails exempt from rate limits.
+        # Adding new admins requires a CDK redeploy (deliberate — not a hot config).
+        admin_emails = self.node.try_get_context("admin_emails") or "kathi.shah@gmail.com"
+
         common_env = {
             "SESSIONS_TABLE": sessions_table.table_name,
             "JOBS_TABLE": jobs_table.table_name,
             "WS_CONNECTIONS_TABLE": ws_table.table_name,
+            "USER_SETTINGS_TABLE": user_settings_table.table_name,
             "S3_BUCKET": bucket.bucket_name,
             "SES_SENDER": ses_sender,
             "AWS_ACCOUNT_ID": self.account,
             "AWS_DEPLOY_REGION": self.region,
+            "ADMIN_EMAILS": admin_emails,
+            "SECRET_ARN": api_keys_secret.secret_arn,
         }
 
         # ── API Lambda functions (zip-based) ─────────────────────────────────
@@ -228,7 +262,7 @@ class SundayAlbumStack(Stack):
             "JOBS_TABLE": jobs_table.table_name,
             "S3_BUCKET": bucket.bucket_name,
             "AWS_DEPLOY_REGION": self.region,
-            # ANTHROPIC_API_KEY and OPENAI_API_KEY set post-deploy via CLI
+            "SECRET_ARN": api_keys_secret.secret_arn,
         }
 
         def pipeline_fn(
@@ -299,6 +333,7 @@ class SundayAlbumStack(Stack):
                 "start_time.$":    "$.start_time",
                 "photo_count.$":   "$.photo_count",
                 "config.$":        "$.config",
+                "user_keys.$":     "$.user_keys",
                 "photo_indices.$": "States.ArrayRange(1, $.photo_count, 1)",
             },
         )
@@ -327,6 +362,7 @@ class SundayAlbumStack(Stack):
                 "stem.$":        "$.stem",
                 "start_time.$":  "$.start_time",
                 "config.$":      "$.config",
+                "user_keys.$":   "$.user_keys",
             },
             max_concurrency=4,
             result_path="$.photo_results",
@@ -378,6 +414,20 @@ class SundayAlbumStack(Stack):
 
         jobs_fn.add_environment("STATE_MACHINE_ARN", state_machine.state_machine_arn)
 
+        settings_fn = lambda_.Function(
+            self,
+            "SettingsFunction",
+            function_name=f"sa-settings{suffix}",
+            runtime=py312,
+            handler="settings.handler",
+            code=lambda_code,
+            role=lambda_role,
+            environment=common_env,
+            timeout=Duration.seconds(30),
+            memory_size=512,
+            description=f"Sunday Album settings ({stage}): user API key management",
+        )
+
         # ── API Gateway HTTP API ─────────────────────────────────────────────
         http_api = apigw.HttpApi(
             self,
@@ -403,15 +453,22 @@ class SundayAlbumStack(Stack):
         http_api.add_routes(path="/jobs/{jobId}/start",     methods=[apigw.HttpMethod.POST], integration=HttpLambdaIntegration("JobsStart",     jobs_fn))
         http_api.add_routes(path="/jobs/{jobId}/reprocess", methods=[apigw.HttpMethod.POST], integration=HttpLambdaIntegration("JobsReprocess", jobs_fn))
 
+        settings_int = HttpLambdaIntegration("SettingsApiKeys", settings_fn)
+        http_api.add_routes(path="/settings/api-keys", methods=[apigw.HttpMethod.GET],    integration=settings_int)
+        http_api.add_routes(path="/settings/api-keys", methods=[apigw.HttpMethod.PUT],    integration=HttpLambdaIntegration("SettingsApiKeysPut",    settings_fn))
+        http_api.add_routes(path="/settings/api-keys", methods=[apigw.HttpMethod.DELETE], integration=HttpLambdaIntegration("SettingsApiKeysDelete", settings_fn))
+
         # ── Outputs ──────────────────────────────────────────────────────────
         # Export names are stage-suffixed so both stacks can coexist in the same account.
-        CfnOutput(self, "ApiUrl",            value=http_api.api_endpoint,           export_name=f"SundayAlbumApiUrl-{stage}",           description=f"HTTP API base URL ({stage})")
-        CfnOutput(self, "BucketName",        value=bucket.bucket_name,              export_name=f"SundayAlbumBucketName-{stage}",        description=f"S3 data bucket ({stage})")
-        CfnOutput(self, "SessionsTableName", value=sessions_table.table_name,       export_name=f"SundayAlbumSessionsTable-{stage}")
-        CfnOutput(self, "JobsTableName",     value=jobs_table.table_name,           export_name=f"SundayAlbumJobsTable-{stage}")
-        CfnOutput(self, "StateMachineArn",   value=state_machine.state_machine_arn, export_name=f"SundayAlbumStateMachineArn-{stage}",   description=f"Step Functions state machine ARN ({stage})")
-        CfnOutput(self, "AuthFunctionName",  value=auth_fn.function_name,           export_name=f"SundayAlbumAuthFunction-{stage}")
-        CfnOutput(self, "JobsFunctionName",  value=jobs_fn.function_name,           export_name=f"SundayAlbumJobsFunction-{stage}")
+        CfnOutput(self, "ApiUrl",                value=http_api.api_endpoint,               export_name=f"SundayAlbumApiUrl-{stage}",               description=f"HTTP API base URL ({stage})")
+        CfnOutput(self, "BucketName",            value=bucket.bucket_name,                  export_name=f"SundayAlbumBucketName-{stage}",            description=f"S3 data bucket ({stage})")
+        CfnOutput(self, "SessionsTableName",     value=sessions_table.table_name,           export_name=f"SundayAlbumSessionsTable-{stage}")
+        CfnOutput(self, "JobsTableName",         value=jobs_table.table_name,               export_name=f"SundayAlbumJobsTable-{stage}")
+        CfnOutput(self, "UserSettingsTableName", value=user_settings_table.table_name,      export_name=f"SundayAlbumUserSettingsTable-{stage}")
+        CfnOutput(self, "StateMachineArn",       value=state_machine.state_machine_arn,     export_name=f"SundayAlbumStateMachineArn-{stage}",      description=f"Step Functions state machine ARN ({stage})")
+        CfnOutput(self, "AuthFunctionName",      value=auth_fn.function_name,               export_name=f"SundayAlbumAuthFunction-{stage}")
+        CfnOutput(self, "JobsFunctionName",      value=jobs_fn.function_name,               export_name=f"SundayAlbumJobsFunction-{stage}")
+        CfnOutput(self, "ApiKeysSecretArn",      value=api_keys_secret.secret_arn,          export_name=f"SundayAlbumApiKeysSecret-{stage}")
 
         # Resource references for cross-stack use in later phases
         self.stage = stage
@@ -419,8 +476,11 @@ class SundayAlbumStack(Stack):
         self.sessions_table = sessions_table
         self.jobs_table = jobs_table
         self.ws_table = ws_table
+        self.user_settings_table = user_settings_table
+        self.api_keys_secret = api_keys_secret
         self.http_api = http_api
         self.auth_fn = auth_fn
         self.jobs_fn = jobs_fn
         self.ws_fn = ws_fn
+        self.settings_fn = settings_fn
         self.state_machine = state_machine

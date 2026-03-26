@@ -6,6 +6,8 @@ This module serves the pipeline step handlers invoked by Step Functions.
 
 from __future__ import annotations
 
+import functools
+import json
 import logging
 import os
 from datetime import datetime, timezone
@@ -19,11 +21,44 @@ logger.setLevel(logging.INFO)
 # ── Environment ───────────────────────────────────────────────────────────────
 S3_BUCKET = os.environ["S3_BUCKET"]
 JOBS_TABLE = os.environ["JOBS_TABLE"]
+SECRET_ARN = os.environ["SECRET_ARN"]
 REGION = os.environ.get("AWS_DEPLOY_REGION", "us-west-2")
 
 # ── AWS clients ───────────────────────────────────────────────────────────────
 _dynamodb = boto3.resource("dynamodb", region_name=REGION)
 jobs_table = _dynamodb.Table(JOBS_TABLE)
+_secrets_client = boto3.client("secretsmanager", region_name=REGION)
+
+
+# ── API key resolution ────────────────────────────────────────────────────────
+
+@functools.lru_cache(maxsize=1)
+def _get_system_api_keys() -> dict:
+    """Fetch system API keys from Secrets Manager (cached per Lambda instance)."""
+    try:
+        resp = _secrets_client.get_secret_value(SecretId=SECRET_ARN)
+        return json.loads(resp["SecretString"])
+    except Exception as exc:
+        logger.error("Failed to fetch system API keys from Secrets Manager: %s", exc)
+        return {}
+
+
+def get_anthropic_key(user_keys: dict | None = None) -> str:
+    """Return the Anthropic API key: user-supplied if present, else system key."""
+    if user_keys:
+        user_key = user_keys.get("anthropic_api_key", "").strip()
+        if user_key:
+            return user_key
+    return _get_system_api_keys().get("ANTHROPIC_API_KEY", "")
+
+
+def get_openai_key(user_keys: dict | None = None) -> str:
+    """Return the OpenAI API key: user-supplied if present, else system key."""
+    if user_keys:
+        user_key = user_keys.get("openai_api_key", "").strip()
+        if user_key:
+            return user_key
+    return _get_system_api_keys().get("OPENAI_API_KEY", "")
 
 
 # ── Storage factory ───────────────────────────────────────────────────────────

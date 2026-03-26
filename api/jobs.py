@@ -21,12 +21,14 @@ from typing import Any
 from boto3.dynamodb.conditions import Key
 
 from common import (
+    DAILY_JOB_LIMIT,
     S3_BUCKET,
     bad_request,
     created,
     error,
     generate_ulid,
     internal,
+    is_admin,
     jobs_table,
     not_found,
     ok,
@@ -36,7 +38,9 @@ from common import (
     presign_put,
     require_auth,
     s3_client,
+    too_many_requests,
     unauthorized,
+    user_settings_table,
 )
 
 logger = logging.getLogger(__name__)
@@ -67,7 +71,7 @@ def handler(event: dict, context: Any) -> dict:
         if "reprocess" in route:
             return _handle_reprocess(job_id, event, user_hash)
         if "start" in route:
-            return _handle_start(job_id, user_hash)
+            return _handle_start(job_id, user_hash, email)
         if job_id:
             method = event.get("requestContext", {}).get("http", {}).get("method", "")
             if method == "DELETE":
@@ -207,8 +211,46 @@ def _handle_delete(job_id: str, user_hash: str) -> dict:
     return ok({"message": "Job deleted", "job_id": job_id})
 
 
+# ── Rate limit check ──────────────────────────────────────────────────────────
+def _count_jobs_today(user_hash: str) -> int:
+    """Count jobs started today (UTC) for rate limiting.
+
+    Queries all jobs for the user today using created_at as a filter.
+    ``created_at`` is an ISO-8601 string (e.g. "2026-03-26T14:23:00+00:00").
+    We filter client-side after a partition-key-only query and cap at 50 items —
+    more than enough to evaluate the 20-job limit without a table scan.
+    """
+    today_prefix = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    try:
+        from boto3.dynamodb.conditions import Attr, Key as DKey
+        resp = jobs_table.query(
+            KeyConditionExpression=DKey("user_hash").eq(user_hash),
+            FilterExpression=Attr("created_at").begins_with(today_prefix),
+            Select="COUNT",
+            Limit=100,  # cap pages; 20-job limit makes this sufficient
+        )
+        return int(resp.get("Count", 0))
+    except Exception as exc:
+        logger.error("Rate limit count query failed: %s", exc)
+        return 0  # fail open — don't block users if DynamoDB is unavailable
+
+
+def _get_user_keys(user_hash: str) -> dict:
+    """Fetch user-supplied API keys from user_settings table. Returns {} if none."""
+    try:
+        resp = user_settings_table.get_item(Key={"user_hash": user_hash})
+        item = resp.get("Item", {})
+        return {
+            "anthropic_api_key": item.get("anthropic_api_key", ""),
+            "openai_api_key":    item.get("openai_api_key", ""),
+        }
+    except Exception as exc:
+        logger.warning("Could not fetch user API keys: %s", exc)
+        return {}
+
+
 # ── Start pipeline ─────────────────────────────────────────────────────────────
-def _handle_start(job_id: str, user_hash: str) -> dict:
+def _handle_start(job_id: str, user_hash: str, email: str) -> dict:
     item = _get_job_or_none(job_id, user_hash)
     if item is None:
         return not_found(f"Job {job_id} not found")
@@ -224,6 +266,24 @@ def _handle_start(job_id: str, user_hash: str) -> dict:
         return bad_request(
             "Upload not found in S3. Please upload the file before starting."
         )
+
+    # Fetch user-supplied API keys (may be empty — pipeline will use system keys)
+    user_keys = _get_user_keys(user_hash)
+    has_both_user_keys = bool(
+        user_keys.get("anthropic_api_key") and user_keys.get("openai_api_key")
+    )
+
+    # Rate limit check: skip for admins and users who supply their own keys
+    if not is_admin(email) and not has_both_user_keys:
+        jobs_today = _count_jobs_today(user_hash)
+        if jobs_today >= DAILY_JOB_LIMIT:
+            logger.info(
+                "Rate limit hit for user %s... (%d jobs today)", user_hash[:8], jobs_today
+            )
+            return too_many_requests(
+                f"You've reached the daily limit of {DAILY_JOB_LIMIT} free jobs. "
+                "Add your own API keys in Settings to continue."
+            )
 
     now_iso = datetime.now(timezone.utc).isoformat()
 
@@ -241,6 +301,7 @@ def _handle_start(job_id: str, user_hash: str) -> dict:
                 "upload_key": upload_key,
                 "start_time": time.time(),
                 "config": {},
+                "user_keys": user_keys,
             }
         )
         try:
@@ -271,7 +332,7 @@ def _handle_start(job_id: str, user_hash: str) -> dict:
         return ok({"status": "processing", "execution_arn": execution_arn})
 
     else:
-        # Phase 1 placeholder: mark as processing without Step Functions
+        # Fallback: mark as processing without Step Functions (should not occur in prod)
         jobs_table.update_item(
             Key={"user_hash": user_hash, "job_id": job_id},
             UpdateExpression="SET #s = :s, current_step = :cs, updated_at = :ua",
@@ -288,7 +349,7 @@ def _handle_start(job_id: str, user_hash: str) -> dict:
         return ok(
             {
                 "status": "processing",
-                "note": "Pipeline Lambda not yet deployed (Phase 2). File is in S3.",
+                "note": "Pipeline not yet deployed. File is in S3.",
             }
         )
 
