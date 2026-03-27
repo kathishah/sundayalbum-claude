@@ -435,12 +435,12 @@ def _serialize_job(item: dict) -> dict:
     }
 
 
-def _presign_keys(keys: list) -> list[str]:
+def _presign_keys(keys: list, expires: int = 7 * 24 * 3600) -> list[str]:
     """Generate presigned GET URLs for a list of S3 keys."""
     urls = []
     for key in keys:
         try:
-            urls.append(presign_get(str(key), expires=3600))
+            urls.append(presign_get(str(key), expires=expires))
         except Exception:
             pass
     return urls
