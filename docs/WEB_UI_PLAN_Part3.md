@@ -3,7 +3,7 @@
 
 **Version:** 1.6
 **Date:** March 2026
-**Status:** Phase 4 up next — Phase 3 complete (dev.sundayalbum.com live)
+**Status:** Phase 4 in progress — Phase 3 complete (dev.sundayalbum.com live). Thumbnail architecture shipped: `thumbnail_url` (before) and `thumbnail_urls` (all steps) served by API with 7-day presigned URL expiry; backfill of all dev jobs complete.
 **See also:** WEB_UI_PLAN_Part1.md (Phases 0–2: completed), WEB_UI_PLAN_Part2.md (Phase 3: ✅ complete)
 
 ---
@@ -111,21 +111,25 @@ Key semantic color tokens (light / dark):
 
 ---
 
-### 4.3 ThumbBox — Before Thumbnail from debug_urls
+### 4.3 ThumbBox — Before Thumbnail ✅
 
 **macOS reference:** `AlbumPageCard.swift` `loadBeforeImage()` — uses `debug/01_loaded.jpg` first, falls back to original HEIC.
 
-**Current state:** No before thumbnail is shown on the web card.
+**Current state:** ✅ Working — `thumbnail_url` returned by API and rendered in card.
 
 **What to build:**
 - On job creation (optimistic), use a `URL.createObjectURL()` from the uploaded `File` object — this gives an immediate preview before the job has any debug images
-- Once `GET /jobs/{jobId}` returns, use `debug_urls['load']` (the `01_loaded.jpg` presigned URL) as the before thumbnail — this is the JPEG version of the loaded image, much faster to display than the raw HEIC
+- Once `GET /jobs` (list) or `GET /jobs/{jobId}` (get) returns, use `job.thumbnail_url` as the before thumbnail — this is a 400px-wide JPEG thumbnail of `01_loaded.jpg`, presigned for 7 days
 - `ThumbBox` is a 60×88px container:
   - If image available: `object-fit: cover`, `border-radius: 8px`
   - If loading: `saSurface` background (`rgb(245,245,244)` light / `rgb(24,21,19)` dark) with a small spinner (matches macOS `Color.saSurface` + `ProgressView().controlSize(.small)`)
-- The `File` object URL is stored in Zustand job state at upload time and kept until replaced by the debug URL
+- The `File` object URL is stored in Zustand job state at upload time and kept until replaced by `thumbnail_url`
 
-**API note:** `debug_urls` is a dict returned by `GET /jobs/{jobId}`. Key `'load'` maps to the presigned URL for `01_loaded.jpg`. The frontend should request this URL and display it — it's a normal JPEG, not HEIC.
+**API fields (as implemented):**
+- `thumbnail_url` (string) — presigned 7-day URL for the `01_loaded` 400px thumbnail. Returned by **both** `GET /jobs` (list) and `GET /jobs/{id}` (get). Use this for the library card before-image.
+- `thumbnail_urls` (map: label → presigned URL) — all per-step 400px thumbnails. Returned by `GET /jobs/{id}` only. Keys match `debug_urls` (e.g. `01_loaded`, `02_page_detected`, `05b_photo_01_oriented`). Use this for Phase 5 step detail.
+- `debug_urls` (map: label → presigned URL) — full-resolution debug images. Returned by `GET /jobs/{id}` only. Keys use the numeric-prefix label format: `01_loaded`, `02_normalized`, `02_page_detected`, `03_page_warped`, `04_photo_boundaries`, `05b_photo_01_oriented`, `07_photo_01_deglared`, `14_photo_01_enhanced`, etc.
+- All presigned URLs expire in **7 days**. Upload PUT URL remains 1 hour (write permission only).
 
 ---
 
@@ -288,15 +292,21 @@ In the `ExpandedAlbumCard`, below the thumbnail row (before the footer divider),
 - Only show debug images that exist (some steps may be missing for certain inputs)
 
 **`debug_urls` key mapping:**
+
+`debug_urls` keys use numeric-prefix labels (same namespace as `thumbnail_urls`). Per-photo steps include the zero-padded photo index. Map to display labels for the strip:
+
 ```ts
-const DEBUG_STEP_LABELS: Record<string, string> = {
-  load:              '1. Load',
-  page_detect:       '2. Page',
-  photo_detect:      '3. Photos',
-  ai_orient:         '4. Orient',
-  glare_remove:      '5. Glare',
-  color_restore:     '6. Color',
-}
+// Ordered list for the debug strip — show only keys that exist in debug_urls
+const DEBUG_STRIP_ORDER: Array<{ keyPrefix: string; label: string }> = [
+  { keyPrefix: '01_loaded',              label: '1. Load' },
+  { keyPrefix: '02_page_detected',       label: '2. Page' },
+  { keyPrefix: '03_page_warped',         label: '3. Warped' },
+  { keyPrefix: '04_photo_boundaries',    label: '4. Split' },
+  { keyPrefix: '05b_photo_01_oriented',  label: '5. Orient' },  // first photo only in strip
+  { keyPrefix: '07_photo_01_deglared',   label: '6. Glare' },   // first photo only in strip
+  { keyPrefix: '14_photo_01_enhanced',   label: '7. Color' },   // first photo only in strip
+]
+// For multi-photo jobs, duplicate per-photo entries per photo index (01, 02, 03…)
 ```
 
 ---
@@ -333,7 +343,7 @@ Photo 3  ● ○ ○ ○ ○ ○
 - [ ] DropZone shown only when no jobs, fixed height 320px
 - [ ] Amber border overlay appears on drag-over (even when grid is populated)
 - [ ] AlbumPageCard: background is `saCard` warm grey (not white)
-- [ ] AlbumPageCard: ThumbBox shows before thumbnail (from object URL or `debug_urls['load']`)
+- [x] AlbumPageCard: ThumbBox shows before thumbnail (from object URL or `job.thumbnail_url`)
 - [ ] AlbumPageCard: Arrow icon is `saAmber400` (bright yellow-gold) in compact card
 - [ ] AlbumPageCard: PipelineProgressWheel shows during processing (pie segments, not arc)
 - [ ] PipelineProgressWheel: correct segment count (6), correct filled count, "X of 6" center label
