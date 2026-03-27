@@ -36,9 +36,12 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
 USER nextjs
 
-EXPOSE 3000
+EXPOSE 8080
 
-ENV PORT=3000
+# App Runner injects PORT=8080 at runtime; match that default so the
+# Next.js standalone server and the App Runner health-check agree on the port.
+# Override with ENV PORT=3000 in docker run for local development.
+ENV PORT=8080
 ENV HOSTNAME="0.0.0.0"
 
 CMD ["node", "server.js"]
