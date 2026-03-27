@@ -104,8 +104,20 @@ def update_step(
     step_name: str,
     detail: str = "",
     debug_keys: dict | None = None,
+    thumbnail_key: str | None = None,
 ) -> None:
-    """Update job record to reflect the currently running step."""
+    """Update job record to reflect the currently running step.
+
+    Args:
+        user_hash: User partition key.
+        job_id: Job sort key.
+        step_name: Name of the step now running (e.g. ``"load"``).
+        detail: Human-readable detail shown in the UI.
+        debug_keys: Mapping of label → S3 key written to ``debug_keys`` map.
+        thumbnail_key: Full S3 key for the card thumbnail (``{user_hash}/thumbnails/{stem}.jpg``).
+            Stored as a top-level ``thumbnail_key`` attribute so the list endpoint
+            can presign it without fetching all debug keys.
+    """
     now = datetime.now(timezone.utc).isoformat()
     update_expr = "SET current_step = :cs, step_detail = :sd, updated_at = :ua"
     expr_values: dict[str, Any] = {":cs": step_name, ":sd": detail, ":ua": now}
@@ -115,6 +127,10 @@ def update_step(
             safe = attr_key.replace("-", "_").replace(".", "_").replace("/", "_")
             update_expr += f", debug_keys.#dk_{safe} = :dkv_{safe}"
             expr_values[f":dkv_{safe}"] = s3_key
+
+    if thumbnail_key:
+        update_expr += ", thumbnail_key = :tk"
+        expr_values[":tk"] = thumbnail_key
 
     try:
         kw: dict[str, Any] = {

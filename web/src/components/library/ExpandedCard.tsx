@@ -119,16 +119,19 @@ function AfterSection({ job }: { job: Job }) {
   if (job.status === 'complete' && job.output_urls && job.output_urls.length > 0) {
     const visible = job.output_urls.slice(0, 3)
     const overflow = job.output_urls.length - visible.length
-    // Natural-ratio layout: images keep their aspect ratio up to maxWidth, then
-    // flex shrinks them so they always fit inside the expanded card (max-w-[640px]).
+    // CSS Grid with 1fr columns: every slot is mathematically equal regardless of
+    // the photo's natural aspect ratio. Overflow badge shares the same row as a
+    // fixed-width auto column so it doesn't inflate the photo slots.
+    const cols = overflow > 0
+      ? `repeat(${visible.length}, 1fr) ${Math.round(height * 0.65)}px`
+      : `repeat(${visible.length}, 1fr)`
     return (
-      <div className="flex items-center gap-2 overflow-hidden" style={{ height }}>
+      <div
+        className="w-full overflow-hidden"
+        style={{ display: 'grid', gridTemplateColumns: cols, gap: 8, height }}
+      >
         {visible.map((url, i) => (
-          <div
-            key={i}
-            className="flex-1 min-w-0 overflow-hidden rounded-[6px]"
-            style={{ height, maxWidth: height * 1.5 }}
-          >
+          <div key={i} className="overflow-hidden rounded-[6px]" style={{ height }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={url}
@@ -139,8 +142,8 @@ function AfterSection({ job }: { job: Job }) {
         ))}
         {overflow > 0 && (
           <div
-            className="flex-shrink-0 flex items-center justify-center rounded-[6px] bg-sa-stone-200 dark:bg-sa-stone-700"
-            style={{ width: height * 0.65, height }}
+            className="flex items-center justify-center rounded-[6px] bg-sa-stone-200 dark:bg-sa-stone-700"
+            style={{ height }}
           >
             <span className="text-xs font-semibold text-sa-stone-500 dark:text-sa-stone-400">
               +{overflow}
@@ -208,7 +211,8 @@ export default function ExpandedCard({ job, onClose }: ExpandedCardProps) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job.job_id])
 
-  const beforeSrc = job.debug_urls?.['load'] ?? job.preview_url
+  // Before-thumbnail: 400px backend thumbnail → client preview_url → nothing
+  const beforeSrc = job.thumbnail_url ?? job.preview_url
   const hasDebugStrip =
     (job.status === 'complete' || job.status === 'processing') &&
     job.debug_urls && Object.keys(job.debug_urls).length > 0

@@ -76,17 +76,21 @@ function AfterSection({ job, height }: AfterSectionProps) {
 
   if (job.status === 'complete' && job.output_urls && job.output_urls.length > 0) {
     const photos = job.output_urls
-    // Equal-slot flex layout — each photo gets 1 flex unit, fills available width.
-    // flex-1/min-w-0 on the wrapper + each slot prevents any overflow regardless of
-    // how many photos there are or what aspect ratio the card happens to be.
+    // CSS Grid with repeat(N, 1fr) — the only layout that guarantees perfectly equal
+    // column widths regardless of image natural dimensions. flex-1 lets natural image
+    // sizes bleed through even with min-w-0; 1fr columns are mathematically equal.
     return (
-      <div className="flex items-center gap-1 w-full overflow-hidden" style={{ height }}>
+      <div
+        className="w-full overflow-hidden"
+        style={{
+          display: 'grid',
+          gridTemplateColumns: `repeat(${photos.length}, 1fr)`,
+          gap: 4,
+          height,
+        }}
+      >
         {photos.map((url, i) => (
-          <div
-            key={i}
-            className="flex-1 min-w-0 overflow-hidden rounded-[6px]"
-            style={{ height }}
-          >
+          <div key={i} className="overflow-hidden rounded-[6px]" style={{ height }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={url}
@@ -120,13 +124,13 @@ export default function AlbumPageCard({ job, isOtherExpanded, onExpand }: AlbumP
   const isActive =
     job.status === 'uploading' || job.status === 'processing'
 
-  // For complete jobs loaded from the list endpoint, output_urls (and debug_urls) are
-  // absent. Fetch the full job record once on mount so the after-thumbnails appear.
+  // For jobs loaded from the list endpoint, output_urls / thumbnail_url may be absent.
+  // Fetch the full job record once on mount when either is missing so thumbnails appear.
   useEffect(() => {
-    if (
-      job.status === 'complete' &&
+    const missingOutputUrls = job.status === 'complete' &&
       (!job.output_urls || job.output_urls.length === 0)
-    ) {
+    const missingThumbnail = !job.thumbnail_url && !job.preview_url
+    if (missingOutputUrls || missingThumbnail) {
       getJob(job.job_id)
         .then((full) => upsertJob({ ...full, preview_url: job.preview_url }))
         .catch(() => {})
@@ -172,8 +176,8 @@ export default function AlbumPageCard({ job, isOtherExpanded, onExpand }: AlbumP
     }
   }
 
-  // Before-thumbnail: prefer debug_urls['load'] (01_loaded.jpg), fall back to preview_url
-  const beforeSrc = job.debug_urls?.['load'] ?? job.preview_url
+  // Before-thumbnail: 400px backend thumbnail → client preview_url from upload → nothing
+  const beforeSrc = job.thumbnail_url ?? job.preview_url
 
   const thumbH = 88
   const deleteColor =
