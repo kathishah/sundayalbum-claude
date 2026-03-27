@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - dev
+      - web-ui-implementation
     paths:
       - "web/**"
       - ".github/workflows/deploy-web.yml"
@@ -27,6 +27,7 @@ env:
 jobs:
   build-and-deploy:
     name: Build & Deploy (${{ github.ref_name == 'main' && 'prod' || 'dev' }})
+    # web-ui-implementation → dev App Runner | main → prod App Runner
     runs-on: ubuntu-latest
     permissions:
       id-token: write
