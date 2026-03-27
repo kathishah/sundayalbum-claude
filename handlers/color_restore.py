@@ -2,7 +2,7 @@
 from __future__ import annotations
 import logging
 from typing import Any
-from handlers.common import fail_job, make_config, make_storage, update_step
+from handlers.common import fail_job, make_config, make_storage, update_step, write_thumbnail
 import src.steps.color_restore as step
 
 logger = logging.getLogger(__name__)
@@ -21,13 +21,18 @@ def handler(event: dict, context: Any) -> dict:
         fail_job(user_hash, job_id, f"color_restore[{photo_index}] failed: {exc}")
         raise
     idx = f"{photo_index:02d}"
-    output_key = result.get("output_key", f"output/SundayAlbum_{stem}_Photo{idx}.jpg")
+    label = f"14_photo_{idx}_enhanced"
+    debug_key = f"debug/{stem}_{label}.jpg"
+    thumb_key = f"thumbnails/{stem}_{label}.jpg"
+    write_thumbnail(storage, debug_key, thumb_key)
     update_step(
         user_hash, job_id, "color_restore",
         f"Photo {photo_index} complete",
-        debug_keys={f"14_photo_{idx}_enhanced": f"debug/{stem}_14_photo_{idx}_enhanced.jpg"},
+        debug_keys={label: debug_key},
+        thumbnail_keys={label: thumb_key},
     )
-    logger.info("color_restore[%d]: output=%s", photo_index, output_key)
+    logger.info("color_restore[%d]: output=%s", photo_index, result.get("output_key"))
+    output_key = result.get("output_key", f"output/SundayAlbum_{stem}_Photo{idx}.jpg")
     # Return only what finalize needs (keep event small)
     return {
         "photo_index": photo_index,

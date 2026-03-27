@@ -2,7 +2,7 @@
 from __future__ import annotations
 import logging
 from typing import Any
-from handlers.common import fail_job, make_config, make_storage, update_step
+from handlers.common import fail_job, make_config, make_storage, update_step, write_thumbnail
 import src.steps.photo_detect as step
 
 logger = logging.getLogger(__name__)
@@ -20,9 +20,13 @@ def handler(event: dict, context: Any) -> dict:
         fail_job(user_hash, job_id, f"photo_detect failed: {exc}")
         raise
     count = result.get("photo_count", 0)
+    debug_key = f"debug/{stem}_04_photo_boundaries.jpg"
+    thumb_key = f"thumbnails/{stem}_04_photo_boundaries.jpg"
+    write_thumbnail(storage, debug_key, thumb_key)
     update_step(
         user_hash, job_id, "photo_detect", f"{count} photo(s) detected",
-        debug_keys={"04_photo_boundaries": f"debug/{stem}_04_photo_boundaries.jpg"},
+        debug_keys={"04_photo_boundaries": debug_key},
+        thumbnail_keys={"04_photo_boundaries": thumb_key},
     )
     logger.info("photo_detect: %d photo(s)", count)
     return {**event, **result}

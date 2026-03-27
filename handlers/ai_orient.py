@@ -2,7 +2,7 @@
 from __future__ import annotations
 import logging
 from typing import Any
-from handlers.common import fail_job, make_config, make_storage, update_step
+from handlers.common import fail_job, make_config, make_storage, update_step, write_thumbnail
 import src.steps.ai_orient as step
 
 logger = logging.getLogger(__name__)
@@ -21,10 +21,15 @@ def handler(event: dict, context: Any) -> dict:
         fail_job(user_hash, job_id, f"ai_orient[{photo_index}] failed: {exc}")
         raise
     idx = f"{photo_index:02d}"
+    label = f"05b_photo_{idx}_oriented"
+    debug_key = f"debug/{stem}_{label}.jpg"
+    thumb_key = f"thumbnails/{stem}_{label}.jpg"
+    write_thumbnail(storage, debug_key, thumb_key)
     update_step(
         user_hash, job_id, "ai_orient",
         f"Photo {photo_index} oriented ({result.get('rotation_degrees', 0)}°)",
-        debug_keys={f"05b_photo_{idx}_oriented": f"debug/{stem}_05b_photo_{idx}_oriented.jpg"},
+        debug_keys={label: debug_key},
+        thumbnail_keys={label: thumb_key},
     )
     logger.info("ai_orient[%d]: %d° confidence=%s", photo_index, result.get("rotation_degrees", 0), result.get("orientation_confidence"))
     return {**event, **result}

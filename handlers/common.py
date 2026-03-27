@@ -98,13 +98,41 @@ def make_config(overrides: dict | None = None, user_keys: dict | None = None):
 
 # ── DynamoDB helpers ──────────────────────────────────────────────────────────
 
+def _safe(key: str) -> str:
+    """Make a DynamoDB expression attribute name safe (no hyphens, dots, slashes)."""
+    return key.replace("-", "_").replace(".", "_").replace("/", "_")
+
+
+def write_thumbnail(storage, debug_key: str, thumb_key: str) -> None:
+    """Read the debug image at *debug_key*, resize to 400 px wide, write to *thumb_key*.
+
+    Both keys are relative to the storage backend's prefix (user_hash).
+    Non-fatal: logs a warning on failure so a thumbnail error never aborts the pipeline.
+    """
+    import numpy as np
+    from PIL import Image
+
+    try:
+        image = storage.read_image(debug_key)
+        h, w = image.shape[:2]
+        thumb_w = 400
+        thumb_h = max(1, int(round(h * thumb_w / w)))
+        img_u8 = (np.clip(image, 0.0, 1.0) * 255).astype(np.uint8)
+        pil_thumb = Image.fromarray(img_u8, "RGB").resize((thumb_w, thumb_h), Image.LANCZOS)
+        thumb_arr = np.array(pil_thumb).astype(np.float32) / 255.0
+        storage.write_image(thumb_key, thumb_arr, format="jpeg", quality=85)
+        logger.debug("write_thumbnail: %s → %s (%dx%d)", debug_key, thumb_key, thumb_w, thumb_h)
+    except Exception as exc:
+        logger.warning("write_thumbnail failed for %s: %s (non-fatal)", debug_key, exc)
+
+
 def update_step(
     user_hash: str,
     job_id: str,
     step_name: str,
     detail: str = "",
     debug_keys: dict | None = None,
-    thumbnail_key: str | None = None,
+    thumbnail_keys: dict | None = None,
 ) -> None:
     """Update job record to reflect the currently running step.
 
@@ -113,24 +141,31 @@ def update_step(
         job_id: Job sort key.
         step_name: Name of the step now running (e.g. ``"load"``).
         detail: Human-readable detail shown in the UI.
-        debug_keys: Mapping of label → S3 key written to ``debug_keys`` map.
-        thumbnail_key: Full S3 key for the card thumbnail (``{user_hash}/thumbnails/{stem}.jpg``).
-            Stored as a top-level ``thumbnail_key`` attribute so the list endpoint
-            can presign it without fetching all debug keys.
+        debug_keys: Mapping of label → relative S3 key for full-res debug images.
+            Stored in the ``debug_keys`` DynamoDB map. API prefixes user_hash when presigning.
+        thumbnail_keys: Mapping of label → relative S3 key for 400px thumbnails.
+            Same label namespace as debug_keys (e.g. ``"01_loaded"``, ``"07_photo_01_deglared"``).
+            Stored in the ``thumbnail_keys`` DynamoDB map. API presigns all entries for the
+            step-detail page and the ``01_loaded`` entry as the card before-thumbnail.
     """
     now = datetime.now(timezone.utc).isoformat()
     update_expr = "SET current_step = :cs, step_detail = :sd, updated_at = :ua"
     expr_values: dict[str, Any] = {":cs": step_name, ":sd": detail, ":ua": now}
+    expr_names: dict[str, str] = {}
 
     if debug_keys:
         for attr_key, s3_key in debug_keys.items():
-            safe = attr_key.replace("-", "_").replace(".", "_").replace("/", "_")
-            update_expr += f", debug_keys.#dk_{safe} = :dkv_{safe}"
-            expr_values[f":dkv_{safe}"] = s3_key
+            s = _safe(attr_key)
+            update_expr += f", debug_keys.#dk_{s} = :dkv_{s}"
+            expr_values[f":dkv_{s}"] = s3_key
+            expr_names[f"#dk_{s}"] = attr_key
 
-    if thumbnail_key:
-        update_expr += ", thumbnail_key = :tk"
-        expr_values[":tk"] = thumbnail_key
+    if thumbnail_keys:
+        for attr_key, s3_key in thumbnail_keys.items():
+            s = _safe(attr_key)
+            update_expr += f", thumbnail_keys.#tk_{s} = :tkv_{s}"
+            expr_values[f":tkv_{s}"] = s3_key
+            expr_names[f"#tk_{s}"] = attr_key
 
     try:
         kw: dict[str, Any] = {
@@ -138,11 +173,8 @@ def update_step(
             "UpdateExpression": update_expr,
             "ExpressionAttributeValues": expr_values,
         }
-        if debug_keys:
-            kw["ExpressionAttributeNames"] = {
-                f"#dk_{attr_key.replace('-','_').replace('.','_').replace('/','_')}": attr_key
-                for attr_key in debug_keys
-            }
+        if expr_names:
+            kw["ExpressionAttributeNames"] = expr_names
         jobs_table.update_item(**kw)
     except Exception as exc:
         logger.warning("update_step DynamoDB error (non-fatal): %s", exc)

@@ -2,7 +2,7 @@
 from __future__ import annotations
 import logging
 from typing import Any
-from handlers.common import fail_job, make_config, make_storage, update_step
+from handlers.common import fail_job, make_config, make_storage, update_step, write_thumbnail
 import src.steps.geometry as step
 
 logger = logging.getLogger(__name__)
@@ -20,5 +20,16 @@ def handler(event: dict, context: Any) -> dict:
     except Exception as exc:
         fail_job(user_hash, job_id, f"geometry[{photo_index}] failed: {exc}")
         raise
+    idx = f"{photo_index:02d}"
+    label = f"10_photo_{idx}_geometry_final"
+    debug_key = f"debug/{stem}_{label}.jpg"
+    thumb_key = f"thumbnails/{stem}_{label}.jpg"
+    write_thumbnail(storage, debug_key, thumb_key)
+    update_step(
+        user_hash, job_id, "geometry",
+        f"Photo {photo_index} geometry corrected",
+        debug_keys={label: debug_key},
+        thumbnail_keys={label: thumb_key},
+    )
     logger.info("geometry[%d]: %s", photo_index, result)
     return {**event, **result}

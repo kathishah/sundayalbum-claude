@@ -2,7 +2,7 @@
 from __future__ import annotations
 import logging
 from typing import Any
-from handlers.common import fail_job, make_config, make_storage, update_step
+from handlers.common import fail_job, make_config, make_storage, update_step, write_thumbnail
 import src.steps.perspective as step
 
 logger = logging.getLogger(__name__)
@@ -19,9 +19,13 @@ def handler(event: dict, context: Any) -> dict:
     except Exception as exc:
         fail_job(user_hash, job_id, f"perspective failed: {exc}")
         raise
+    debug_key = f"debug/{stem}_03_page_warped.jpg"
+    thumb_key = f"thumbnails/{stem}_03_page_warped.jpg"
+    write_thumbnail(storage, debug_key, thumb_key)
     update_step(
         user_hash, job_id, "perspective", "Perspective corrected",
-        debug_keys={"03_page_warped": f"debug/{stem}_03_page_warped.jpg"},
+        debug_keys={"03_page_warped": debug_key},
+        thumbnail_keys={"03_page_warped": thumb_key},
     )
     logger.info("perspective: result=%s", result)
     return {**event, **result}

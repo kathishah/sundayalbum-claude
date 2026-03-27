@@ -12,11 +12,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-from PIL import Image
-
 from handlers.common import (
-    S3_BUCKET, REGION, fail_job, make_config, make_storage, update_step
+    S3_BUCKET, REGION, fail_job, make_config, make_storage, update_step, write_thumbnail
 )
 
 logger = logging.getLogger(__name__)
@@ -66,26 +63,19 @@ def handler(event: dict, context: Any) -> dict:
     debug_key = f"debug/{stem}_01_loaded.jpg"
     storage.write_image(debug_key, image, format="jpeg", quality=95)
 
-    # Write card thumbnail: 400px wide JPEG for fast library display
-    h, w = image.shape[:2]
-    thumb_w = 400
-    thumb_h = max(1, int(round(h * thumb_w / w)))
-    img_u8 = (np.clip(image, 0.0, 1.0) * 255).astype(np.uint8)
-    pil_thumb = Image.fromarray(img_u8, "RGB").resize((thumb_w, thumb_h), Image.LANCZOS)
-    thumb_arr = np.array(pil_thumb).astype(np.float32) / 255.0
-    thumbnail_key = f"thumbnails/{stem}.jpg"
-    storage.write_image(thumbnail_key, thumb_arr, format="jpeg", quality=85)
+    # Write 400px thumbnail for library card + Phase 5 step detail
+    thumb_key = f"thumbnails/{stem}_01_loaded.jpg"
+    write_thumbnail(storage, debug_key, thumb_key)
 
     update_step(
         user_hash, job_id, "load", "Loaded",
         debug_keys={"01_loaded": debug_key},
-        thumbnail_key=f"{user_hash}/{thumbnail_key}",
+        thumbnail_keys={"01_loaded": thumb_key},
     )
 
     logger.info(
-        "load: %s → %dx%d (%s), thumbnail %dx%d",
+        "load: %s → %dx%d (%s)",
         source_key, metadata.original_size[0], metadata.original_size[1], metadata.format,
-        thumb_w, thumb_h,
     )
 
     return {

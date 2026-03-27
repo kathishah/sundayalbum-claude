@@ -2,7 +2,7 @@
 from __future__ import annotations
 import logging
 from typing import Any
-from handlers.common import fail_job, make_config, make_storage, update_step
+from handlers.common import fail_job, make_config, make_storage, update_step, write_thumbnail
 import src.steps.glare_remove as step
 
 logger = logging.getLogger(__name__)
@@ -21,10 +21,15 @@ def handler(event: dict, context: Any) -> dict:
         fail_job(user_hash, job_id, f"glare_remove[{photo_index}] failed: {exc}")
         raise
     idx = f"{photo_index:02d}"
+    label = f"07_photo_{idx}_deglared"
+    debug_key = f"debug/{stem}_{label}.jpg"
+    thumb_key = f"thumbnails/{stem}_{label}.jpg"
+    write_thumbnail(storage, debug_key, thumb_key)
     update_step(
         user_hash, job_id, "glare_remove",
         f"Photo {photo_index} deglared ({result.get('method', '?')})",
-        debug_keys={f"07_photo_{idx}_deglared": f"debug/{stem}_07_photo_{idx}_deglared.jpg"},
+        debug_keys={label: debug_key},
+        thumbnail_keys={label: thumb_key},
     )
     logger.info("glare_remove[%d]: method=%s", photo_index, result.get("method"))
     return {**event, **result}
