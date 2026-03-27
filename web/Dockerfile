@@ -34,14 +34,17 @@ COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
+# Entrypoint forces HOSTNAME=0.0.0.0 so Next.js binds on all interfaces.
+# App Runner overrides the HOSTNAME env var with the container's internal
+# hostname at runtime; without this fix the server binds to a single IP and
+# the App Runner health-check probe (connecting via 127.0.0.1) gets ECONNREFUSED.
+COPY --chown=nextjs:nodejs entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
 USER nextjs
 
 EXPOSE 8080
 
-# App Runner injects PORT=8080 at runtime; match that default so the
-# Next.js standalone server and the App Runner health-check agree on the port.
-# Override with ENV PORT=3000 in docker run for local development.
 ENV PORT=8080
-ENV HOSTNAME="0.0.0.0"
 
-CMD ["node", "server.js"]
+CMD ["/app/entrypoint.sh"]
