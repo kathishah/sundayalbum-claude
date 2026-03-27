@@ -14,7 +14,10 @@ export interface Job {
   processing_time: number
   output_keys: string[]
   output_urls?: string[]
+  debug_urls?: Record<string, string>  // step_name → presigned S3 URL for debug image
   upload_url?: string
+  /** Client-only: object URL from the uploaded File, used as before-thumbnail placeholder */
+  preview_url?: string
 }
 
 export interface StepUpdate {

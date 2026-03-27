@@ -5,6 +5,25 @@
 :root {
   --font-fraunces: 'Fraunces', Georgia, serif;
   --font-dm-sans: 'DM Sans', system-ui, sans-serif;
+  --font-jetbrains-mono: 'JetBrains Mono', monospace;
+
+  /* Semantic adaptive color tokens — rgb channel values for Tailwind opacity modifier */
+  --sa-card: 240 239 236;        /* warm light grey card surface */
+  --sa-surface: 245 245 244;     /* slightly lighter inset surface */
+  --sa-border-card: 219 217 215; /* subtle card border */
+
+  /* Adaptive shadows */
+  --sa-shadow-card: 0 3px 12px rgba(28, 25, 23, 0.45);
+  --sa-shadow-expanded: 0 12px 48px rgba(28, 25, 23, 0.22);
+}
+
+.dark {
+  --sa-card: 35 31 29;
+  --sa-surface: 24 21 19;
+  --sa-border-card: 55 50 47;
+
+  --sa-shadow-card: 0 3px 12px rgba(255, 255, 255, 0.12);
+  --sa-shadow-expanded: 0 12px 48px rgba(255, 255, 255, 0.10);
 }
 
 * {

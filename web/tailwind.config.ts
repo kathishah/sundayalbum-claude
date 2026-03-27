@@ -15,7 +15,7 @@ const config: Config = {
           100: '#FEF0DC',
           200: '#FDE0C0',
           400: '#FBBF24',
-          500: '#D97708',
+          500: '#D97706',
           600: '#B45309',
           700: '#92400E',
         },
@@ -34,10 +34,15 @@ const config: Config = {
         },
         'sa-success': '#16A34A',
         'sa-error': '#DC2626',
+        /* Semantic adaptive tokens — reference CSS variables set in globals.css */
+        'sa-card': 'rgb(var(--sa-card) / <alpha-value>)',
+        'sa-surface': 'rgb(var(--sa-surface) / <alpha-value>)',
+        'sa-border-card': 'rgb(var(--sa-border-card) / <alpha-value>)',
       },
       fontFamily: {
         display: ['var(--font-fraunces)', 'Georgia', 'serif'],
         sans: ['var(--font-dm-sans)', 'system-ui', 'sans-serif'],
+        mono: ['var(--font-jetbrains-mono)', 'monospace'],
       },
       transitionTimingFunction: {
         'sa-spring': 'cubic-bezier(0.16, 1, 0.3, 1)',

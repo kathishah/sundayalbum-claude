@@ -26,6 +26,53 @@ export const STEP_LABELS: Record<string, string> = {
   done: 'Complete',
 }
 
+/**
+ * Maps the 10 backend Lambda step names to the 6 visual step indices (0–5)
+ * shown in the PipelineProgressWheel pie segments and JobStatusLine.
+ *
+ * Backend steps not listed independently (normalize, perspective, photo_split,
+ * geometry) are collapsed into their adjacent visual step — they don't advance
+ * the visible counter on their own.
+ */
+export const BACKEND_TO_VISUAL: Record<string, number> = {
+  load:          0,
+  normalize:     0,
+  page_detect:   1,
+  perspective:   1,
+  photo_detect:  2,
+  photo_split:   2,
+  ai_orient:     3,
+  glare_remove:  4,
+  geometry:      4,
+  color_restore: 5,
+  done:          5,
+}
+
+/** 6 user-visible step names, indices 0–5, matching macOS PipelineStep enum order */
+export const VISUAL_STEP_LABELS: string[] = [
+  'Load',
+  'Page',
+  'Split',
+  'Orient',
+  'Glare',
+  'Color',
+]
+
+export const TOTAL_VISUAL_STEPS = 6
+
+/**
+ * Labels shown under each debug image in the expanded card strip.
+ * Keys match the backend step names returned in debug_urls.
+ */
+export const DEBUG_STEP_LABELS: Record<string, string> = {
+  load:          '1. Load',
+  page_detect:   '2. Page',
+  photo_detect:  '3. Photos',
+  ai_orient:     '4. Orient',
+  glare_remove:  '5. Glare',
+  color_restore: '6. Color',
+}
+
 export const ALLOWED_EXTENSIONS = new Set(['.heic', '.jpg', '.jpeg', '.png'])
 
 export const TOKEN_KEY = 'sa_token'

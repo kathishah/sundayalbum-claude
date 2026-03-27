@@ -1,238 +1,262 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import Link from 'next/link'
-import clsx from 'clsx'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { Job, StepUpdate } from '@/lib/types'
-import { STEP_LABELS, STEP_PROGRESS } from '@/lib/constants'
+import { BACKEND_TO_VISUAL, TOTAL_VISUAL_STEPS } from '@/lib/constants'
 import { useJobProgress } from '@/lib/websocket'
 import { useJobsStore } from '@/stores/jobs-store'
-import { getJob } from '@/lib/api'
-import Spinner from '@/components/ui/Spinner'
-import Button from '@/components/ui/Button'
-import ProgressWheel from './ProgressWheel'
-import ExpandedCard from './ExpandedCard'
+import { getJob, deleteJob } from '@/lib/api'
+import PipelineProgressWheel from './ProgressWheel'
 
 interface AlbumPageCardProps {
   job: Job
+  /** True when a different card is currently expanded — dims and scales this card */
+  isOtherExpanded: boolean
+  onExpand: () => void
 }
 
-export default function AlbumPageCard({ job: initialJob }: AlbumPageCardProps) {
-  const { upsertJob } = useJobsStore()
-  const [localJob, setLocalJob] = useState<Job>(initialJob)
-  const [progress, setProgress] = useState(
-    STEP_PROGRESS[initialJob.current_step] ?? 0,
+// ── ThumbBox ────────────────────────────────────────────────────────────────
+
+interface ThumbBoxProps {
+  src: string | undefined
+  width: number
+  height: number
+}
+
+function ThumbBox({ src, width, height }: ThumbBoxProps) {
+  return (
+    <div
+      className="flex-shrink-0 rounded-lg overflow-hidden bg-sa-surface"
+      style={{ width, height }}
+    >
+      {src ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={src}
+          alt="Before"
+          className="w-full h-full object-cover"
+        />
+      ) : (
+        <div className="w-full h-full flex items-center justify-center">
+          {/* Small spinner matching macOS ProgressView().controlSize(.small) */}
+          <div className="w-4 h-4 rounded-full border-2 border-sa-stone-300 dark:border-sa-stone-600 border-t-sa-amber-500 animate-spin" />
+        </div>
+      )}
+    </div>
   )
-  const [expanded, setExpanded] = useState(false)
+}
+
+// ── AfterSection ─────────────────────────────────────────────────────────────
+
+interface AfterSectionProps {
+  job: Job
+  height: number
+  /** When provided: equal-slot compact mode. When undefined: natural-ratio expanded mode (up to 3). */
+  sectionWidth?: number
+}
+
+function AfterSection({ job, height, sectionWidth }: AfterSectionProps) {
+  const completedCount =
+    job.status === 'complete'
+      ? TOTAL_VISUAL_STEPS
+      : job.status === 'processing'
+        ? (BACKEND_TO_VISUAL[job.current_step] ?? 0)
+        : 0
+
+  if (job.status === 'complete' && job.output_urls && job.output_urls.length > 0) {
+    const photos = job.output_urls
+
+    if (sectionWidth !== undefined) {
+      // Compact equal-slot mode
+      const gap = 4
+      const n = photos.length
+      const slotW = Math.max((sectionWidth - gap * (n - 1)) / n, 20)
+      return (
+        <div className="flex items-center" style={{ gap, height }}>
+          {photos.map((url, i) => (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              key={i}
+              src={url}
+              alt={`Photo ${i + 1}`}
+              className="object-cover rounded-[6px] flex-shrink-0"
+              style={{ width: slotW, height }}
+            />
+          ))}
+        </div>
+      )
+    }
+
+    // Expanded natural-ratio mode (up to 3 + overflow badge)
+    const visible = photos.slice(0, 3)
+    const overflow = photos.length - visible.length
+    return (
+      <div className="flex items-center gap-2" style={{ height }}>
+        {visible.map((url, i) => (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            key={i}
+            src={url}
+            alt={`Photo ${i + 1}`}
+            className="object-cover rounded-[6px] flex-shrink-0"
+            style={{ height, width: 'auto', maxWidth: height * 1.5 }}
+          />
+        ))}
+        {overflow > 0 && (
+          <div
+            className="flex-shrink-0 flex items-center justify-center rounded-[6px] bg-sa-stone-200 dark:bg-sa-stone-700"
+            style={{ width: height * 0.65, height }}
+          >
+            <span className="text-xs font-semibold text-sa-stone-500 dark:text-sa-stone-400">
+              +{overflow}
+            </span>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // Processing / uploading / failed — pie wheel
+  return (
+    <div
+      className="flex items-center justify-center"
+      style={{ height, minWidth: height }}
+    >
+      <PipelineProgressWheel completedCount={completedCount} size={height} />
+    </div>
+  )
+}
+
+// ── AlbumPageCard ─────────────────────────────────────────────────────────────
+
+export default function AlbumPageCard({ job, isOtherExpanded, onExpand }: AlbumPageCardProps) {
+  const { upsertJob, removeJob } = useJobsStore()
+  const [isHovered, setIsHovered] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
 
   const isActive =
-    localJob.status === 'uploading' || localJob.status === 'processing'
+    job.status === 'uploading' || job.status === 'processing'
 
   const handleUpdate = useCallback(
     (update: StepUpdate) => {
-      const newProgress =
-        update.progress >= 0
-          ? update.progress
-          : STEP_PROGRESS[update.step] ?? progress
-
-      setProgress(newProgress)
-
-      // If complete/failed, refresh full job record for output_urls
       if (update.status === 'complete' || update.status === 'failed') {
         getJob(update.jobId)
-          .then((fullJob) => {
-            setLocalJob(fullJob)
-            upsertJob(fullJob)
-          })
-          .catch(() => {
-            setLocalJob((prev) => ({
-              ...prev,
+          .then((fullJob) => upsertJob(fullJob))
+          .catch(() =>
+            upsertJob({
+              ...job,
               status: update.status,
               current_step: update.step,
               step_detail: update.detail,
-            }))
-          })
+            }),
+          )
       } else {
-        setLocalJob((prev) => ({
-          ...prev,
+        upsertJob({
+          ...job,
           status: update.status,
           current_step: update.step,
           step_detail: update.detail,
-          photo_count: update.photoCount || prev.photo_count,
-        }))
+          ...(update.photoCount > 0 && { photo_count: update.photoCount }),
+        })
       }
     },
-    [upsertJob, progress],
+    [job, upsertJob],
   )
 
-  useJobProgress({
-    jobId: localJob.job_id,
-    onUpdate: handleUpdate,
-    enabled: isActive,
-  })
+  useJobProgress({ jobId: job.job_id, onUpdate: handleUpdate, enabled: isActive })
 
-  const stepLabel = STEP_LABELS[localJob.current_step] ?? localJob.current_step
+  async function handleDelete(e: React.MouseEvent) {
+    e.stopPropagation()
+    setIsDeleting(true)
+    try {
+      await deleteJob(job.job_id)
+    } finally {
+      removeJob(job.job_id)
+    }
+  }
+
+  // Before-thumbnail: prefer debug_urls['load'] (01_loaded.jpg), fall back to preview_url
+  const beforeSrc = job.debug_urls?.['load'] ?? job.preview_url
+
+  const thumbH = 88
+  const deleteColor =
+    job.status === 'processing' || job.status === 'uploading'
+      ? 'text-sa-error'
+      : 'text-sa-stone-400 dark:text-sa-stone-500'
 
   return (
-    <>
-      <motion.div
-        layout
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-        className="rounded-xl bg-sa-stone-100 dark:bg-sa-stone-900 border border-sa-stone-200 dark:border-sa-stone-800 shadow-sm overflow-hidden"
+    <motion.div
+      layout
+      initial={{ opacity: 0, y: 8 }}
+      animate={{
+        opacity: isOtherExpanded ? 0.3 : 1,
+        scale: isOtherExpanded ? 0.95 : 1,
+        y: 0,
+      }}
+      transition={
+        isOtherExpanded !== undefined
+          ? { type: 'spring', stiffness: 280, damping: 22 }
+          : { duration: 0.35, ease: [0.16, 1, 0.3, 1] }
+      }
+      className="relative rounded-xl overflow-hidden cursor-pointer select-none"
+      style={{ background: 'rgb(var(--sa-card))', boxShadow: 'var(--sa-shadow-card)' }}
+      onClick={onExpand}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+    >
+      {/* ── Thumbnail row (112px = 88px thumb + 24px vertical padding) ── */}
+      <div className="flex items-center justify-center h-[112px] px-3">
+        <div className="flex items-center gap-[10px] w-full">
+          {/* Before thumbnail */}
+          <ThumbBox src={beforeSrc} width={60} height={thumbH} />
+
+          {/* Arrow — saAmber400 in compact card */}
+          <span className="text-[11px] font-semibold text-sa-amber-400 flex-shrink-0 leading-none">
+            →
+          </span>
+
+          {/* After section — flex:1 fills remaining space */}
+          <div className="flex-1 min-w-0">
+            <AfterSection job={job} height={thumbH} sectionWidth={undefined} />
+          </div>
+        </div>
+      </div>
+
+      {/* ── Filename ── */}
+      <p
+        className="text-center text-[12px] font-semibold text-sa-stone-700 dark:text-sa-stone-200 truncate px-3 pt-1 pb-2.5"
+        title={job.input_filename}
+        style={{
+          // Middle truncation via direction trick isn't supported in CSS; use end truncation
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
       >
-        {/* Uploading */}
-        {localJob.status === 'uploading' && (
-          <div className="flex items-center gap-4 p-4">
-            <div className="w-16 h-16 rounded-lg bg-sa-stone-200 dark:bg-sa-stone-800 flex items-center justify-center flex-shrink-0">
-              <Spinner size="md" className="text-sa-amber-500" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-sa-stone-800 dark:text-sa-stone-100 truncate">
-                {localJob.input_filename}
-              </p>
-              <p className="text-xs text-sa-stone-500 dark:text-sa-stone-400 mt-0.5">
-                Uploading…
-              </p>
-            </div>
-          </div>
-        )}
+        {job.input_filename}
+      </p>
 
-        {/* Processing */}
-        {localJob.status === 'processing' && (
-          <div className="flex items-center gap-4 p-4">
-            {/* Thumbnail */}
-            <div className="w-20 h-20 rounded-lg overflow-hidden bg-sa-stone-200 dark:bg-sa-stone-800 flex-shrink-0">
-              {localJob.upload_url ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={localJob.upload_url}
-                  alt={localJob.input_stem}
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center">
-                  <span className="text-sa-stone-400 text-xs">
-                    {localJob.input_stem.slice(0, 4)}
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {/* Text */}
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-sa-stone-800 dark:text-sa-stone-100 truncate mb-1">
-                {localJob.input_filename}
-              </p>
-              <p className="text-xs text-sa-stone-500 dark:text-sa-stone-400 truncate">
-                {localJob.step_detail || stepLabel}
-              </p>
-            </div>
-
-            {/* Progress wheel */}
-            <div className="flex-shrink-0">
-              <ProgressWheel progress={progress} stepLabel={stepLabel} size={72} />
-            </div>
-          </div>
-        )}
-
-        {/* Complete */}
-        {localJob.status === 'complete' && (
-          <div className="p-4">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-sm font-medium text-sa-stone-800 dark:text-sa-stone-100 truncate">
-                {localJob.input_filename}
-              </p>
-              <div className="flex items-center gap-2 flex-shrink-0 ml-2">
-                <span className="text-xs text-sa-success font-medium">
-                  {localJob.photo_count > 0
-                    ? `${localJob.photo_count} photo${localJob.photo_count !== 1 ? 's' : ''}`
-                    : 'Complete'}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setExpanded(true)}
-                  className="text-xs"
-                >
-                  Expand
-                </Button>
-              </div>
-            </div>
-
-            {/* Output thumbnails grid */}
-            {localJob.output_urls && localJob.output_urls.length > 0 ? (
-              <div
-                className={clsx(
-                  'grid gap-2',
-                  localJob.output_urls.length === 1
-                    ? 'grid-cols-1'
-                    : localJob.output_urls.length === 2
-                      ? 'grid-cols-2'
-                      : 'grid-cols-3',
-                )}
-              >
-                {localJob.output_urls.slice(0, 6).map((url, idx) => (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    key={idx}
-                    src={url}
-                    alt={`Photo ${idx + 1}`}
-                    className="w-full aspect-[4/3] object-cover rounded-lg bg-sa-stone-200 dark:bg-sa-stone-800"
-                  />
-                ))}
-              </div>
-            ) : (
-              <Link
-                href={`/jobs/${localJob.job_id}`}
-                className="text-xs text-sa-amber-600 dark:text-sa-amber-400 hover:underline"
-              >
-                View step detail →
-              </Link>
-            )}
-          </div>
-        )}
-
-        {/* Failed */}
-        {localJob.status === 'failed' && (
-          <div className="flex items-center gap-4 p-4">
-            <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-950 flex items-center justify-center flex-shrink-0">
-              <span className="text-sa-error text-lg">!</span>
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-sa-stone-800 dark:text-sa-stone-100 truncate">
-                {localJob.input_filename}
-              </p>
-              <p className="text-xs text-sa-error mt-0.5 truncate">
-                {localJob.error_message || 'Processing failed'}
-              </p>
-            </div>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => {
-                // Retry: reload page to re-trigger upload flow
-                window.location.reload()
-              }}
-              className="flex-shrink-0"
-            >
-              Retry
-            </Button>
-          </div>
-        )}
-      </motion.div>
-
-      {/* Expanded overlay */}
+      {/* ── Hover delete button ── */}
       <AnimatePresence>
-        {expanded && localJob.status === 'complete' && (
-          <ExpandedCard
-            job={localJob}
-            onClose={() => setExpanded(false)}
-          />
+        {isHovered && !isDeleting && (
+          <motion.button
+            key="delete"
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.8 }}
+            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+            className={`absolute top-2 right-2 w-5 h-5 flex items-center justify-center ${deleteColor} hover:opacity-70`}
+            onClick={handleDelete}
+            aria-label="Delete job"
+          >
+            {/* × circle — 16px matching macOS xmark.circle.fill */}
+            <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor">
+              <path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0zm3.25 10.19L10.19 11.25 8 9.06l-2.19 2.19L4.75 10.19 6.94 8 4.75 5.81 5.81 4.75 8 6.94l2.19-2.19 1.06 1.06L9.06 8l2.19 2.19z" />
+            </svg>
+          </motion.button>
         )}
       </AnimatePresence>
-    </>
+    </motion.div>
   )
 }

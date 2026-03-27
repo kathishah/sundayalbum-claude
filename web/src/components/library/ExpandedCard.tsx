@@ -1,104 +1,270 @@
 'use client'
 
-import Link from 'next/link'
+import { useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import type { Job } from '@/lib/types'
-import Button from '@/components/ui/Button'
+import { BACKEND_TO_VISUAL, TOTAL_VISUAL_STEPS, VISUAL_STEP_LABELS, DEBUG_STEP_LABELS } from '@/lib/constants'
+import { useJobsStore } from '@/stores/jobs-store'
+import { getJob } from '@/lib/api'
+import PipelineProgressWheel from './ProgressWheel'
 
 interface ExpandedCardProps {
   job: Job
   onClose: () => void
 }
 
+// ── JobStatusLine ─────────────────────────────────────────────────────────────
+
+function JobStatusLine({ job }: { job: Job }) {
+  const total = TOTAL_VISUAL_STEPS
+
+  if (job.status === 'uploading') {
+    return (
+      <div className="flex items-center gap-1.5 text-[11px] text-sa-stone-400 dark:text-sa-stone-500">
+        <svg viewBox="0 0 12 12" width="11" height="11" fill="currentColor">
+          <path d="M6 0a6 6 0 1 0 0 12A6 6 0 0 0 6 0zm.5 3v3.25l2.25 1.3-.5.87L5.5 6.75V3h1z" />
+        </svg>
+        Preparing…
+      </div>
+    )
+  }
+
+  if (job.status === 'processing') {
+    const visualIdx = BACKEND_TO_VISUAL[job.current_step] ?? 0
+    const stepNum = Math.min(visualIdx + 1, total)
+    const stepName = VISUAL_STEP_LABELS[visualIdx] ?? job.current_step
+    const progressFraction = stepNum / total
+
+    return (
+      <div className="flex items-center gap-1.5">
+        {/* Slim progress bar — 52px wide, 3px tall, capsule */}
+        <div className="relative flex-shrink-0 rounded-full bg-sa-stone-200 dark:bg-sa-stone-700 overflow-hidden" style={{ width: 52, height: 3 }}>
+          <div
+            className="absolute inset-y-0 left-0 rounded-full bg-sa-amber-500 transition-all duration-[200ms] ease-[cubic-bezier(0.16,1,0.3,1)]"
+            style={{ width: `${progressFraction * 100}%` }}
+          />
+        </div>
+        <span className="text-[11px] text-sa-stone-500 dark:text-sa-stone-400">
+          Step {stepNum} of {total}: {stepName}
+        </span>
+      </div>
+    )
+  }
+
+  if (job.status === 'complete') {
+    const photoCount = job.photo_count
+    const label = `${photoCount} photo${photoCount !== 1 ? 's' : ''} extracted`
+    const timeLabel = job.processing_time > 0 ? ` · ${job.processing_time.toFixed(1)}s` : ''
+    return (
+      <div className="flex items-center gap-1.5 text-[11px] text-sa-success">
+        <svg viewBox="0 0 12 12" width="11" height="11" fill="currentColor">
+          <path d="M6 0a6 6 0 1 0 0 12A6 6 0 0 0 6 0zm2.78 4.28L5.5 7.56 3.22 5.28l.78-.78L5.5 6l2.5-2.5.78.78z" />
+        </svg>
+        {label}{timeLabel}
+      </div>
+    )
+  }
+
+  // failed
+  return (
+    <div className="flex items-center gap-1.5 text-[11px] text-sa-error">
+      <svg viewBox="0 0 12 12" width="11" height="11" fill="currentColor">
+        <path d="M6 0a6 6 0 1 0 0 12A6 6 0 0 0 6 0zm-.5 3h1v4h-1V3zm0 5h1v1.25h-1V8z" />
+      </svg>
+      {job.error_message || 'Processing failed'}
+    </div>
+  )
+}
+
+// ── ThumbBox (120×160) ────────────────────────────────────────────────────────
+
+function ThumbBox({ src }: { src: string | undefined }) {
+  return (
+    <div className="flex-shrink-0 w-[120px] h-[160px] rounded-lg overflow-hidden bg-sa-surface">
+      {src ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={src} alt="Before" className="w-full h-full object-cover" />
+      ) : (
+        <div className="w-full h-full flex items-center justify-center">
+          <div className="w-5 h-5 rounded-full border-2 border-sa-stone-300 dark:border-sa-stone-600 border-t-sa-amber-500 animate-spin" />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── AfterSection (expanded natural-ratio mode) ─────────────────────────────
+
+function AfterSection({ job }: { job: Job }) {
+  const height = 160
+  const completedCount =
+    job.status === 'complete'
+      ? TOTAL_VISUAL_STEPS
+      : BACKEND_TO_VISUAL[job.current_step] ?? 0
+
+  if (job.status === 'complete' && job.output_urls && job.output_urls.length > 0) {
+    const visible = job.output_urls.slice(0, 3)
+    const overflow = job.output_urls.length - visible.length
+    return (
+      <div className="flex items-center gap-2" style={{ height }}>
+        {visible.map((url, i) => (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            key={i}
+            src={url}
+            alt={`Photo ${i + 1}`}
+            className="object-cover rounded-[6px] flex-shrink-0"
+            style={{ height, width: 'auto', maxWidth: height * 1.5 }}
+          />
+        ))}
+        {overflow > 0 && (
+          <div
+            className="flex-shrink-0 flex items-center justify-center rounded-[6px] bg-sa-stone-200 dark:bg-sa-stone-700"
+            style={{ width: height * 0.65, height }}
+          >
+            <span className="text-xs font-semibold text-sa-stone-500 dark:text-sa-stone-400">
+              +{overflow}
+            </span>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex items-center justify-center" style={{ height, minWidth: height }}>
+      <PipelineProgressWheel completedCount={completedCount} size={height} />
+    </div>
+  )
+}
+
+// ── Debug image strip ─────────────────────────────────────────────────────────
+
+function DebugStrip({ debugUrls }: { debugUrls: Record<string, string> }) {
+  const entries = Object.entries(DEBUG_STEP_LABELS)
+    .filter(([key]) => debugUrls[key])
+    .map(([key, label]) => ({ key, label, url: debugUrls[key] }))
+
+  if (entries.length === 0) return null
+
+  return (
+    <div className="overflow-x-auto px-5 pb-4">
+      <div className="flex gap-3 w-max">
+        {entries.map(({ key, label, url }) => (
+          <div key={key} className="flex flex-col items-center gap-1 flex-shrink-0">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={url}
+              alt={label}
+              className="h-16 w-auto rounded-[6px] object-cover bg-sa-surface"
+            />
+            <span className="text-[9px] text-sa-stone-400 dark:text-sa-stone-500 text-center">
+              {label}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── ExpandedCard ──────────────────────────────────────────────────────────────
+
 export default function ExpandedCard({ job, onClose }: ExpandedCardProps) {
+  const router = useRouter()
+  const { upsertJob } = useJobsStore()
+
+  // If debug_urls are missing on a complete job (e.g. loaded from list endpoint),
+  // fetch the full job record to get presigned debug URLs
+  useEffect(() => {
+    if (job.status === 'complete' && !job.debug_urls) {
+      getJob(job.job_id)
+        .then((full) => upsertJob(full))
+        .catch(() => {})
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [job.job_id])
+
+  const beforeSrc = job.debug_urls?.['load'] ?? job.preview_url
+  const hasDebugStrip =
+    (job.status === 'complete' || job.status === 'processing') &&
+    job.debug_urls && Object.keys(job.debug_urls).length > 0
+
+  function handleViewDetails() {
+    onClose()
+    router.push(`/jobs/${job.job_id}`)
+  }
+
   return (
     <>
-      {/* Backdrop */}
+      {/* Backdrop — click to dismiss */}
       <motion.div
         key="backdrop"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        transition={{ duration: 0.2 }}
-        className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
+        transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+        className="fixed inset-0 z-40 bg-black/50"
         onClick={onClose}
       />
 
-      {/* Panel */}
-      <motion.div
-        key="panel"
-        initial={{ opacity: 0, scale: 0.96, y: 16 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.96, y: 16 }}
-        transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-        className="fixed inset-x-4 top-1/2 -translate-y-1/2 z-50 max-w-3xl mx-auto bg-white dark:bg-sa-stone-900 rounded-2xl border border-sa-stone-200 dark:border-sa-stone-800 shadow-xl overflow-hidden max-h-[90vh] flex flex-col"
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-sa-stone-200 dark:border-sa-stone-800">
-          <div>
-            <h2 className="font-display text-lg font-semibold text-sa-stone-900 dark:text-sa-stone-50 truncate">
-              {job.input_filename}
-            </h2>
-            <p className="text-xs text-sa-stone-500 dark:text-sa-stone-400 mt-0.5">
-              {job.photo_count > 0
-                ? `${job.photo_count} photo${job.photo_count !== 1 ? 's' : ''} extracted`
-                : 'Processing complete'}
-              {job.processing_time > 0 &&
-                ` · ${job.processing_time.toFixed(1)}s`}
-            </p>
-          </div>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            className="w-8 h-8 flex items-center justify-center rounded-lg text-sa-stone-500 hover:text-sa-stone-800 dark:hover:text-sa-stone-100 hover:bg-sa-stone-100 dark:hover:bg-sa-stone-800 transition-colors duration-[200ms]"
-          >
-            ✕
-          </button>
-        </div>
+      {/* Card — centered, max-width 640px, 48px padding from overlay edges */}
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-12 pointer-events-none">
+        <motion.div
+          key="card"
+          initial={{ opacity: 0, scale: 0.94 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.94 }}
+          transition={{ type: 'spring', stiffness: 280, damping: 22 }}
+          className="w-full max-w-[640px] rounded-2xl overflow-hidden pointer-events-auto"
+          style={{
+            background: 'rgb(var(--sa-card))',
+            border: '1px solid rgb(var(--sa-border-card))',
+            boxShadow: 'var(--sa-shadow-expanded)',
+          }}
+        >
+          {/* Thumbnail row — padding 20px */}
+          <div className="flex items-center justify-center gap-4 p-5">
+            <div className="flex items-center gap-4">
+              <ThumbBox src={beforeSrc} />
 
-        {/* Photo grid */}
-        <div className="flex-1 overflow-y-auto p-6">
-          {job.output_urls && job.output_urls.length > 0 ? (
-            <div
-              className={
-                job.output_urls.length === 1
-                  ? 'grid grid-cols-1 gap-3'
-                  : job.output_urls.length === 2
-                    ? 'grid grid-cols-2 gap-3'
-                    : 'grid grid-cols-3 gap-3'
-              }
-            >
-              {job.output_urls.map((url, idx) => (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  key={idx}
-                  src={url}
-                  alt={`Extracted photo ${idx + 1}`}
-                  className="w-full rounded-xl object-cover bg-sa-stone-100 dark:bg-sa-stone-800"
-                  style={{ aspectRatio: '4/3' }}
-                />
-              ))}
+              {/* Arrow — saAmber500 in expanded card */}
+              <span className="text-base font-semibold text-sa-amber-500 flex-shrink-0 leading-none">
+                →
+              </span>
+
+              <AfterSection job={job} />
             </div>
-          ) : (
-            <p className="text-sm text-sa-stone-500 dark:text-sa-stone-400 text-center py-8">
-              No output photos available.
-            </p>
-          )}
-        </div>
+          </div>
 
-        {/* Footer */}
-        <div className="px-6 py-4 border-t border-sa-stone-200 dark:border-sa-stone-800 flex items-center justify-between gap-4">
-          <Link
-            href={`/jobs/${job.job_id}`}
-            className="text-sm text-sa-amber-600 dark:text-sa-amber-400 hover:underline transition-colors duration-[200ms]"
-          >
-            Open Step Detail →
-          </Link>
-          <Button variant="secondary" size="sm" onClick={onClose}>
-            Close
-          </Button>
-        </div>
-      </motion.div>
+          {/* Debug image strip (below thumbnail row, before divider) */}
+          {hasDebugStrip && <DebugStrip debugUrls={job.debug_urls!} />}
+
+          {/* Divider */}
+          <div className="h-px bg-sa-border-card" />
+
+          {/* Footer — padding 20px */}
+          <div className="flex items-center justify-between gap-3 p-5">
+            <div className="flex flex-col gap-[5px] min-w-0">
+              <p
+                className="text-[14px] font-semibold text-sa-stone-700 dark:text-sa-stone-100 truncate"
+                title={job.input_filename}
+              >
+                {job.input_filename}
+              </p>
+              <JobStatusLine job={job} />
+            </div>
+
+            <button
+              onClick={handleViewDetails}
+              className="flex-shrink-0 px-3 py-1.5 rounded-lg text-[13px] font-semibold text-white bg-sa-amber-500 hover:bg-sa-amber-600 transition-colors duration-[200ms] ease-[cubic-bezier(0.16,1,0.3,1)]"
+            >
+              View Step Details
+            </button>
+          </div>
+        </motion.div>
+      </div>
     </>
   )
 }
