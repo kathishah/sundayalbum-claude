@@ -119,17 +119,23 @@ function AfterSection({ job }: { job: Job }) {
   if (job.status === 'complete' && job.output_urls && job.output_urls.length > 0) {
     const visible = job.output_urls.slice(0, 3)
     const overflow = job.output_urls.length - visible.length
+    // Natural-ratio layout: images keep their aspect ratio up to maxWidth, then
+    // flex shrinks them so they always fit inside the expanded card (max-w-[640px]).
     return (
-      <div className="flex items-center gap-2" style={{ height }}>
+      <div className="flex items-center gap-2 overflow-hidden" style={{ height }}>
         {visible.map((url, i) => (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <div
             key={i}
-            src={url}
-            alt={`Photo ${i + 1}`}
-            className="object-cover rounded-[6px] flex-shrink-0"
-            style={{ height, width: 'auto', maxWidth: height * 1.5 }}
-          />
+            className="flex-1 min-w-0 overflow-hidden rounded-[6px]"
+            style={{ height, maxWidth: height * 1.5 }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={url}
+              alt={`Photo ${i + 1}`}
+              className="w-full h-full object-cover"
+            />
+          </div>
         ))}
         {overflow > 0 && (
           <div

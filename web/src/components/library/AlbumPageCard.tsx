@@ -64,11 +64,9 @@ function ThumbBox({ src, width, height }: ThumbBoxProps) {
 interface AfterSectionProps {
   job: Job
   height: number
-  /** When provided: equal-slot compact mode. When undefined: natural-ratio expanded mode (up to 3). */
-  sectionWidth?: number
 }
 
-function AfterSection({ job, height, sectionWidth }: AfterSectionProps) {
+function AfterSection({ job, height }: AfterSectionProps) {
   const completedCount =
     job.status === 'complete'
       ? TOTAL_VISUAL_STEPS
@@ -78,53 +76,25 @@ function AfterSection({ job, height, sectionWidth }: AfterSectionProps) {
 
   if (job.status === 'complete' && job.output_urls && job.output_urls.length > 0) {
     const photos = job.output_urls
-
-    if (sectionWidth !== undefined) {
-      // Compact equal-slot mode
-      const gap = 4
-      const n = photos.length
-      const slotW = Math.max((sectionWidth - gap * (n - 1)) / n, 20)
-      return (
-        <div className="flex items-center" style={{ gap, height }}>
-          {photos.map((url, i) => (
-            // eslint-disable-next-line @next/next/no-img-element
+    // Equal-slot flex layout — each photo gets 1 flex unit, fills available width.
+    // flex-1/min-w-0 on the wrapper + each slot prevents any overflow regardless of
+    // how many photos there are or what aspect ratio the card happens to be.
+    return (
+      <div className="flex items-center gap-1 w-full overflow-hidden" style={{ height }}>
+        {photos.map((url, i) => (
+          <div
+            key={i}
+            className="flex-1 min-w-0 overflow-hidden rounded-[6px]"
+            style={{ height }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              key={i}
               src={url}
               alt={`Photo ${i + 1}`}
-              className="object-cover rounded-[6px] flex-shrink-0"
-              style={{ width: slotW, height }}
+              className="w-full h-full object-cover"
             />
-          ))}
-        </div>
-      )
-    }
-
-    // Expanded natural-ratio mode (up to 3 + overflow badge)
-    const visible = photos.slice(0, 3)
-    const overflow = photos.length - visible.length
-    return (
-      <div className="flex items-center gap-2" style={{ height }}>
-        {visible.map((url, i) => (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            key={i}
-            src={url}
-            alt={`Photo ${i + 1}`}
-            className="object-cover rounded-[6px] flex-shrink-0"
-            style={{ height, width: 'auto', maxWidth: height * 1.5 }}
-          />
-        ))}
-        {overflow > 0 && (
-          <div
-            className="flex-shrink-0 flex items-center justify-center rounded-[6px] bg-sa-stone-200 dark:bg-sa-stone-700"
-            style={{ width: height * 0.65, height }}
-          >
-            <span className="text-xs font-semibold text-sa-stone-500 dark:text-sa-stone-400">
-              +{overflow}
-            </span>
           </div>
-        )}
+        ))}
       </div>
     )
   }
@@ -243,8 +213,8 @@ export default function AlbumPageCard({ job, isOtherExpanded, onExpand }: AlbumP
           </span>
 
           {/* After section — flex:1 fills remaining space */}
-          <div className="flex-1 min-w-0">
-            <AfterSection job={job} height={thumbH} sectionWidth={undefined} />
+          <div className="flex-1 min-w-0 overflow-hidden">
+            <AfterSection job={job} height={thumbH} />
           </div>
         </div>
       </div>
