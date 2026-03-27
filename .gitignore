@@ -3,7 +3,6 @@ secrets.json
 test-images/
 output/
 debug/
-uploads/
 logs/
 __pycache__/
 *.pyc
