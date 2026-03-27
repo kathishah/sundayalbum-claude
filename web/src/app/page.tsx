@@ -1,19 +1,7 @@
-'use client'
+import { redirect } from 'next/navigation'
 
-import { useEffect } from 'react'
-import { useRouter } from 'next/navigation'
-import { isAuthenticated } from '@/lib/auth'
-
+// Always redirect to /login — the login page redirects to /library if already authenticated.
+// Server-side redirect: no blank flash, no client JS required.
 export default function RootPage() {
-  const router = useRouter()
-
-  useEffect(() => {
-    if (isAuthenticated()) {
-      router.replace('/library')
-    } else {
-      router.replace('/login')
-    }
-  }, [router])
-
-  return null
+  redirect('/login')
 }

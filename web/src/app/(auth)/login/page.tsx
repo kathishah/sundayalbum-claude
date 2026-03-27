@@ -1,10 +1,19 @@
+'use client'
+
+import { useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { isAuthenticated } from '@/lib/auth'
 import AuthForm from '@/components/auth/AuthForm'
 
-export const metadata = {
-  title: 'Sign In — Sunday Album',
-}
-
 export default function LoginPage() {
+  const router = useRouter()
+
+  useEffect(() => {
+    if (isAuthenticated()) {
+      router.replace('/library')
+    }
+  }, [router])
+
   return (
     <main className="min-h-screen flex items-center justify-center px-4 bg-sa-stone-50 dark:bg-sa-stone-950">
       <div className="w-full max-w-md">
