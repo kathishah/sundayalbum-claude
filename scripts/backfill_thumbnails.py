@@ -45,7 +45,11 @@ def _decode_to_jpeg(raw_bytes: bytes, filename: str) -> bytes:
 
 ACCOUNT_ID = "680073251743"
 REGION = "us-west-2"
-BUCKET = f"sundayalbum-data-{ACCOUNT_ID}-{REGION}"
+
+
+def bucket_name(stage: str) -> str:
+    base = f"sundayalbum-data-{ACCOUNT_ID}-{REGION}"
+    return base if stage == "prod" else f"{base}-{stage}"
 THUMB_WIDTH = 400
 THUMB_QUALITY = 85
 
@@ -83,6 +87,7 @@ def backfill(stage: str, dry_run: bool) -> None:
     s3 = boto3.client("s3", region_name=REGION)
     dynamo = boto3.resource("dynamodb", region_name=REGION)
     table = dynamo.Table(table_name(stage))
+    BUCKET = bucket_name(stage)
 
     print(f"Scanning {table_name(stage)} in bucket {BUCKET}…")
     items = scan_all_jobs(table)
