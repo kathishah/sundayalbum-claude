@@ -1,10 +1,10 @@
 # Sunday Album Web UI — Implementation Plan (Part 2 of 3)
 # Phase 3: Real-time Progress + Library UI (dev.sundayalbum.com)
 
-**Version:** 1.4
+**Version:** 1.5
 **Date:** March 2026
-**Status:** Phase 3 in progress — branch `web-ui-implementation`
-**See also:** WEB_UI_PLAN_Part1.md (Phases 0–2: completed), WEB_UI_PLAN_Part3.md (Phases 4–6: step detail, re-processing, prod)
+**Status:** ✅ PHASE 3 COMPLETE — `dev.sundayalbum.com` live, 3 successful jobs processed, S3 confirmed
+**See also:** WEB_UI_PLAN_Part1.md (Phases 0–2: completed), WEB_UI_PLAN_Part3.md (Phases 4–7: UI matching, step detail, re-processing, prod)
 
 **Current focus:** Get `dev.sundayalbum.com` fully working end-to-end.
 `app.sundayalbum.com` (prod) is deferred to Part 3 / a future phase.
@@ -426,47 +426,69 @@ Translate from `mac-app/SundayAlbum/Theme/DesignSystem.swift` into Tailwind conf
 - Fonts: Fraunces (display), DM Sans (body) via `next/font`
 - Animations: `sa-standard` (200ms ease), `sa-slide` (350ms ease-out), `sa-reveal` (600ms ease-in-out)
 
-### 3.5 Library Page ⏳ IN PROGRESS
+### 3.5 Library Page ✅ COMPLETE
 
 Replicate `mac-app/SundayAlbum/Views/LibraryView.swift`:
 
 - Adaptive grid of `AlbumPageCard` components
 - `DropZone` when library is empty (drag-drop + "Choose Files" button)
 - Cards show: before thumbnail → animated progress wheel with step label → output thumbnails grid
-- Single-click → expanded overlay; double-click → step detail (Phase 4)
+- Single-click → expanded overlay; double-click → step detail (Phase 5)
 - Real-time updates: WebSocket event → Zustand store → card re-renders
+
+> **Note:** Basic library page is functional. Full macOS UI parity (adaptive grid, pie-chart wheel, before thumbnail from debug, debug strip, step tree) is Phase 4 in Part 3.
 
 ### 3.6 Auth Pages ✅ COMPLETE
 
 - `/login` — email input → send code → 6-digit code entry → redirect to `/library`
 - Session token in `localStorage`; auth guard on `/library` and `/library/[jobId]`
 
-### 3.7 Verification ⏳ PENDING
+### 3.7 Verification ✅ COMPLETE (2026-03-26)
 
-- `dev.sundayalbum.com` resolves to dev App Runner service
-- Login flow works end-to-end (email → code → session)
-- Upload HEIC from browser → card enters processing state
-- Step labels update in real-time as pipeline runs
-- Output thumbnails appear when job completes
-- Presigned URLs load correctly in `<img>` tags
+- `dev.sundayalbum.com` resolves to dev App Runner service ✅
+- Login flow works end-to-end (email → code → session) ✅
+- Upload HEIC from browser → card enters processing state ✅
+- Step labels update in real-time as pipeline runs ✅
+- Output thumbnails appear when job completes ✅
+- Presigned URLs load correctly in `<img>` tags ✅
+- S3 buckets verified: 3 successful job runs confirmed in `sundayalbum-data-*-dev` ✅
 
-### 3.8 App Runner + Domain Setup (dev)
+### 3.8 App Runner + Domain Setup (dev) ✅ COMPLETE (2026-03-26)
 
-**Dev App Runner service:** `sundayalbum-web-dev` — deployed and RUNNING
+**Dev App Runner service:** `sundayalbum-web-dev` — RUNNING
 - URL: `https://kiz3qkgvsb.us-west-2.awsapprunner.com` ✅
+- Custom domain: `https://dev.sundayalbum.com` ✅ (ACM cert validated, HTTP 200)
 - ECR repo: `680073251743.dkr.ecr.us-west-2.amazonaws.com/sundayalbum-web`
-- GitHub Actions deploys on every push to `web-ui-implementation`
+- GitHub Actions deploys on every push to `web-ui-implementation` ✅
 
-**Route 53 hosted zone:** Created for `sundayalbum.com` (zone ID: `Z0420309YMJDXBAU344P`)
-- NS records: `ns-455.awsdns-56.com`, `ns-1993.awsdns-57.co.uk`, `ns-1110.awsdns-10.org`, `ns-981.awsdns-58.net`
-- Namecheap NS records: ⏳ not yet updated
+**Route 53 hosted zone:** `sundayalbum.com` (zone ID: `Z0420309YMJDXBAU344P`) ✅
+- Namecheap NS records updated to Route 53 NS ✅
+- CNAME validation record for ACM cert added ✅
+- ALIAS record: `dev.sundayalbum.com` → `sundayalbum-web-dev` App Runner ✅
 
-**To complete dev.sundayalbum.com:**
-1. Update Namecheap to use Route 53 NS records (one-time, done in Namecheap dashboard)
-2. Associate `dev.sundayalbum.com` custom domain on `sundayalbum-web-dev` App Runner service
-3. ACM cert auto-provisioned by App Runner; add CNAME validation record to Route 53
-4. Run 3.7 verification checklist
+**Key fix applied:** App Runner overrides the `HOSTNAME` env var at runtime with the container's internal hostname, causing Next.js to bind to a single IP instead of 0.0.0.0. Fixed via `web/entrypoint.sh` that forces `HOSTNAME=0.0.0.0` before `node server.js`. Same pattern used in `workorder-invoice` app.
+
+**Root page blank flash fix:** Converted `web/src/app/page.tsx` from a client component with `useEffect` redirect to a Next.js server component using `redirect('/login')` — eliminates the blank page on first load.
 
 **Prod App Runner (`app.sundayalbum.com`) deferred to Part 3.**
+
+---
+
+## Phase 3 — Final Status
+
+✅ **PHASE 3 COMPLETE** as of 2026-03-26.
+
+All checklist items verified:
+- CDK stage parameterization (3.0) ✅
+- API key management + rate limiting (3.1) ✅
+- WebSocket progress backend (3.2) ✅
+- Next.js app scaffold (3.3) ✅
+- Design system (3.4) ✅
+- Library page (3.5) — functional; full macOS parity is Phase 4 ✅
+- Auth pages (3.6) ✅
+- Verification (3.7) ✅
+- App Runner + domain setup (3.8) ✅
+
+**Next:** Phase 4 — Library UI matching macOS app (see WEB_UI_PLAN_Part3.md)
 
 ---
