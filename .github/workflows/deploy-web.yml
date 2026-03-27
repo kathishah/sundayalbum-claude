@@ -1,0 +1,170 @@
+name: Deploy Web App
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+    paths:
+      - "web/**"
+      - ".github/workflows/deploy-web.yml"
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: "Stage to deploy (dev or prod)"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+          - dev
+          - prod
+
+env:
+  AWS_REGION: us-west-2
+  ECR_REPOSITORY: sundayalbum-web
+  ACCOUNT_ID: "680073251743"
+
+jobs:
+  build-and-deploy:
+    name: Build & Deploy (${{ github.ref_name == 'main' && 'prod' || 'dev' }})
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine stage
+        id: stage
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "stage=${{ github.event.inputs.stage }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref_name }}" = "main" ]; then
+            echo "stage=prod" >> $GITHUB_OUTPUT
+          else
+            echo "stage=dev" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.ACCOUNT_ID }}:role/github-actions-sundayalbum
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set image tag
+        id: image
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          STAGE=${{ steps.stage.outputs.stage }}
+          ECR_URI="${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}"
+          echo "uri=${ECR_URI}" >> $GITHUB_OUTPUT
+          echo "tag=${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "latest_tag=${STAGE}-latest" >> $GITHUB_OUTPUT
+
+      - name: Build Docker image
+        working-directory: web
+        run: |
+          docker build \
+            --platform linux/amd64 \
+            -t ${{ steps.image.outputs.uri }}:${{ steps.image.outputs.tag }} \
+            -t ${{ steps.image.outputs.uri }}:${{ steps.image.outputs.latest_tag }} \
+            .
+
+      - name: Push to ECR
+        run: |
+          docker push ${{ steps.image.outputs.uri }}:${{ steps.image.outputs.tag }}
+          docker push ${{ steps.image.outputs.uri }}:${{ steps.image.outputs.latest_tag }}
+
+      - name: Deploy to App Runner (dev)
+        if: steps.stage.outputs.stage == 'dev'
+        run: |
+          SERVICE_ARN=$(aws apprunner list-services \
+            --query "ServiceSummaryList[?ServiceName=='sundayalbum-web-dev'].ServiceArn" \
+            --output text)
+          aws apprunner update-service \
+            --service-arn "${SERVICE_ARN}" \
+            --source-configuration "{
+              \"ImageRepository\": {
+                \"ImageIdentifier\": \"${{ steps.image.outputs.uri }}:${{ steps.image.outputs.tag }}\",
+                \"ImageConfiguration\": {
+                  \"Port\": \"3000\",
+                  \"RuntimeEnvironmentVariables\": {
+                    \"NEXT_PUBLIC_API_URL\": \"https://nodcooz758.execute-api.us-west-2.amazonaws.com\",
+                    \"NEXT_PUBLIC_WS_URL\": \"wss://0rqvs3ydf9.execute-api.us-west-2.amazonaws.com/\$default\",
+                    \"NODE_ENV\": \"production\"
+                  }
+                },
+                \"ImageRepositoryType\": \"ECR\"
+              },
+              \"AuthenticationConfiguration\": {
+                \"AccessRoleArn\": \"arn:aws:iam::${{ env.ACCOUNT_ID }}:role/AppRunnerECRAccessRole\"
+              }
+            }"
+
+      - name: Deploy to App Runner (prod)
+        if: steps.stage.outputs.stage == 'prod'
+        run: |
+          SERVICE_ARN=$(aws apprunner list-services \
+            --query "ServiceSummaryList[?ServiceName=='sundayalbum-web-prod'].ServiceArn" \
+            --output text)
+          aws apprunner update-service \
+            --service-arn "${SERVICE_ARN}" \
+            --source-configuration "{
+              \"ImageRepository\": {
+                \"ImageIdentifier\": \"${{ steps.image.outputs.uri }}:${{ steps.image.outputs.tag }}\",
+                \"ImageConfiguration\": {
+                  \"Port\": \"3000\",
+                  \"RuntimeEnvironmentVariables\": {
+                    \"NEXT_PUBLIC_API_URL\": \"https://e1f6o1ah49.execute-api.us-west-2.amazonaws.com\",
+                    \"NEXT_PUBLIC_WS_URL\": \"wss://l7t59cvhyh.execute-api.us-west-2.amazonaws.com/\$default\",
+                    \"NODE_ENV\": \"production\"
+                  }
+                },
+                \"ImageRepositoryType\": \"ECR\"
+              },
+              \"AuthenticationConfiguration\": {
+                \"AccessRoleArn\": \"arn:aws:iam::${{ env.ACCOUNT_ID }}:role/AppRunnerECRAccessRole\"
+              }
+            }"
+
+      - name: Wait for deployment
+        run: |
+          STAGE=${{ steps.stage.outputs.stage }}
+          SERVICE_NAME="sundayalbum-web-${STAGE}"
+          echo "Waiting for ${SERVICE_NAME} to reach RUNNING state..."
+
+          for i in $(seq 1 30); do
+            STATUS=$(aws apprunner describe-service \
+              --service-arn "$(aws apprunner list-services \
+                --query "ServiceSummaryList[?ServiceName=='${SERVICE_NAME}'].ServiceArn" \
+                --output text)" \
+              --query 'Service.Status' --output text)
+            echo "Status: ${STATUS} (attempt ${i}/30)"
+            if [ "${STATUS}" = "RUNNING" ]; then
+              echo "Deployment successful!"
+              exit 0
+            fi
+            if [ "${STATUS}" = "CREATE_FAILED" ] || [ "${STATUS}" = "UPDATE_FAILED" ]; then
+              echo "Deployment FAILED"
+              exit 1
+            fi
+            sleep 10
+          done
+          echo "Timed out waiting for deployment"
+          exit 1
+
+      - name: Print service URL
+        run: |
+          STAGE=${{ steps.stage.outputs.stage }}
+          SERVICE_URL=$(aws apprunner describe-service \
+            --service-arn "$(aws apprunner list-services \
+              --query "ServiceSummaryList[?ServiceName=='sundayalbum-web-${STAGE}'].ServiceArn" \
+              --output text)" \
+            --query 'Service.ServiceUrl' --output text)
+          echo "Deployed to: https://${SERVICE_URL}"
