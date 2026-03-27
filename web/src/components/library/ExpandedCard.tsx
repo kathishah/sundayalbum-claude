@@ -87,7 +87,20 @@ function ThumbBox({ src }: { src: string | undefined }) {
         <img src={src} alt="Before" className="w-full h-full object-cover" />
       ) : (
         <div className="w-full h-full flex items-center justify-center">
-          <div className="w-5 h-5 rounded-full border-2 border-sa-stone-300 dark:border-sa-stone-600 border-t-sa-amber-500 animate-spin" />
+          {/* Photo icon placeholder */}
+          <svg
+            viewBox="0 0 24 24"
+            width="40"
+            height="40"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            className="text-sa-stone-300 dark:text-sa-stone-600"
+          >
+            <rect x="3" y="3" width="18" height="18" rx="3" />
+            <circle cx="8.5" cy="8.5" r="1.5" />
+            <path d="M21 15l-5-5L5 21" />
+          </svg>
         </div>
       )}
     </div>
@@ -175,12 +188,15 @@ export default function ExpandedCard({ job, onClose }: ExpandedCardProps) {
   const router = useRouter()
   const { upsertJob } = useJobsStore()
 
-  // If debug_urls are missing on a complete job (e.g. loaded from list endpoint),
-  // fetch the full job record to get presigned debug URLs
+  // If output_urls or debug_urls are missing on a complete job (e.g. loaded from the
+  // list endpoint which omits presigned URLs), fetch the full job record.
   useEffect(() => {
-    if (job.status === 'complete' && !job.debug_urls) {
+    if (
+      job.status === 'complete' &&
+      (!job.debug_urls || !job.output_urls || job.output_urls.length === 0)
+    ) {
       getJob(job.job_id)
-        .then((full) => upsertJob(full))
+        .then((full) => upsertJob({ ...full, preview_url: job.preview_url }))
         .catch(() => {})
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps

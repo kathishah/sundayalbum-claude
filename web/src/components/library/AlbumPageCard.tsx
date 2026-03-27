@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { Job, StepUpdate } from '@/lib/types'
 import { BACKEND_TO_VISUAL, TOTAL_VISUAL_STEPS } from '@/lib/constants'
@@ -39,8 +39,20 @@ function ThumbBox({ src, width, height }: ThumbBoxProps) {
         />
       ) : (
         <div className="w-full h-full flex items-center justify-center">
-          {/* Small spinner matching macOS ProgressView().controlSize(.small) */}
-          <div className="w-4 h-4 rounded-full border-2 border-sa-stone-300 dark:border-sa-stone-600 border-t-sa-amber-500 animate-spin" />
+          {/* Photo icon placeholder — matches macOS empty state */}
+          <svg
+            viewBox="0 0 24 24"
+            width={Math.round(width * 0.45)}
+            height={Math.round(height * 0.45)}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            className="text-sa-stone-300 dark:text-sa-stone-600"
+          >
+            <rect x="3" y="3" width="18" height="18" rx="3" />
+            <circle cx="8.5" cy="8.5" r="1.5" />
+            <path d="M21 15l-5-5L5 21" />
+          </svg>
         </div>
       )}
     </div>
@@ -137,6 +149,20 @@ export default function AlbumPageCard({ job, isOtherExpanded, onExpand }: AlbumP
 
   const isActive =
     job.status === 'uploading' || job.status === 'processing'
+
+  // For complete jobs loaded from the list endpoint, output_urls (and debug_urls) are
+  // absent. Fetch the full job record once on mount so the after-thumbnails appear.
+  useEffect(() => {
+    if (
+      job.status === 'complete' &&
+      (!job.output_urls || job.output_urls.length === 0)
+    ) {
+      getJob(job.job_id)
+        .then((full) => upsertJob({ ...full, preview_url: job.preview_url }))
+        .catch(() => {})
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [job.job_id])
 
   const handleUpdate = useCallback(
     (update: StepUpdate) => {
