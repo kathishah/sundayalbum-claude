@@ -4,7 +4,7 @@
 **Version:** 1.5
 **Date:** March 2026
 **Status:** ✅ PHASE 3 COMPLETE — `dev.sundayalbum.com` live, 3 successful jobs processed, S3 confirmed
-**See also:** WEB_UI_PLAN_Part1.md (Phases 0–2: completed), WEB_UI_PLAN_Part3.md (Phases 4–7: UI matching, step detail, re-processing, prod)
+**See also:** WEB_UI_PLAN_Part1.md (Phases 0–2: ✅), WEB_UI_PLAN_Part3.md (Phases 4–6: ✅), WEB_UI_PLAN_Part4.md (Phases 7–9: Testing, Admin, Prod)
 
 **Current focus:** Get `dev.sundayalbum.com` fully working end-to-end.
 `app.sundayalbum.com` (prod) is deferred to Part 3 / a future phase.

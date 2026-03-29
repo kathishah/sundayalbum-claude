@@ -5,7 +5,7 @@
 **Date:** March 2026
 **Status:** Phases 0–2 complete — branch `web-ui-implementation`
 **Companion Documents:** PRD_Album_Digitizer.md, UI_Design_Album_Digitizer.md, PHASED_PLAN_Claude_Code.md
-**See also:** WEB_UI_PLAN_Part2.md (Phase 3: dev deployment), WEB_UI_PLAN_Part3.md (Phases 4–6: step detail, re-processing, prod)
+**See also:** WEB_UI_PLAN_Part2.md (Phase 3: ✅), WEB_UI_PLAN_Part3.md (Phases 4–6: ✅), WEB_UI_PLAN_Part4.md (Phases 7–9: Testing, Admin, Prod)
 
 ---
 

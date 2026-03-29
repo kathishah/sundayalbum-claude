@@ -1,11 +1,10 @@
 # Sunday Album Web UI — Implementation Plan (Part 3 of 4)
 # Phases 4–6: macOS UI Parity, Step Detail, Re-processing
 
-**Version:** 1.7
+**Version:** 1.8
 **Date:** March 2026
-**Status:** Phases 4–6 complete. See Part 4 for Phases 7–9 (Testing, Admin Tools, Production Hardening).
-**Status:** Phase 4 in progress — Phase 3 complete (dev.sundayalbum.com live). Thumbnail architecture shipped: `thumbnail_url` (before) and `thumbnail_urls` (all steps) served by API with 7-day presigned URL expiry; backfill of all dev jobs complete.
-**See also:** WEB_UI_PLAN_Part1.md (Phases 0–2: completed), WEB_UI_PLAN_Part2.md (Phase 3: ✅ complete)
+**Status:** ✅ Phases 4–6 COMPLETE (2026-03-29). See Part 4 for Phases 7–9 (Testing, Admin Tools, Production Hardening).
+**See also:** WEB_UI_PLAN_Part1.md (Phases 0–2: ✅), WEB_UI_PLAN_Part2.md (Phase 3: ✅), WEB_UI_PLAN_Part4.md (Phases 7–9: next)
 
 ---
 
@@ -366,6 +365,28 @@ Photo 3  ● ○ ○ ○ ○ ○
 
 ---
 
+## Phase 4 — Final Status ✅ COMPLETE (2026-03-28)
+
+**Commits:** `47b3da6`, `cacf8dd`, `7b8490e`, `ac49bc4`, `8818f3c`, `7a87839`, `72b90fe`
+
+**What was built:**
+
+- **Adaptive grid layout** — `repeat(auto-fill, minmax(280px, 400px))` grid, 16px gap, 32px horizontal padding, "Library" Fraunces header + "Add Photos" amber button top-right.
+- **AlbumPageCard redesign** — `saCard` warm grey background, 60×88 ThumbBox, `saAmber400` arrow, equal-slot output thumbnails in compact mode. Hover × delete button (red for active jobs, stone for complete).
+- **Before thumbnail** — optimistic blob URL on upload; replaced by `thumbnail_url` (`01_loaded` 400px JPEG, 7-day presigned URL) once API responds. Thumbnail architecture shipped: both `thumbnail_url` (list endpoint) and `thumbnail_urls` map (get endpoint) fully wired.
+- **PipelineProgressWheel** — replaced continuous arc with 6 discrete SVG pie segments. `saAmber500` filled / `saStone200` pending. `saCard`-colored donut hole. "X of 6" center label in DM Sans. `BACKEND_TO_VISUAL` mapping collapses normalize/perspective/photo_split/geometry into adjacent visual steps.
+- **Expanded card overlay** — single-click opens `ExpandedAlbumCard`. Spring animation (0.4s / 0.6 damping). Background cards dim to 0.3 + scale 0.95. `saCard` background, `saBorder` 1px border, 16px radius. 120×160 ThumbBox, `saAmber500` arrow. `JobStatusLine` (queued / running with progress bar / complete with photo count / failed). "View Step Details" button → `/jobs/{jobId}`.
+- **Debug image strip** — horizontally scrollable 64px-tall strip of per-step debug thumbnails in the expanded card. Loaded from `debug_urls`. Step labels below each image.
+- **Per-photo step tree (Phase 4.8)** — multi-photo jobs show a per-photo dot grid in the expanded card (amber = complete, stone = pending). Hidden for single-photo jobs and queued state.
+
+**Implementation notes:**
+- `thumbnail_keys` map initialization bug fixed on 2026-03-29 (`f7224db`) — job creation in `api/jobs.py` now initializes both `debug_keys: {}` and `thumbnail_keys: {}` at creation time.
+- Presigned URL expiry extended to 7 days for both output and debug URLs (`7a87839`).
+- Backfill script run on all existing dev jobs after thumbnail architecture shipped.
+- Complete multi-photo cards no longer show per-photo dots (dots are only for in-progress jobs).
+
+---
+
 ## Phase 5: Step Detail Views
 
 Replicate `mac-app/SundayAlbum/Views/StepDetailView.swift` and all step-specific views.
@@ -408,6 +429,29 @@ All images loaded from S3 via presigned URLs from `GET /jobs/{jobId}` response (
 
 ---
 
+## Phase 5 — Final Status ✅ COMPLETE (2026-03-28)
+
+**Commit:** `4599a58`
+
+**What was built:**
+
+- **Route** — `/jobs/[jobId]/page.tsx` (was a stub in Phase 3; fully implemented here).
+- **3-pane layout** — breadcrumb (Library / filename / step), StepTree sidebar (196px), StepCanvas main area. Responsive: sidebar collapses on narrow viewports.
+- **StepTree** — ordered list of all pipeline steps with per-photo sub-items for multi-photo jobs. Active item has amber left border. Steps without a debug image are greyed out (not clickable). Auto-selects first available step on load.
+- **StepCanvas** — renders the debug image for the selected step. Step-specific view component rendered below the image.
+- **Step-specific views** (all in `web/src/components/step-detail/`):
+  - `GlareRemovalView` — shows the result image only (not side-by-side); `saReveal` 600ms fade-in on mount and photo-index change. Amber glow fades in at 400ms delay.
+  - `ResultsView` — output photo grid with download buttons. ComparisonView embedded.
+  - Orientation, PageDetection, PhotoSplit, ColorCorrection views — image display with step metadata.
+- **Thumbnail strip** — horizontal scrollable strip of all pipeline step thumbnails above the StepTree (single-photo jobs only). Loaded from `thumbnail_urls` map.
+- **JetBrains Mono** — loaded as web font, applied to filename/metadata in step detail views only (not in library cards).
+
+**Implementation notes:**
+- Glare step was originally planned as a before/after reveal. Changed in Phase 6 polish (`946db6b`) to show result only — the before/after comparison was visually confusing since the OpenAI model often changes composition slightly.
+- `AlbumPageCard.tsx` moved into `web/src/components/library/` subdirectory alongside `ExpandedCard.tsx` and `DropZone.tsx` during Phase 5 file reorganization.
+
+---
+
 ## Phase 6: Re-processing + Polish
 
 ### 6.1 Re-process from Step
@@ -433,4 +477,30 @@ All images loaded from S3 via presigned URLs from `GET /jobs/{jobId}` response (
 
 - Adjust corners in PageDetectionView, see pipeline re-run from perspective step
 - Change rotation, see glare removal re-run with correct orientation
+
+---
+
+## Phase 6 — Final Status ✅ COMPLETE (2026-03-29)
+
+**Commits:** `801edb0`, `946db6b`, `2522e02`, `235f00d`, `5193510`, `e0bb1fa`
+
+**What was built:**
+
+- **Reprocess endpoint** — `POST /jobs/{jobId}/reprocess { from_step, photo_index?, overrides? }` implemented in `api/jobs.py`. Starts a new Step Functions execution with `start_from` in the execution input. State machine uses Choice states to skip steps before `start_from`.
+- **Interactive orientation controls** — OrientationView rotation picker (0/90/180/270°) wired to reprocess from `ai_orient`. "Apply & Reprocess" calls `POST /reprocess` and shows a reprocessing banner.
+- **Interactive color controls** — ColorCorrectionView sliders (brightness, saturation, warmth, sharpness) wired to reprocess from `color_restore` with slider values as overrides.
+- **Controls panel** — step-specific controls rendered below the canvas image in an amber-tinted footer panel. Consistent across OrientationView, ColorCorrectionView, GlareRemovalView, and ResultsView (`e0bb1fa`).
+- **GlareRemoval prompt display** — GlareRemovalView shows the scene description prompt that was sent to OpenAI, so users understand what the model was told (`2522e02`).
+- **Single-image ResultsView** — when a job has exactly one output photo, ResultsView shows it full-width instead of a grid (`2522e02`).
+- **Thumbnail strip in step detail** — horizontal scrollable strip of all debug-step thumbnails shown above the step tree in the step detail page, loaded from `thumbnail_urls` (`2522e02`).
+- **Polish fixes:**
+  - Glare step shows result only, not side-by-side (`946db6b`) — applied to both web and macOS app.
+  - Controls footer elevated above scroll area (sticky bottom) (`235f00d`).
+  - Per-photo step dots hidden on complete multi-photo cards (`235f00d`).
+  - Dead `isComplete` TypeScript branch removed after status type narrowing in `PerPhotoStepTree` (`5193510`).
+  - Glare image amber glow shadow removed; controls panel uses consistent amber tint (`e0bb1fa`).
+
+**Implementation notes:**
+- `start_from` logic in the state machine uses a `should_skip` helper in `handlers/common.py` — each pre-split handler checks whether `event.get("start_from")` is downstream; if so, it reads the previous step's output from S3 without re-running the processing.
+- Per-photo reprocess (`reprocess_photo_index`) allows re-running only one photo's per-photo steps (ai_orient → glare → geometry → color_restore) without touching other photos or earlier shared steps.
 
