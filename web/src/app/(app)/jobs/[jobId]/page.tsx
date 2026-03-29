@@ -216,14 +216,15 @@ function OrientationView({
   }
 
   return (
-    <div className="flex-1 flex items-start gap-6 p-6 overflow-auto">
-      <div className="flex-1 flex justify-center">
+    <div className="flex-1 flex flex-col overflow-hidden">
+      {/* Image canvas */}
+      <div className="flex-1 flex justify-center p-6 overflow-auto min-h-0">
         {url ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={url}
             alt={`Photo ${photoIdx} — oriented`}
-            className="max-w-full h-auto rounded-xl shadow-md object-contain self-start"
+            className="max-h-full w-auto rounded-xl shadow-md object-contain self-start"
             style={{ transform: `rotate(${selected}deg)`, transition: 'transform 0.3s ease' }}
           />
         ) : (
@@ -233,58 +234,48 @@ function OrientationView({
         )}
       </div>
 
-      {/* Control panel */}
-      <div className="w-56 flex-shrink-0 flex flex-col gap-4 pt-1">
-        <h3 className="text-[13px] font-semibold text-sa-stone-700 dark:text-sa-stone-200">
-          Orientation
-        </h3>
-        <p className="text-[12px] text-sa-stone-500 dark:text-sa-stone-400 leading-relaxed">
-          Apply an additional clockwise rotation before reprocessing glare removal and color restore.
-        </p>
-
-        {/* Rotation picker */}
-        <div>
-          <p className="text-[11px] font-semibold text-sa-stone-400 dark:text-sa-stone-500 uppercase tracking-wider mb-2">
-            Rotate
-          </p>
-          <div className="grid grid-cols-4 gap-1">
-            {ROTATION_OPTIONS.map((deg) => (
-              <button
-                key={deg}
-                onClick={() => setSelected(deg)}
-                className={[
-                  'py-1.5 rounded text-[12px] font-medium transition-colors duration-[200ms]',
-                  selected === deg
-                    ? 'bg-sa-amber-500 text-white'
-                    : 'bg-sa-stone-100 dark:bg-sa-stone-800 text-sa-stone-600 dark:text-sa-stone-300 hover:bg-sa-stone-200 dark:hover:bg-sa-stone-700',
-                ].join(' ')}
-              >
-                {deg}°
-              </button>
-            ))}
-          </div>
+      {/* Controls footer */}
+      <div className="flex-shrink-0 border-t border-sa-stone-200 dark:border-sa-stone-800 bg-sa-stone-50 dark:bg-sa-stone-900 px-6 py-3 flex items-center gap-3 flex-wrap">
+        <span className="text-[12px] font-medium text-sa-stone-500 dark:text-sa-stone-400 flex-shrink-0">
+          Rotate
+        </span>
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          {ROTATION_OPTIONS.map((deg) => (
+            <button
+              key={deg}
+              onClick={() => setSelected(deg)}
+              className={[
+                'px-3 py-1.5 rounded text-[12px] font-medium transition-colors duration-[200ms]',
+                selected === deg
+                  ? 'bg-sa-amber-500 text-white'
+                  : 'bg-white dark:bg-sa-stone-800 border border-sa-stone-200 dark:border-sa-stone-700 text-sa-stone-600 dark:text-sa-stone-300 hover:bg-sa-stone-100 dark:hover:bg-sa-stone-700',
+              ].join(' ')}
+            >
+              {deg}°
+            </button>
+          ))}
         </div>
 
-        {submitError && (
-          <p className="text-[11px] text-sa-error">{submitError}</p>
-        )}
+        <div className="flex-1" />
 
-        {/* Apply / Discard */}
-        <button
-          onClick={handleApply}
-          disabled={!dirty || submitting}
-          className="w-full py-2 rounded-lg text-[13px] font-semibold text-white bg-sa-amber-500 hover:bg-sa-amber-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors duration-[200ms]"
-        >
-          {submitting ? 'Starting…' : 'Apply & Reprocess'}
-        </button>
+        {submitError && (
+          <p className="text-[11px] text-sa-error flex-shrink-0">{submitError}</p>
+        )}
         {dirty && !submitting && (
           <button
             onClick={() => { setSelected(0); setSubmitError(null) }}
-            className="w-full py-1.5 rounded-lg text-[12px] text-sa-stone-500 dark:text-sa-stone-400 hover:text-sa-stone-700 dark:hover:text-sa-stone-200 transition-colors duration-[200ms]"
+            className="px-3 py-1.5 rounded-lg text-[12px] text-sa-stone-500 dark:text-sa-stone-400 hover:text-sa-stone-700 dark:hover:text-sa-stone-200 transition-colors duration-[200ms] flex-shrink-0"
           >
             Discard
           </button>
         )}
+        <button
+          onClick={handleApply}
+          disabled={!dirty || submitting}
+          className="px-4 py-1.5 rounded-lg text-[12px] font-semibold text-white bg-sa-amber-500 hover:bg-sa-amber-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors duration-[200ms] flex-shrink-0"
+        >
+          {submitting ? 'Starting…' : 'Apply & Reprocess'}
+        </button>
       </div>
     </div>
   )
@@ -337,14 +328,15 @@ function ColorRestoreView({
   }
 
   return (
-    <div className="flex-1 flex items-start gap-6 p-6 overflow-auto">
-      <div className="flex-1 flex justify-center">
+    <div className="flex-1 flex flex-col overflow-hidden">
+      {/* Image canvas */}
+      <div className="flex-1 flex justify-center p-6 overflow-auto min-h-0">
         {url ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={url}
             alt={`Photo ${photoIdx} — color restored`}
-            className="max-w-full h-auto rounded-xl shadow-md object-contain self-start"
+            className="max-h-full w-auto rounded-xl shadow-md object-contain self-start"
           />
         ) : (
           <div className="flex items-center justify-center text-sa-stone-400 dark:text-sa-stone-500 text-sm">
@@ -353,63 +345,150 @@ function ColorRestoreView({
         )}
       </div>
 
-      {/* Interactive slider panel */}
-      <div className="w-56 flex-shrink-0 flex flex-col gap-4 pt-1">
-        <h3 className="text-[13px] font-semibold text-sa-stone-700 dark:text-sa-stone-200">
-          Color Restore
-        </h3>
-
-        {/* Saturation slider */}
-        <div className="flex flex-col gap-1.5">
-          <div className="flex items-center justify-between">
-            <span className="text-[12px] text-sa-stone-600 dark:text-sa-stone-300">Saturation</span>
-            <span className="text-[11px] text-sa-stone-400 dark:text-sa-stone-500">{displayVal(saturation)}</span>
+      {/* Controls footer */}
+      <div className="flex-shrink-0 border-t border-sa-stone-200 dark:border-sa-stone-800 bg-sa-stone-50 dark:bg-sa-stone-900 px-6 py-3">
+        <div className="flex items-center gap-6 flex-wrap">
+          {/* Saturation */}
+          <div className="flex items-center gap-3 min-w-[180px] flex-1">
+            <span className="text-[12px] text-sa-stone-600 dark:text-sa-stone-300 flex-shrink-0 w-20">Saturation</span>
+            <input
+              type="range"
+              min={0}
+              max={50}
+              value={saturation}
+              onChange={(e) => setSaturation(Number(e.target.value))}
+              className="flex-1 h-1.5 rounded-full accent-sa-amber-500 cursor-pointer"
+            />
+            <span className="text-[11px] text-sa-stone-400 dark:text-sa-stone-500 w-9 text-right flex-shrink-0">{displayVal(saturation)}</span>
           </div>
-          <input
-            type="range"
-            min={0}
-            max={50}
-            value={saturation}
-            onChange={(e) => setSaturation(Number(e.target.value))}
-            className="w-full h-1.5 rounded-full accent-sa-amber-500 cursor-pointer"
-          />
-        </div>
 
-        {/* Sharpness slider */}
-        <div className="flex flex-col gap-1.5">
-          <div className="flex items-center justify-between">
-            <span className="text-[12px] text-sa-stone-600 dark:text-sa-stone-300">Sharpness</span>
-            <span className="text-[11px] text-sa-stone-400 dark:text-sa-stone-500">{displayVal(sharpness)}</span>
+          {/* Sharpness */}
+          <div className="flex items-center gap-3 min-w-[180px] flex-1">
+            <span className="text-[12px] text-sa-stone-600 dark:text-sa-stone-300 flex-shrink-0 w-20">Sharpness</span>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={sharpness}
+              onChange={(e) => setSharpness(Number(e.target.value))}
+              className="flex-1 h-1.5 rounded-full accent-sa-amber-500 cursor-pointer"
+            />
+            <span className="text-[11px] text-sa-stone-400 dark:text-sa-stone-500 w-9 text-right flex-shrink-0">{displayVal(sharpness)}</span>
           </div>
-          <input
-            type="range"
-            min={0}
-            max={100}
-            value={sharpness}
-            onChange={(e) => setSharpness(Number(e.target.value))}
-            className="w-full h-1.5 rounded-full accent-sa-amber-500 cursor-pointer"
-          />
+
+          {/* Actions */}
+          <div className="flex items-center gap-2 flex-shrink-0 ml-auto">
+            {submitError && (
+              <span className="text-[11px] text-sa-error">{submitError}</span>
+            )}
+            {dirty && !submitting && (
+              <button
+                onClick={() => { setSaturation(DEFAULT_SATURATION); setSharpness(DEFAULT_SHARPNESS); setSubmitError(null) }}
+                className="px-3 py-1.5 rounded-lg text-[12px] text-sa-stone-500 dark:text-sa-stone-400 hover:text-sa-stone-700 dark:hover:text-sa-stone-200 transition-colors duration-[200ms]"
+              >
+                Discard
+              </button>
+            )}
+            <button
+              onClick={handleApply}
+              disabled={!dirty || submitting}
+              className="px-4 py-1.5 rounded-lg text-[12px] font-semibold text-white bg-sa-amber-500 hover:bg-sa-amber-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors duration-[200ms]"
+            >
+              {submitting ? 'Starting…' : 'Apply & Reprocess'}
+            </button>
+          </div>
         </div>
+      </div>
+    </div>
+  )
+}
 
-        {submitError && (
-          <p className="text-[11px] text-sa-error">{submitError}</p>
-        )}
+// ── Step thumbnail strip (single-photo jobs, shown below breadcrumb) ──────────
 
-        <button
-          onClick={handleApply}
-          disabled={!dirty || submitting}
-          className="w-full py-2 rounded-lg text-[13px] font-semibold text-white bg-sa-amber-500 hover:bg-sa-amber-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors duration-[200ms]"
-        >
-          {submitting ? 'Starting…' : 'Apply & Reprocess'}
-        </button>
-        {dirty && !submitting && (
-          <button
-            onClick={() => { setSaturation(DEFAULT_SATURATION); setSharpness(DEFAULT_SHARPNESS); setSubmitError(null) }}
-            className="w-full py-1.5 rounded-lg text-[12px] text-sa-stone-500 dark:text-sa-stone-400 hover:text-sa-stone-700 dark:hover:text-sa-stone-200 transition-colors duration-[200ms]"
-          >
-            Discard
-          </button>
-        )}
+/** Maps thumbnail_urls label → StepSelection (single-photo only) */
+const THUMB_KEY_TO_SELECTION: Record<string, StepSelection> = {
+  '01_loaded':             { kind: 'job',   stepKey: 'load'         },
+  '02_page_detected':      { kind: 'job',   stepKey: 'page_detect'  },
+  '03_page_warped':        { kind: 'job',   stepKey: 'perspective'  },
+  '04_photo_boundaries':   { kind: 'job',   stepKey: 'photo_split'  },
+  '05b_photo_01_oriented': { kind: 'photo', photoIdx: 1, stepKey: 'ai_orient'    },
+  '07_photo_01_deglared':  { kind: 'photo', photoIdx: 1, stepKey: 'glare_remove' },
+  '14_photo_01_enhanced':  { kind: 'photo', photoIdx: 1, stepKey: 'color_restore'},
+}
+
+const THUMB_STRIP_KEYS = [
+  '01_loaded', '02_page_detected', '03_page_warped', '04_photo_boundaries',
+  '05b_photo_01_oriented', '07_photo_01_deglared', '14_photo_01_enhanced',
+] as const
+
+const THUMB_STRIP_LABELS: Record<string, string> = {
+  '01_loaded':             'Load',
+  '02_page_detected':      'Page',
+  '03_page_warped':        'Warp',
+  '04_photo_boundaries':   'Split',
+  '05b_photo_01_oriented': 'Orient',
+  '07_photo_01_deglared':  'Glare',
+  '14_photo_01_enhanced':  'Color',
+}
+
+function selectionMatchesThumbKey(sel: StepSelection, key: string): boolean {
+  const target = THUMB_KEY_TO_SELECTION[key]
+  if (!target) return false
+  if (target.kind !== sel.kind) return false
+  if (target.kind === 'job' && sel.kind === 'job') return target.stepKey === sel.stepKey
+  if (target.kind === 'photo' && sel.kind === 'photo')
+    return target.stepKey === sel.stepKey && target.photoIdx === sel.photoIdx
+  return false
+}
+
+function StepThumbnailStrip({
+  thumbnailUrls,
+  selection,
+  onSelect,
+}: {
+  thumbnailUrls: Record<string, string>
+  selection: StepSelection
+  onSelect: (s: StepSelection) => void
+}) {
+  return (
+    <div className="flex-shrink-0 border-b border-sa-stone-200 dark:border-sa-stone-800 bg-sa-stone-50 dark:bg-sa-stone-900 overflow-x-auto">
+      <div className="flex gap-1 px-4 py-2 w-max">
+        {THUMB_STRIP_KEYS.map((key) => {
+          const url = thumbnailUrls[key]
+          if (!url) return null
+          const active = selectionMatchesThumbKey(selection, key)
+          const target = THUMB_KEY_TO_SELECTION[key]
+          return (
+            <button
+              key={key}
+              onClick={() => target && onSelect(target)}
+              className={[
+                'flex flex-col items-center gap-1 flex-shrink-0 p-1.5 rounded-lg transition-colors duration-[200ms]',
+                active
+                  ? 'bg-sa-amber-100 dark:bg-sa-amber-950/30'
+                  : 'hover:bg-sa-stone-200 dark:hover:bg-sa-stone-700',
+              ].join(' ')}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={url}
+                alt={THUMB_STRIP_LABELS[key]}
+                className={[
+                  'h-14 w-auto rounded object-cover',
+                  active ? 'ring-2 ring-sa-amber-500' : '',
+                ].join(' ')}
+              />
+              <span className={[
+                'text-[9px]',
+                active
+                  ? 'text-sa-amber-600 dark:text-sa-amber-400 font-semibold'
+                  : 'text-sa-stone-400 dark:text-sa-stone-500',
+              ].join(' ')}>
+                {THUMB_STRIP_LABELS[key]}
+              </span>
+            </button>
+          )
+        })}
       </div>
     </div>
   )
@@ -498,6 +577,8 @@ export default function JobDetailPage({ params }: { params: { jobId: string } })
           <GlareRemovalView
             afterUrl={job.debug_urls?.[`07_photo_${n}_deglared`]}
             photoIdx={selection.photoIdx}
+            jobId={job.job_id}
+            onStarted={() => setJob((j) => j ? { ...j, status: 'processing' } : j)}
           />
         )
       }
@@ -554,6 +635,15 @@ export default function JobDetailPage({ params }: { params: { jobId: string } })
         <span className="text-sa-stone-300 dark:text-sa-stone-600">/</span>
         <span className="text-sa-stone-900 dark:text-sa-stone-100 font-semibold">{currentLabel}</span>
       </div>
+
+      {/* Step thumbnail strip — single-photo jobs only */}
+      {job.photo_count === 1 && job.thumbnail_urls && Object.keys(job.thumbnail_urls).length > 0 && (
+        <StepThumbnailStrip
+          thumbnailUrls={job.thumbnail_urls}
+          selection={selection}
+          onSelect={setSelection}
+        />
+      )}
 
       {/* 3-pane body */}
       <div className="flex flex-1 overflow-hidden">

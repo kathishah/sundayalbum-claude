@@ -1,38 +1,85 @@
 import SwiftUI
 import AppKit
 
-/// Before/after glare removal view for a single extracted photo.
-/// The tree in StepDetailView handles photo selection; this view shows one photo's result.
+// The static part of the prompt sent to OpenAI gpt-image-1.5.
+// Source: src/glare/remover_openai.py _build_prompt()
+private let kPromptStatic =
+    "We used an iPhone camera to photograph a picture printed on glossy paper for digitization. " +
+    "Remove glare/reflections caused by the glossy surface. " +
+    "Preserve the original composition, geometry, textures, and colors. " +
+    "Only modify pixels necessary to remove glare/reflections; do not change framing. " +
+    "Description of the printed photo: "
+
+/// Glare removal result view for a single extracted photo.
+/// Shows the deglared image with a reveal animation, and displays
+/// the prompt template used for the OpenAI call.
 struct GlareRemovalStepView: View {
     let job: ProcessingJob
     let photoIndex: Int   // 0-based
 
     @State private var afterOpacity: Double = 0
     @State private var showGlow = false
+    @State private var sceneDesc: String = ""
 
     var photo: ExtractedPhoto? { job.extractedPhotos[safe: photoIndex] }
 
     var body: some View {
-        // The step tree already shows the oriented "before" image; show only the
-        // glare-removed result here with the reveal animation.
-        VStack(spacing: 8) {
-            ImagePane(url: photo?.imageURL)
-                .shadow(
-                    color: showGlow ? Color.saAmber500.opacity(0.2) : .clear,
-                    radius: 20
-                )
-                .opacity(afterOpacity)
+        VStack(spacing: 0) {
+            // ── Image canvas ────────────────────────────────────────
+            ZStack {
+                Color.saStone900
+                ImagePane(url: photo?.imageURL)
+                    .shadow(
+                        color: showGlow ? Color.saAmber500.opacity(0.2) : .clear,
+                        radius: 20
+                    )
+                    .opacity(afterOpacity)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .onAppear { triggerReveal() }
+            .onChange(of: photoIndex) { triggerReveal() }
+
+            Divider()
+
+            // ── Prompt footer ───────────────────────────────────────
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Prompt sent to OpenAI")
+                    .font(.dmSans(11, weight: .semibold))
+                    .foregroundStyle(Color.saStone400)
+                    .textCase(.uppercase)
+
+                // Prompt template (monospace, wrapping)
+                Text(kPromptStatic + (sceneDesc.isEmpty ? "[AI auto-detected scene description]" : sceneDesc))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(Color.saTextSecondary)
+                    .lineLimit(nil)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(10)
+                    .background(Color.saCard)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(Color.saStone200, lineWidth: 1)
+                    }
+
+                HStack(spacing: 8) {
+                    Text("Override scene description")
+                        .font(.dmSans(11))
+                        .foregroundStyle(Color.saTextTertiary)
+                    TextField("Leave blank for AI description", text: $sceneDesc)
+                        .font(.dmSans(12))
+                        .textFieldStyle(.roundedBorder)
+                }
+            }
+            .padding(16)
+            .background(Color.saBackground)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(16)
-        .background(Color.saStone900)
-        .onAppear { triggerReveal() }
-        .onChange(of: photoIndex) { triggerReveal() }
     }
 
     private func triggerReveal() {
         afterOpacity = 0
         showGlow = false
+        sceneDesc = photo?.sceneDescription ?? ""
         Task {
             try? await Task.sleep(for: .milliseconds(80))
             withAnimation(.saReveal) { afterOpacity = 1 }

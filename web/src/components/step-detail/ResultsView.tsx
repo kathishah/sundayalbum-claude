@@ -10,11 +10,9 @@ interface ResultsViewProps {
 export default function ResultsView({ job }: ResultsViewProps) {
   const outputUrls = job.output_urls ?? []
   const [selected, setSelected] = useState(0)
+  const total = outputUrls.length
 
-  // "Before" for comparison: the loaded/input thumbnail
-  const beforeUrl = job.debug_urls?.['01_loaded'] ?? job.thumbnail_url
-
-  if (outputUrls.length === 0) {
+  if (total === 0) {
     return (
       <div className="flex-1 flex items-center justify-center text-sa-stone-400 dark:text-sa-stone-500 text-sm">
         No output photos available
@@ -33,103 +31,74 @@ export default function ResultsView({ job }: ResultsViewProps) {
     })
   }
 
+  const prev = () => setSelected((s) => Math.max(0, s - 1))
+  const next = () => setSelected((s) => Math.min(total - 1, s + 1))
+
   return (
-    <div className="flex-1 flex items-start gap-6 p-6 overflow-auto min-h-0">
-      {/* Photo grid */}
-      <div className="flex-1 min-w-0">
-        <div
-          className="grid gap-3"
-          style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}
-        >
-          {outputUrls.map((url, i) => (
-            <button
-              key={i}
-              onClick={() => setSelected(i)}
-              className={[
-                'relative rounded-xl overflow-hidden bg-sa-surface transition-all duration-[200ms]',
-                'aspect-[3/4]',
-                selected === i
-                  ? 'ring-2 ring-sa-amber-500 ring-offset-2 ring-offset-white dark:ring-offset-sa-stone-950'
-                  : 'hover:ring-2 hover:ring-sa-stone-300 dark:hover:ring-sa-stone-600 hover:ring-offset-1',
-              ].join(' ')}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={url}
-                alt={`Photo ${i + 1}`}
-                className="w-full h-full object-cover"
-              />
-              <div className="absolute bottom-0 inset-x-0 py-1 px-2 bg-black/40 backdrop-blur-sm">
-                <span className="text-[10px] font-mono text-white/80">
-                  Photo {i + 1}
-                </span>
-              </div>
-            </button>
-          ))}
-        </div>
+    <div className="flex-1 flex flex-col overflow-hidden">
+      {/* Single large image */}
+      <div className="flex-1 flex justify-center p-6 overflow-auto min-h-0">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          key={selected}
+          src={outputUrls[selected]}
+          alt={`Photo ${selected + 1}`}
+          className="max-h-full w-auto rounded-xl shadow-md object-contain self-start"
+        />
       </div>
 
-      {/* Comparison panel */}
-      <div className="w-72 flex-shrink-0 flex flex-col gap-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-[13px] font-semibold text-sa-stone-700 dark:text-sa-stone-200">
-            Photo {selected + 1}
-            <span className="text-sa-stone-400 dark:text-sa-stone-500 font-normal ml-1">
-              of {outputUrls.length}
+      {/* Navigation + download footer */}
+      <div className="flex-shrink-0 border-t border-sa-stone-200 dark:border-sa-stone-800 bg-sa-stone-50 dark:bg-sa-stone-900 px-6 py-3 flex items-center gap-4">
+        {/* Prev/Next only if more than one photo */}
+        {total > 1 && (
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button
+              onClick={prev}
+              disabled={selected === 0}
+              className="w-8 h-8 flex items-center justify-center rounded-lg border border-sa-stone-200 dark:border-sa-stone-700 text-sa-stone-600 dark:text-sa-stone-300 hover:bg-sa-stone-200 dark:hover:bg-sa-stone-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors duration-[200ms]"
+              aria-label="Previous photo"
+            >
+              <svg viewBox="0 0 8 12" width="8" height="12" fill="currentColor">
+                <path d="M6.5 1L1.5 6l5 5" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
+            <span className="text-[13px] text-sa-stone-600 dark:text-sa-stone-300 tabular-nums flex-shrink-0">
+              {selected + 1} <span className="text-sa-stone-400 dark:text-sa-stone-500">/ {total}</span>
             </span>
-          </h3>
-        </div>
+            <button
+              onClick={next}
+              disabled={selected === total - 1}
+              className="w-8 h-8 flex items-center justify-center rounded-lg border border-sa-stone-200 dark:border-sa-stone-700 text-sa-stone-600 dark:text-sa-stone-300 hover:bg-sa-stone-200 dark:hover:bg-sa-stone-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors duration-[200ms]"
+              aria-label="Next photo"
+            >
+              <svg viewBox="0 0 8 12" width="8" height="12" fill="currentColor">
+                <path d="M1.5 1L6.5 6l-5 5" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
+          </div>
+        )}
 
-        {/* Before */}
-        <div className="flex flex-col gap-1.5">
-          <p className="text-[10px] font-semibold text-sa-stone-400 dark:text-sa-stone-500 uppercase tracking-wider">
-            Original
-          </p>
-          {beforeUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={beforeUrl}
-              alt="Original input"
-              className="w-full rounded-lg object-cover bg-sa-surface"
-            />
-          ) : (
-            <div className="w-full h-32 rounded-lg bg-sa-surface" />
-          )}
-        </div>
+        <div className="flex-1" />
 
-        {/* After */}
-        <div className="flex flex-col gap-1.5">
-          <p className="text-[10px] font-semibold text-sa-stone-400 dark:text-sa-stone-500 uppercase tracking-wider">
-            Processed
-          </p>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={outputUrls[selected]}
-            alt={`Photo ${selected + 1} — processed`}
-            className="w-full rounded-lg object-cover bg-sa-surface"
-          />
-        </div>
-
-        {/* Metadata */}
-        <p className="text-[11px] font-mono text-sa-stone-400 dark:text-sa-stone-500 truncate" title={job.input_filename}>
+        {/* Filename */}
+        <span className="text-[11px] font-mono text-sa-stone-400 dark:text-sa-stone-500 truncate hidden sm:block max-w-[200px]" title={job.input_filename}>
           {job.input_filename}
-        </p>
+        </span>
 
-        {/* Download actions */}
+        {/* Download */}
         <a
           href={outputUrls[selected]}
           download={`photo_${String(selected + 1).padStart(2, '0')}.jpg`}
-          className="block w-full text-center px-3 py-2 rounded-lg text-[13px] font-semibold text-white bg-sa-amber-500 hover:bg-sa-amber-600 transition-colors duration-[200ms]"
+          className="flex-shrink-0 px-4 py-1.5 rounded-lg text-[12px] font-semibold text-white bg-sa-amber-500 hover:bg-sa-amber-600 transition-colors duration-[200ms]"
         >
-          Download Photo {selected + 1}
+          {total > 1 ? `Download Photo ${selected + 1}` : 'Download'}
         </a>
-
-        {outputUrls.length > 1 && (
+        {total > 1 && (
           <button
             onClick={handleDownloadAll}
-            className="w-full text-center px-3 py-2 rounded-lg text-[13px] font-semibold text-sa-stone-600 dark:text-sa-stone-300 bg-sa-stone-100 dark:bg-sa-stone-800 hover:bg-sa-stone-200 dark:hover:bg-sa-stone-700 transition-colors duration-[200ms]"
+            className="flex-shrink-0 px-4 py-1.5 rounded-lg text-[12px] font-semibold text-sa-stone-600 dark:text-sa-stone-300 bg-white dark:bg-sa-stone-800 border border-sa-stone-200 dark:border-sa-stone-700 hover:bg-sa-stone-100 dark:hover:bg-sa-stone-700 transition-colors duration-[200ms]"
           >
-            Download All ({outputUrls.length})
+            Download All ({total})
           </button>
         )}
       </div>

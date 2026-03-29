@@ -35,7 +35,7 @@ private struct OrientationPhotoPanel: View {
     @State private var isDirty = false
 
     var body: some View {
-        HStack(spacing: 0) {
+        VStack(spacing: 0) {
             // ── Image canvas ──────────────────────────────────────────
             ZStack {
                 Color.saStone900
@@ -54,68 +54,38 @@ private struct OrientationPhotoPanel: View {
 
             Divider()
 
-            // ── Controls panel ────────────────────────────────────────
-            VStack(alignment: .leading, spacing: 20) {
-                Text("Orientation")
-                    .font(.fraunces(18))
-                    .foregroundStyle(Color.saTextPrimary)
+            // ── Controls footer ───────────────────────────────────────
+            HStack(spacing: 16) {
+                Text("Rotate")
+                    .font(.dmSans(12, weight: .semibold))
+                    .foregroundStyle(Color.saTextSecondary)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Rotation")
-                        .font(.dmSans(12, weight: .semibold))
-                        .foregroundStyle(Color.saTextSecondary)
-                    RotationPicker(selected: $pendingRotation)
-                        .onChange(of: pendingRotation) { checkDirty() }
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Scene description")
-                        .font(.dmSans(12, weight: .semibold))
-                        .foregroundStyle(Color.saTextSecondary)
-
-                    TextEditor(text: $pendingDescription)
-                        .font(.dmSans(13))
-                        .scrollContentBackground(.hidden)
-                        .background(Color.saCard)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 6)
-                                .strokeBorder(Color.saStone200, lineWidth: 1)
-                        }
-                        .frame(minHeight: 80, maxHeight: 120)
-                        .onChange(of: pendingDescription) { checkDirty() }
-
-                    Text("Passed to glare removal as scene context. Leave blank to use the AI description.")
-                        .font(.dmSans(11))
-                        .foregroundStyle(Color.saTextTertiary)
-                }
+                RotationPicker(selected: $pendingRotation)
+                    .onChange(of: pendingRotation) { checkDirty() }
 
                 Spacer()
 
                 if isDirty {
-                    HStack(spacing: 8) {
-                        Button("Discard") {
-                            pendingRotation = photo.rotationOverride ?? 0
-                            pendingDescription = photo.sceneDescription ?? ""
-                            isDirty = false
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.regular)
-
-                        Button("Apply") {
-                            photo.rotationOverride = pendingRotation == 0 ? nil : pendingRotation
-                            photo.sceneDescription = pendingDescription.isEmpty ? nil : pendingDescription
-                            isDirty = false
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(Color.saAmber500)
-                        .controlSize(.regular)
+                    Button("Discard") {
+                        pendingRotation = photo.rotationOverride ?? 0
+                        pendingDescription = photo.sceneDescription ?? ""
+                        isDirty = false
                     }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+
+                    Button("Apply & Reprocess") {
+                        photo.rotationOverride = pendingRotation == 0 ? nil : pendingRotation
+                        photo.sceneDescription = pendingDescription.isEmpty ? nil : pendingDescription
+                        isDirty = false
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color.saAmber500)
+                    .controlSize(.small)
                 }
             }
-            .padding(20)
-            .frame(width: 260)
-            .frame(maxHeight: .infinity)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
             .background(Color.saBackground)
         }
         .task(id: photoIndex) {

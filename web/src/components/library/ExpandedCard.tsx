@@ -4,7 +4,7 @@ import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import type { Job } from '@/lib/types'
-import { BACKEND_TO_VISUAL, TOTAL_VISUAL_STEPS, VISUAL_STEP_LABELS, DEBUG_STEP_LABELS } from '@/lib/constants'
+import { BACKEND_TO_VISUAL, TOTAL_VISUAL_STEPS, VISUAL_STEP_LABELS } from '@/lib/constants'
 import { useJobsStore } from '@/stores/jobs-store'
 import { getJob } from '@/lib/api'
 import PipelineProgressWheel from './ProgressWheel'
@@ -235,36 +235,6 @@ function PerPhotoStepTree({ job }: { job: Job }) {
   )
 }
 
-// ── Debug image strip ─────────────────────────────────────────────────────────
-
-function DebugStrip({ debugUrls }: { debugUrls: Record<string, string> }) {
-  const entries = Object.entries(DEBUG_STEP_LABELS)
-    .filter(([key]) => debugUrls[key])
-    .map(([key, label]) => ({ key, label, url: debugUrls[key] }))
-
-  if (entries.length === 0) return null
-
-  return (
-    <div className="overflow-x-auto px-5 pb-4">
-      <div className="flex gap-3 w-max">
-        {entries.map(({ key, label, url }) => (
-          <div key={key} className="flex flex-col items-center gap-1 flex-shrink-0">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={url}
-              alt={label}
-              className="h-16 w-auto rounded-[6px] object-cover bg-sa-surface"
-            />
-            <span className="text-[9px] text-sa-stone-400 dark:text-sa-stone-500 text-center">
-              {label}
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
 // ── ExpandedCard ──────────────────────────────────────────────────────────────
 
 export default function ExpandedCard({ job, onClose }: ExpandedCardProps) {
@@ -290,9 +260,6 @@ export default function ExpandedCard({ job, onClose }: ExpandedCardProps) {
 
   // Before-thumbnail: 400px backend thumbnail → client preview_url → nothing
   const beforeSrc = job.thumbnail_url ?? job.preview_url
-  const hasDebugStrip =
-    (job.status === 'complete' || job.status === 'processing') &&
-    job.debug_urls && Object.keys(job.debug_urls).length > 0
 
   function handleViewDetails() {
     onClose()
@@ -340,9 +307,6 @@ export default function ExpandedCard({ job, onClose }: ExpandedCardProps) {
               <AfterSection job={job} />
             </div>
           </div>
-
-          {/* Debug image strip (below thumbnail row, before divider) */}
-          {hasDebugStrip && <DebugStrip debugUrls={job.debug_urls!} />}
 
           {/* Per-photo step tree — shown for multi-photo jobs */}
           <PerPhotoStepTree job={job} />
