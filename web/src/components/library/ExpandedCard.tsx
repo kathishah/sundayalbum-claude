@@ -161,6 +161,80 @@ function AfterSection({ job }: { job: Job }) {
   )
 }
 
+// ── Per-photo step tree ───────────────────────────────────────────────────────
+
+/**
+ * Derives per-photo step completion from thumbnail_urls keys.
+ * Per-photo thumbnails follow the pattern:
+ *   05b_photo_{idx}_oriented  → visual step 3 (Orient)
+ *   07_photo_{idx}_deglared   → visual step 4 (Glare)
+ *   14_photo_{idx}_enhanced   → visual step 5 (Color)
+ * Pre-photo steps (0–2) complete uniformly for all photos.
+ */
+function PerPhotoStepTree({ job }: { job: Job }) {
+  const count = job.photo_count
+  if (count <= 1) return null
+  if (job.status !== 'complete' && job.status !== 'processing') return null
+
+  const isComplete = job.status === 'complete'
+  const thumbUrls = job.thumbnail_urls ?? {}
+  const hasThumbs = Object.keys(thumbUrls).length > 0
+  const visualIdx = BACKEND_TO_VISUAL[job.current_step] ?? 0
+
+  // Pre-photo steps 0–2 (Load / Page / Split) finish uniformly before per-photo work begins
+  const preDone = isComplete || visualIdx >= 2
+
+  const photos: { idx: number; completed: boolean[] }[] = []
+  for (let i = 1; i <= count; i++) {
+    const photoNum = String(i).padStart(2, '0')
+
+    let orientDone: boolean, glareDone: boolean, colorDone: boolean
+    if (isComplete) {
+      orientDone = glareDone = colorDone = true
+    } else if (hasThumbs) {
+      orientDone = !!thumbUrls[`05b_photo_${photoNum}_oriented`]
+      glareDone  = !!thumbUrls[`07_photo_${photoNum}_deglared`]
+      colorDone  = !!thumbUrls[`14_photo_${photoNum}_enhanced`]
+    } else {
+      // Uniform fallback when thumbnail_urls not yet available
+      orientDone = visualIdx >= 3
+      glareDone  = visualIdx >= 4
+      colorDone  = visualIdx >= 5
+    }
+
+    photos.push({
+      idx: i,
+      completed: [preDone, preDone, preDone, orientDone, glareDone, colorDone],
+    })
+  }
+
+  return (
+    <div className="px-5 pb-3">
+      <div className="flex flex-col gap-1.5">
+        {photos.map(({ idx, completed }) => (
+          <div key={idx} className="flex items-center gap-2">
+            <span className="text-[11px] text-sa-stone-500 dark:text-sa-stone-400 w-14 flex-shrink-0">
+              Photo {idx}
+            </span>
+            <div className="flex items-center gap-1">
+              {completed.map((done, stepIdx) => (
+                <div
+                  key={stepIdx}
+                  className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                    done
+                      ? 'bg-sa-amber-500'
+                      : 'bg-sa-stone-300 dark:bg-sa-stone-600'
+                  }`}
+                />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ── Debug image strip ─────────────────────────────────────────────────────────
 
 function DebugStrip({ debugUrls }: { debugUrls: Record<string, string> }) {
@@ -197,13 +271,16 @@ export default function ExpandedCard({ job, onClose }: ExpandedCardProps) {
   const router = useRouter()
   const { upsertJob } = useJobsStore()
 
-  // If output_urls or debug_urls are missing on a complete job (e.g. loaded from the
-  // list endpoint which omits presigned URLs), fetch the full job record.
+  // Fetch the full job record when the card opens if we're missing presigned URLs
+  // (list endpoint omits them) or per-photo thumbnail data needed for the step tree.
   useEffect(() => {
-    if (
+    const missingComplete =
       job.status === 'complete' &&
       (!job.debug_urls || !job.output_urls || job.output_urls.length === 0)
-    ) {
+    const missingPerPhotoThumbs =
+      job.photo_count > 1 && !job.thumbnail_urls
+
+    if (missingComplete || missingPerPhotoThumbs) {
       getJob(job.job_id)
         .then((full) => upsertJob({ ...full, preview_url: job.preview_url }))
         .catch(() => {})
@@ -266,6 +343,9 @@ export default function ExpandedCard({ job, onClose }: ExpandedCardProps) {
 
           {/* Debug image strip (below thumbnail row, before divider) */}
           {hasDebugStrip && <DebugStrip debugUrls={job.debug_urls!} />}
+
+          {/* Per-photo step tree — shown for multi-photo jobs */}
+          <PerPhotoStepTree job={job} />
 
           {/* Divider */}
           <div className="h-px bg-sa-border-card" />
