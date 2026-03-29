@@ -69,16 +69,8 @@ export default function GlareRemovalView({
       <div className="flex-1 flex justify-center p-6 overflow-auto min-h-0">
         <motion.div
           className="rounded-xl overflow-hidden bg-sa-surface self-start"
-          animate={{
-            opacity: revealed ? 1 : 0,
-            boxShadow: revealed
-              ? '0 0 40px 10px rgba(217,119,6,0.28)'
-              : '0 0 0px 0px rgba(217,119,6,0)',
-          }}
-          transition={{
-            opacity:   { duration: 0.6, ease: [0.16, 1, 0.3, 1] },
-            boxShadow: { duration: 0.6, ease: [0.16, 1, 0.3, 1], delay: 0.4 },
-          }}
+          animate={{ opacity: revealed ? 1 : 0 }}
+          transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
         >
           {afterUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -92,7 +84,7 @@ export default function GlareRemovalView({
       </div>
 
       {/* Prompt + reprocess footer */}
-      <div className="flex-shrink-0 border-t border-sa-stone-200 dark:border-sa-stone-700 bg-white dark:bg-sa-stone-950 px-6 py-4 flex flex-col gap-3 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] dark:shadow-[0_-4px_20px_rgba(0,0,0,0.35)]">
+      <div className="flex-shrink-0 border-t border-sa-amber-200 bg-sa-amber-50 px-6 py-4 flex flex-col gap-3">
         {/* Prompt template display */}
         <div className="flex flex-col gap-1.5">
           <p className="text-[11px] font-semibold text-sa-stone-400 dark:text-sa-stone-500 uppercase tracking-wider">

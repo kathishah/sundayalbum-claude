@@ -235,7 +235,7 @@ function OrientationView({
       </div>
 
       {/* Controls footer */}
-      <div className="flex-shrink-0 border-t border-sa-stone-200 dark:border-sa-stone-700 bg-white dark:bg-sa-stone-950 px-6 py-4 flex items-center gap-3 flex-wrap shadow-[0_-4px_20px_rgba(0,0,0,0.06)] dark:shadow-[0_-4px_20px_rgba(0,0,0,0.35)]">
+      <div className="flex-shrink-0 border-t border-sa-amber-200 bg-sa-amber-50 px-6 py-4 flex items-center gap-3 flex-wrap">
         <span className="text-[12px] font-medium text-sa-stone-500 dark:text-sa-stone-400 flex-shrink-0">
           Rotate
         </span>
@@ -346,7 +346,7 @@ function ColorRestoreView({
       </div>
 
       {/* Controls footer */}
-      <div className="flex-shrink-0 border-t border-sa-stone-200 dark:border-sa-stone-700 bg-white dark:bg-sa-stone-950 px-6 py-4 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] dark:shadow-[0_-4px_20px_rgba(0,0,0,0.35)]">
+      <div className="flex-shrink-0 border-t border-sa-amber-200 bg-sa-amber-50 px-6 py-4">
         <div className="flex items-center gap-6 flex-wrap">
           {/* Saturation */}
           <div className="flex items-center gap-3 min-w-[180px] flex-1">

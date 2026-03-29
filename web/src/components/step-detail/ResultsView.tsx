@@ -48,27 +48,27 @@ export default function ResultsView({ job }: ResultsViewProps) {
       </div>
 
       {/* Navigation + download footer */}
-      <div className="flex-shrink-0 border-t border-sa-stone-200 dark:border-sa-stone-800 bg-sa-stone-50 dark:bg-sa-stone-900 px-6 py-3 flex items-center gap-4">
+      <div className="flex-shrink-0 border-t border-sa-amber-200 bg-sa-amber-50 px-6 py-3 flex items-center gap-4">
         {/* Prev/Next only if more than one photo */}
         {total > 1 && (
           <div className="flex items-center gap-2 flex-shrink-0">
             <button
               onClick={prev}
               disabled={selected === 0}
-              className="w-8 h-8 flex items-center justify-center rounded-lg border border-sa-stone-200 dark:border-sa-stone-700 text-sa-stone-600 dark:text-sa-stone-300 hover:bg-sa-stone-200 dark:hover:bg-sa-stone-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors duration-[200ms]"
+              className="w-8 h-8 flex items-center justify-center rounded-lg border border-sa-amber-200 text-sa-stone-600 hover:bg-sa-amber-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors duration-[200ms]"
               aria-label="Previous photo"
             >
               <svg viewBox="0 0 8 12" width="8" height="12" fill="currentColor">
                 <path d="M6.5 1L1.5 6l5 5" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
             </button>
-            <span className="text-[13px] text-sa-stone-600 dark:text-sa-stone-300 tabular-nums flex-shrink-0">
-              {selected + 1} <span className="text-sa-stone-400 dark:text-sa-stone-500">/ {total}</span>
+            <span className="text-[13px] text-sa-stone-600 tabular-nums flex-shrink-0">
+              {selected + 1} <span className="text-sa-stone-400">/ {total}</span>
             </span>
             <button
               onClick={next}
               disabled={selected === total - 1}
-              className="w-8 h-8 flex items-center justify-center rounded-lg border border-sa-stone-200 dark:border-sa-stone-700 text-sa-stone-600 dark:text-sa-stone-300 hover:bg-sa-stone-200 dark:hover:bg-sa-stone-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors duration-[200ms]"
+              className="w-8 h-8 flex items-center justify-center rounded-lg border border-sa-amber-200 text-sa-stone-600 hover:bg-sa-amber-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors duration-[200ms]"
               aria-label="Next photo"
             >
               <svg viewBox="0 0 8 12" width="8" height="12" fill="currentColor">
@@ -81,7 +81,7 @@ export default function ResultsView({ job }: ResultsViewProps) {
         <div className="flex-1" />
 
         {/* Filename */}
-        <span className="text-[11px] font-mono text-sa-stone-400 dark:text-sa-stone-500 truncate hidden sm:block max-w-[200px]" title={job.input_filename}>
+        <span className="text-[11px] font-mono text-sa-stone-400 truncate hidden sm:block max-w-[200px]" title={job.input_filename}>
           {job.input_filename}
         </span>
 
@@ -96,7 +96,7 @@ export default function ResultsView({ job }: ResultsViewProps) {
         {total > 1 && (
           <button
             onClick={handleDownloadAll}
-            className="flex-shrink-0 px-4 py-1.5 rounded-lg text-[12px] font-semibold text-sa-stone-600 dark:text-sa-stone-300 bg-white dark:bg-sa-stone-800 border border-sa-stone-200 dark:border-sa-stone-700 hover:bg-sa-stone-100 dark:hover:bg-sa-stone-700 transition-colors duration-[200ms]"
+            className="flex-shrink-0 px-4 py-1.5 rounded-lg text-[12px] font-semibold text-sa-stone-600 bg-white border border-sa-amber-200 hover:bg-sa-amber-100 transition-colors duration-[200ms]"
           >
             Download All ({total})
           </button>
