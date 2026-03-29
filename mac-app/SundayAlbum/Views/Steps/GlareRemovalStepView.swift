@@ -72,7 +72,7 @@ struct GlareRemovalStepView: View {
                 }
             }
             .padding(16)
-            .background(Color.saBackground)
+            .background(Color.saCard)
         }
     }
 

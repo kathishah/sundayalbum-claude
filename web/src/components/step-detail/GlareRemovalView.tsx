@@ -92,7 +92,7 @@ export default function GlareRemovalView({
       </div>
 
       {/* Prompt + reprocess footer */}
-      <div className="flex-shrink-0 border-t border-sa-stone-200 dark:border-sa-stone-800 bg-sa-stone-50 dark:bg-sa-stone-900 px-6 py-4 flex flex-col gap-3">
+      <div className="flex-shrink-0 border-t border-sa-stone-200 dark:border-sa-stone-700 bg-white dark:bg-sa-stone-950 px-6 py-4 flex flex-col gap-3 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] dark:shadow-[0_-4px_20px_rgba(0,0,0,0.35)]">
         {/* Prompt template display */}
         <div className="flex flex-col gap-1.5">
           <p className="text-[11px] font-semibold text-sa-stone-400 dark:text-sa-stone-500 uppercase tracking-wider">

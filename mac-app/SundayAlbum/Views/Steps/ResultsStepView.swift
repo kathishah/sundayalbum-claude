@@ -103,8 +103,8 @@ struct ResultsStepView: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(Color.saBackground)
+            .padding(.vertical, 12)
+            .background(Color.saCard)
         }
         .task(id: selectedIndex) {
             image = nil

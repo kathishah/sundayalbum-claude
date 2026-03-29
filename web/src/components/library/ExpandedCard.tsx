@@ -174,7 +174,9 @@ function AfterSection({ job }: { job: Job }) {
 function PerPhotoStepTree({ job }: { job: Job }) {
   const count = job.photo_count
   if (count <= 1) return null
-  if (job.status !== 'complete' && job.status !== 'processing') return null
+  // Only show per-photo progress while processing — once complete the output photos
+  // are already shown in AfterSection, making the dot strip redundant.
+  if (job.status !== 'processing') return null
 
   const isComplete = job.status === 'complete'
   const thumbUrls = job.thumbnail_urls ?? {}

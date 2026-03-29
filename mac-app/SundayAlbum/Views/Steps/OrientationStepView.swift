@@ -85,8 +85,8 @@ private struct OrientationPhotoPanel: View {
                 }
             }
             .padding(.horizontal, 20)
-            .padding(.vertical, 12)
-            .background(Color.saBackground)
+            .padding(.vertical, 14)
+            .background(Color.saCard)
         }
         .task(id: photoIndex) {
             let url = PipelineStep.orientation.debugImageURL(
