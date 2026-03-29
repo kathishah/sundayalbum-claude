@@ -178,22 +178,20 @@ function PerPhotoStepTree({ job }: { job: Job }) {
   // are already shown in AfterSection, making the dot strip redundant.
   if (job.status !== 'processing') return null
 
-  const isComplete = job.status === 'complete'
+  // At this point status === 'processing' — isComplete is always false, dropped.
   const thumbUrls = job.thumbnail_urls ?? {}
   const hasThumbs = Object.keys(thumbUrls).length > 0
   const visualIdx = BACKEND_TO_VISUAL[job.current_step] ?? 0
 
   // Pre-photo steps 0–2 (Load / Page / Split) finish uniformly before per-photo work begins
-  const preDone = isComplete || visualIdx >= 2
+  const preDone = visualIdx >= 2
 
   const photos: { idx: number; completed: boolean[] }[] = []
   for (let i = 1; i <= count; i++) {
     const photoNum = String(i).padStart(2, '0')
 
     let orientDone: boolean, glareDone: boolean, colorDone: boolean
-    if (isComplete) {
-      orientDone = glareDone = colorDone = true
-    } else if (hasThumbs) {
+    if (hasThumbs) {
       orientDone = !!thumbUrls[`05b_photo_${photoNum}_oriented`]
       glareDone  = !!thumbUrls[`07_photo_${photoNum}_deglared`]
       colorDone  = !!thumbUrls[`14_photo_${photoNum}_enhanced`]
