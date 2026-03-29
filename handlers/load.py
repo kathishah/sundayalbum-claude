@@ -13,7 +13,8 @@ from pathlib import Path
 from typing import Any
 
 from handlers.common import (
-    S3_BUCKET, REGION, fail_job, make_config, make_storage, update_step, write_thumbnail
+    S3_BUCKET, REGION, fail_job, make_config, make_storage, should_skip_pre_split,
+    update_step, write_thumbnail,
 )
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,10 @@ def handler(event: dict, context: Any) -> dict:
     user_hash: str = event["user_hash"]
     job_id: str = event["job_id"]
     stem: str = event["stem"]
+
+    if should_skip_pre_split(event, "load"):
+        logger.info("load: skipping (start_from=%s)", event.get("start_from"))
+        return event
 
     update_step(user_hash, job_id, "load", "Loading source image")
     storage = make_storage(user_hash)

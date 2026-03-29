@@ -3,9 +3,9 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { motion, AnimatePresence } from 'framer-motion'
-import { getJob } from '@/lib/api'
+import { getJob, reprocessJob } from '@/lib/api'
 import type { Job } from '@/lib/types'
-import { JOB_STEP_TREE, PHOTO_STEP_TREE } from '@/lib/constants'
+import { JOB_STEP_TREE, PHOTO_STEP_TREE, POLLING_INTERVAL_MS } from '@/lib/constants'
 import GlareRemovalView from '@/components/step-detail/GlareRemovalView'
 import ResultsView from '@/components/step-detail/ResultsView'
 
@@ -148,6 +148,11 @@ function StepTree({
 // ── Step canvas views ──────────────────────────────────────────────────────────
 
 function DebugImageCanvas({ url, label }: { url: string | undefined; label: string }) {
+  const [loaded, setLoaded] = useState(false)
+
+  // Reset loaded state when url changes (new step selected)
+  useEffect(() => { setLoaded(false) }, [url])
+
   if (!url) {
     return (
       <div className="flex-1 flex items-center justify-center text-sa-stone-400 dark:text-sa-stone-500 text-sm">
@@ -157,19 +162,58 @@ function DebugImageCanvas({ url, label }: { url: string | undefined; label: stri
   }
   return (
     <div className="flex-1 flex justify-center p-6 overflow-auto">
+      {!loaded && (
+        <div className="w-full max-w-2xl aspect-[4/3] rounded-xl bg-sa-stone-200 dark:bg-sa-stone-800 animate-pulse self-start" />
+      )}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={url}
         alt={label}
-        className="max-w-full h-auto rounded-xl shadow-md object-contain self-start"
+        onLoad={() => setLoaded(true)}
+        className={[
+          'max-w-full h-auto rounded-xl shadow-md object-contain self-start',
+          loaded ? 'opacity-100' : 'opacity-0 absolute pointer-events-none',
+        ].join(' ')}
       />
     </div>
   )
 }
 
-function OrientationView({ job, photoIdx }: { job: Job; photoIdx: number }) {
+const ROTATION_OPTIONS = [0, 90, 180, 270] as const
+
+function OrientationView({
+  job,
+  photoIdx,
+  onStarted,
+}: {
+  job: Job
+  photoIdx: number
+  onStarted: () => void
+}) {
   const n = photoNum(photoIdx)
   const url = job.debug_urls?.[`05b_photo_${n}_oriented`]
+
+  const [selected, setSelected] = useState<number>(0)
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const dirty = selected !== 0
+
+  async function handleApply() {
+    setSubmitting(true)
+    setSubmitError(null)
+    try {
+      await reprocessJob(job.job_id, {
+        from_step: 'ai_orient',
+        photo_index: photoIdx,
+        config: { forced_rotation_degrees: selected },
+      })
+      onStarted()
+    } catch (e) {
+      setSubmitError(e instanceof Error ? e.message : 'Failed to start reprocessing')
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   return (
     <div className="flex-1 flex items-start gap-6 p-6 overflow-auto">
@@ -180,6 +224,7 @@ function OrientationView({ job, photoIdx }: { job: Job; photoIdx: number }) {
             src={url}
             alt={`Photo ${photoIdx} — oriented`}
             className="max-w-full h-auto rounded-xl shadow-md object-contain self-start"
+            style={{ transform: `rotate(${selected}deg)`, transition: 'transform 0.3s ease' }}
           />
         ) : (
           <div className="flex items-center justify-center text-sa-stone-400 dark:text-sa-stone-500 text-sm">
@@ -188,26 +233,108 @@ function OrientationView({ job, photoIdx }: { job: Job; photoIdx: number }) {
         )}
       </div>
 
-      {/* Info panel — matches macOS right-side control panel */}
+      {/* Control panel */}
       <div className="w-56 flex-shrink-0 flex flex-col gap-4 pt-1">
         <h3 className="text-[13px] font-semibold text-sa-stone-700 dark:text-sa-stone-200">
           Orientation
         </h3>
         <p className="text-[12px] text-sa-stone-500 dark:text-sa-stone-400 leading-relaxed">
-          AI-corrected rotation (0°/90°/180°/270°) applied before glare removal so the
-          model receives a semantically upright image.
+          Apply an additional clockwise rotation before reprocessing glare removal and color restore.
         </p>
-        <p className="text-[11px] text-sa-stone-400 dark:text-sa-stone-500">
-          Rotation editing will be available in a future update.
-        </p>
+
+        {/* Rotation picker */}
+        <div>
+          <p className="text-[11px] font-semibold text-sa-stone-400 dark:text-sa-stone-500 uppercase tracking-wider mb-2">
+            Rotate
+          </p>
+          <div className="grid grid-cols-4 gap-1">
+            {ROTATION_OPTIONS.map((deg) => (
+              <button
+                key={deg}
+                onClick={() => setSelected(deg)}
+                className={[
+                  'py-1.5 rounded text-[12px] font-medium transition-colors duration-[200ms]',
+                  selected === deg
+                    ? 'bg-sa-amber-500 text-white'
+                    : 'bg-sa-stone-100 dark:bg-sa-stone-800 text-sa-stone-600 dark:text-sa-stone-300 hover:bg-sa-stone-200 dark:hover:bg-sa-stone-700',
+                ].join(' ')}
+              >
+                {deg}°
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {submitError && (
+          <p className="text-[11px] text-sa-error">{submitError}</p>
+        )}
+
+        {/* Apply / Discard */}
+        <button
+          onClick={handleApply}
+          disabled={!dirty || submitting}
+          className="w-full py-2 rounded-lg text-[13px] font-semibold text-white bg-sa-amber-500 hover:bg-sa-amber-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors duration-[200ms]"
+        >
+          {submitting ? 'Starting…' : 'Apply & Reprocess'}
+        </button>
+        {dirty && !submitting && (
+          <button
+            onClick={() => { setSelected(0); setSubmitError(null) }}
+            className="w-full py-1.5 rounded-lg text-[12px] text-sa-stone-500 dark:text-sa-stone-400 hover:text-sa-stone-700 dark:hover:text-sa-stone-200 transition-colors duration-[200ms]"
+          >
+            Discard
+          </button>
+        )}
       </div>
     </div>
   )
 }
 
-function ColorRestoreView({ job, photoIdx }: { job: Job; photoIdx: number }) {
+// Default PipelineConfig values for color sliders
+const DEFAULT_SATURATION = 15  // saturation_boost 0.15 → 15%
+const DEFAULT_SHARPNESS = 50   // sharpen_amount 0.50 → 50%
+
+function ColorRestoreView({
+  job,
+  photoIdx,
+  onStarted,
+}: {
+  job: Job
+  photoIdx: number
+  onStarted: () => void
+}) {
   const n = photoNum(photoIdx)
   const url = job.debug_urls?.[`14_photo_${n}_enhanced`]
+
+  const [saturation, setSaturation] = useState(DEFAULT_SATURATION)
+  const [sharpness, setSharpness] = useState(DEFAULT_SHARPNESS)
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const dirty = saturation !== DEFAULT_SATURATION || sharpness !== DEFAULT_SHARPNESS
+
+  async function handleApply() {
+    setSubmitting(true)
+    setSubmitError(null)
+    try {
+      await reprocessJob(job.job_id, {
+        from_step: 'color_restore',
+        photo_index: photoIdx,
+        config: {
+          saturation_boost: saturation / 100,
+          sharpen_amount: sharpness / 100,
+        },
+      })
+      onStarted()
+    } catch (e) {
+      setSubmitError(e instanceof Error ? e.message : 'Failed to start reprocessing')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  function displayVal(v: number) {
+    return v === 0 ? '0%' : v > 0 ? `+${v}%` : `${v}%`
+  }
 
   return (
     <div className="flex-1 flex items-start gap-6 p-6 overflow-auto">
@@ -226,33 +353,63 @@ function ColorRestoreView({ job, photoIdx }: { job: Job; photoIdx: number }) {
         )}
       </div>
 
-      {/* Slider panel — display only, Phase 6 makes them interactive */}
+      {/* Interactive slider panel */}
       <div className="w-56 flex-shrink-0 flex flex-col gap-4 pt-1">
         <h3 className="text-[13px] font-semibold text-sa-stone-700 dark:text-sa-stone-200">
           Color Restore
         </h3>
-        {[
-          { label: 'Brightness',  value: 0   },
-          { label: 'Saturation',  value: 15  },
-          { label: 'Warmth',      value: 0   },
-          { label: 'Sharpness',   value: 50  },
-        ].map(({ label, value }) => (
-          <div key={label} className="flex flex-col gap-1">
-            <div className="flex items-center justify-between">
-              <span className="text-[12px] text-sa-stone-600 dark:text-sa-stone-300">{label}</span>
-              <span className="text-[11px] text-sa-stone-400 dark:text-sa-stone-500">{value > 0 ? `+${value}` : value}%</span>
-            </div>
-            <div className="relative h-1.5 rounded-full bg-sa-stone-200 dark:bg-sa-stone-700 overflow-hidden">
-              <div
-                className="absolute inset-y-0 left-0 rounded-full bg-sa-amber-500"
-                style={{ width: `${50 + value / 2}%` }}
-              />
-            </div>
+
+        {/* Saturation slider */}
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[12px] text-sa-stone-600 dark:text-sa-stone-300">Saturation</span>
+            <span className="text-[11px] text-sa-stone-400 dark:text-sa-stone-500">{displayVal(saturation)}</span>
           </div>
-        ))}
-        <p className="text-[11px] text-sa-stone-400 dark:text-sa-stone-500 pt-1">
-          Adjustment controls will be interactive in a future update.
-        </p>
+          <input
+            type="range"
+            min={0}
+            max={50}
+            value={saturation}
+            onChange={(e) => setSaturation(Number(e.target.value))}
+            className="w-full h-1.5 rounded-full accent-sa-amber-500 cursor-pointer"
+          />
+        </div>
+
+        {/* Sharpness slider */}
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[12px] text-sa-stone-600 dark:text-sa-stone-300">Sharpness</span>
+            <span className="text-[11px] text-sa-stone-400 dark:text-sa-stone-500">{displayVal(sharpness)}</span>
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={sharpness}
+            onChange={(e) => setSharpness(Number(e.target.value))}
+            className="w-full h-1.5 rounded-full accent-sa-amber-500 cursor-pointer"
+          />
+        </div>
+
+        {submitError && (
+          <p className="text-[11px] text-sa-error">{submitError}</p>
+        )}
+
+        <button
+          onClick={handleApply}
+          disabled={!dirty || submitting}
+          className="w-full py-2 rounded-lg text-[13px] font-semibold text-white bg-sa-amber-500 hover:bg-sa-amber-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors duration-[200ms]"
+        >
+          {submitting ? 'Starting…' : 'Apply & Reprocess'}
+        </button>
+        {dirty && !submitting && (
+          <button
+            onClick={() => { setSaturation(DEFAULT_SATURATION); setSharpness(DEFAULT_SHARPNESS); setSubmitError(null) }}
+            className="w-full py-1.5 rounded-lg text-[12px] text-sa-stone-500 dark:text-sa-stone-400 hover:text-sa-stone-700 dark:hover:text-sa-stone-200 transition-colors duration-[200ms]"
+          >
+            Discard
+          </button>
+        )}
       </div>
     </div>
   )
@@ -294,6 +451,18 @@ export default function JobDetailPage({ params }: { params: { jobId: string } })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.jobId])
 
+  // Poll while processing (initial run or reprocess)
+  useEffect(() => {
+    if (!job || job.status !== 'processing') return
+    const id = setInterval(() => {
+      getJob(params.jobId)
+        .then(setJob)
+        .catch(() => { /* keep polling */ })
+    }, POLLING_INTERVAL_MS)
+    return () => clearInterval(id)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [job?.status, params.jobId])
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -333,10 +502,22 @@ export default function JobDetailPage({ params }: { params: { jobId: string } })
         )
       }
       if (selection.stepKey === 'ai_orient') {
-        return <OrientationView job={job} photoIdx={selection.photoIdx} />
+        return (
+          <OrientationView
+            job={job}
+            photoIdx={selection.photoIdx}
+            onStarted={() => setJob((j) => j ? { ...j, status: 'processing' } : j)}
+          />
+        )
       }
       if (selection.stepKey === 'color_restore') {
-        return <ColorRestoreView job={job} photoIdx={selection.photoIdx} />
+        return (
+          <ColorRestoreView
+            job={job}
+            photoIdx={selection.photoIdx}
+            onStarted={() => setJob((j) => j ? { ...j, status: 'processing' } : j)}
+          />
+        )
       }
     }
 
@@ -347,6 +528,14 @@ export default function JobDetailPage({ params }: { params: { jobId: string } })
     // -mx-4 -my-8 escapes the (app)/layout.tsx's px-4 py-8 on <main>
     // so the step-detail chrome can be flush edge-to-edge within max-w-6xl
     <div className="-mx-4 -my-8 flex flex-col" style={{ minHeight: 'calc(100vh - 56px)' }}>
+      {/* Reprocessing banner */}
+      {job.status === 'processing' && (
+        <div className="flex items-center gap-2 px-6 py-2.5 bg-sa-amber-50 dark:bg-sa-amber-950/20 border-b border-sa-amber-200 dark:border-sa-amber-900/40 text-[12px] text-sa-amber-700 dark:text-sa-amber-400 flex-shrink-0">
+          <div className="w-3 h-3 rounded-full border-2 border-sa-amber-500 border-t-transparent animate-spin flex-shrink-0" />
+          Reprocessing — results will update automatically when complete.
+        </div>
+      )}
+
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 px-6 py-3.5 border-b border-sa-stone-200 dark:border-sa-stone-800 text-[13px] flex-shrink-0">
         <Link

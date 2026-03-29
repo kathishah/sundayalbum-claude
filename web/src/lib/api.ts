@@ -6,6 +6,8 @@ import type {
   CreateJobResponse,
   Job,
   JobsResponse,
+  ReprocessRequest,
+  ReprocessResponse,
   StartJobResponse,
 } from '@/lib/types'
 
@@ -102,6 +104,16 @@ export async function deleteJob(jobId: string): Promise<void> {
 
 export async function startJob(jobId: string): Promise<StartJobResponse> {
   return apiFetch(`/jobs/${jobId}/start`, { method: 'POST' })
+}
+
+export async function reprocessJob(
+  jobId: string,
+  req: ReprocessRequest,
+): Promise<ReprocessResponse> {
+  return apiFetch(`/jobs/${jobId}/reprocess`, {
+    method: 'POST',
+    body: JSON.stringify(req),
+  })
 }
 
 // ── Settings ──────────────────────────────────────────────────────────────────

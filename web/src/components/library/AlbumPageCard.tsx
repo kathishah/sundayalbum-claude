@@ -6,7 +6,7 @@ import type { Job, StepUpdate } from '@/lib/types'
 import { BACKEND_TO_VISUAL, TOTAL_VISUAL_STEPS } from '@/lib/constants'
 import { useJobProgress } from '@/lib/websocket'
 import { useJobsStore } from '@/stores/jobs-store'
-import { getJob, deleteJob } from '@/lib/api'
+import { getJob, deleteJob, startJob } from '@/lib/api'
 import PipelineProgressWheel from './ProgressWheel'
 
 interface AlbumPageCardProps {
@@ -120,6 +120,7 @@ export default function AlbumPageCard({ job, isOtherExpanded, onExpand }: AlbumP
   const { upsertJob, removeJob } = useJobsStore()
   const [isHovered, setIsHovered] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [isRetrying, setIsRetrying] = useState(false)
 
   const isActive =
     job.status === 'uploading' || job.status === 'processing'
@@ -173,6 +174,18 @@ export default function AlbumPageCard({ job, isOtherExpanded, onExpand }: AlbumP
       await deleteJob(job.job_id)
     } finally {
       removeJob(job.job_id)
+    }
+  }
+
+  async function handleRetry(e: React.MouseEvent) {
+    e.stopPropagation()
+    setIsRetrying(true)
+    try {
+      await startJob(job.job_id)
+      const full = await getJob(job.job_id)
+      upsertJob(full)
+    } catch {
+      setIsRetrying(false)
     }
   }
 
@@ -236,6 +249,19 @@ export default function AlbumPageCard({ job, isOtherExpanded, onExpand }: AlbumP
       >
         {job.input_filename}
       </p>
+
+      {/* ── Retry row (failed jobs only) ── */}
+      {job.status === 'failed' && (
+        <div className="px-3 pb-2.5 flex justify-center" onClick={(e) => e.stopPropagation()}>
+          <button
+            onClick={handleRetry}
+            disabled={isRetrying}
+            className="text-[11px] font-medium text-sa-amber-600 dark:text-sa-amber-400 hover:underline disabled:opacity-50"
+          >
+            {isRetrying ? 'Retrying…' : 'Retry'}
+          </button>
+        </div>
+      )}
 
       {/* ── Hover delete button ── */}
       <AnimatePresence>

@@ -194,6 +194,8 @@ class PipelineConfig:
     use_ai_orientation: bool = True
     ai_orientation_model: str = "claude-haiku-4-5-20251001"
     ai_orientation_min_confidence: str = "medium"
+    # When set, skip the AI call and apply this exact clockwise rotation (0/90/180/270°)
+    forced_rotation_degrees: Optional[int] = None
 
     # OpenAI glare removal (default)
     use_openai_glare_removal: bool = True

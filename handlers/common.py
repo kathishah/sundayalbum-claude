@@ -222,6 +222,78 @@ def finalize_job(
         logger.error("finalize_job DynamoDB error: %s", exc)
 
 
+# ── Reprocess skip helpers ────────────────────────────────────────────────────
+
+PRE_SPLIT_STEP_ORDER = [
+    "load", "normalize", "page_detect", "perspective", "photo_detect", "photo_split"
+]
+PER_PHOTO_STEP_ORDER = ["ai_orient", "glare_remove", "geometry", "color_restore"]
+
+
+def should_skip_pre_split(event: dict, my_step: str) -> bool:
+    """Return True if this pre-split handler should pass through without running.
+
+    Called at the top of each pre-split handler when reprocessing from a later step.
+    """
+    start_from = event.get("start_from", "")
+    if not start_from:
+        return False
+    # If start_from is a per-photo step, skip all pre-split steps
+    if start_from in PER_PHOTO_STEP_ORDER:
+        return True
+    # If start_from is a pre-split step, skip steps that come before it
+    if start_from in PRE_SPLIT_STEP_ORDER and my_step in PRE_SPLIT_STEP_ORDER:
+        return PRE_SPLIT_STEP_ORDER.index(my_step) < PRE_SPLIT_STEP_ORDER.index(start_from)
+    return False
+
+
+def should_skip_per_photo(event: dict, my_step: str) -> bool:
+    """Return True if this per-photo handler should pass through without running.
+
+    True when:
+    - start_from is set and this step comes earlier in the per-photo order, OR
+    - reprocess_photo_index is set and this photo_index does not match it.
+    """
+    start_from = event.get("start_from", "")
+    reprocess_photo_index = event.get("reprocess_photo_index")
+    photo_index = event.get("photo_index")
+
+    # Skip if this step is before start_from in the per-photo order
+    if start_from and start_from in PER_PHOTO_STEP_ORDER and my_step in PER_PHOTO_STEP_ORDER:
+        if PER_PHOTO_STEP_ORDER.index(my_step) < PER_PHOTO_STEP_ORDER.index(start_from):
+            return True
+
+    # Skip if this photo is not the one being reprocessed
+    if reprocess_photo_index is not None and photo_index is not None:
+        if int(photo_index) != int(reprocess_photo_index):
+            return True
+
+    return False
+
+
+def get_existing_output_key(user_hash: str, job_id: str, photo_index: int) -> str:
+    """Return the relative output_key for *photo_index* from the DynamoDB job record.
+
+    Used by the color_restore handler when a photo is skipped during reprocess
+    so that finalize() still receives a valid output_key for every photo.
+    Falls back to the predictable key pattern if the DynamoDB lookup fails.
+    """
+    idx = f"{photo_index:02d}"
+    try:
+        resp = jobs_table.get_item(Key={"user_hash": user_hash, "job_id": job_id})
+        item = resp.get("Item", {})
+        for key in item.get("output_keys", []):
+            key_str = str(key)
+            # output_keys are stored with user_hash prefix
+            if f"Photo{idx}." in key_str or f"_Photo{idx}." in key_str:
+                if key_str.startswith(f"{user_hash}/"):
+                    return key_str[len(f"{user_hash}/"):]
+                return key_str
+    except Exception as exc:
+        logger.warning("get_existing_output_key failed for photo %d: %s (using fallback)", photo_index, exc)
+    return ""  # caller falls back to predictable pattern
+
+
 def fail_job(user_hash: str, job_id: str, error_message: str) -> None:
     """Mark job as failed."""
     now = datetime.now(timezone.utc).isoformat()

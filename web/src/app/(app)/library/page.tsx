@@ -177,7 +177,7 @@ export default function LibraryPage() {
         style={{ filter: expandedJobId ? 'blur(3px)' : 'none' }}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-8 pt-8 pb-6">
+        <div className="flex items-center justify-between px-4 sm:px-8 pt-6 sm:pt-8 pb-6">
           <h1 className="font-display text-[32px] font-semibold text-sa-stone-700 dark:text-sa-stone-100 leading-tight">
             Library
           </h1>
@@ -204,23 +204,23 @@ export default function LibraryPage() {
 
         {/* Error banner */}
         {uploadError && (
-          <div className="mx-8 mb-4 px-4 py-3 rounded-lg bg-red-50 dark:bg-red-950 border border-sa-error text-sa-error text-sm">
+          <div className="mx-4 sm:mx-8 mb-4 px-4 py-3 rounded-lg bg-red-50 dark:bg-red-950 border border-sa-error text-sa-error text-sm">
             {uploadError}
           </div>
         )}
 
         {/* Empty state: DropZone at 320px height */}
         {jobs.length === 0 ? (
-          <div className="px-8" style={{ height: 320 }}>
+          <div className="px-4 sm:px-8" style={{ height: 320 }}>
             <DropZone onFiles={handleFiles} />
           </div>
         ) : (
-          /* Adaptive grid — min 280px, max 400px columns, 16px gap */
+          /* Adaptive grid — min 240px, max 400px columns, 16px gap */
           <div
-            className="px-8 pb-10"
+            className="px-4 sm:px-8 pb-10"
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 400px))',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(min(240px, 100%), 400px))',
               gap: 16,
             }}
           >

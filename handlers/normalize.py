@@ -2,7 +2,9 @@
 from __future__ import annotations
 import logging
 from typing import Any
-from handlers.common import fail_job, make_config, make_storage, update_step, write_thumbnail
+from handlers.common import (
+    fail_job, make_config, make_storage, should_skip_pre_split, update_step, write_thumbnail,
+)
 import src.steps.normalize as step
 
 logger = logging.getLogger(__name__)
@@ -11,6 +13,9 @@ logger.setLevel(logging.INFO)
 
 def handler(event: dict, context: Any) -> dict:
     user_hash, job_id, stem = event["user_hash"], event["job_id"], event["stem"]
+    if should_skip_pre_split(event, "normalize"):
+        logger.info("normalize: skipping (start_from=%s)", event.get("start_from"))
+        return event
     update_step(user_hash, job_id, "normalize", "Resizing image")
     storage = make_storage(user_hash)
     config = make_config(event.get("config"))

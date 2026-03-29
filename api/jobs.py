@@ -398,11 +398,97 @@ def _handle_start(job_id: str, user_hash: str, email: str) -> dict:
         )
 
 
-# ── Reprocess (Phase 5 placeholder) ──────────────────────────────────────────
+# ── Reprocess ─────────────────────────────────────────────────────────────────
+_VALID_REPROCESS_STEPS = [
+    "load", "normalize", "page_detect", "perspective", "photo_detect", "photo_split",
+    "ai_orient", "glare_remove", "geometry", "color_restore",
+]
+
+
 def _handle_reprocess(job_id: str | None, event: dict, user_hash: str) -> dict:
     if not job_id:
         return bad_request("jobId is required")
-    return error(501, "not_implemented", "Reprocessing is available in Phase 5")
+
+    item = _get_job_or_none(job_id, user_hash)
+    if item is None:
+        return not_found(f"Job {job_id} not found")
+
+    if item.get("status") not in ("complete", "failed"):
+        return error(409, "conflict", f"Job is '{item.get('status')}' — only complete or failed jobs can be reprocessed")
+
+    body = parse_body(event)
+    from_step = (body.get("from_step") or "").strip()
+    photo_index = body.get("photo_index")  # optional int
+    config_overrides = body.get("config") or {}
+
+    if not from_step or from_step not in _VALID_REPROCESS_STEPS:
+        return bad_request(f"from_step must be one of: {', '.join(_VALID_REPROCESS_STEPS)}")
+
+    if photo_index is not None:
+        try:
+            photo_index = int(photo_index)
+        except (TypeError, ValueError):
+            return bad_request("photo_index must be an integer")
+
+    if not STATE_MACHINE_ARN:
+        return error(501, "not_implemented", "Pipeline not deployed")
+
+    user_keys = _get_user_keys(user_hash)
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    import json
+    import boto3
+
+    sfn = boto3.client("stepfunctions")
+    execution_input: dict = {
+        "user_hash": user_hash,
+        "job_id": job_id,
+        "stem": item["input_stem"],
+        "upload_key": item.get("upload_key", ""),
+        "start_time": time.time(),
+        "config": config_overrides,
+        "user_keys": user_keys,
+        "start_from": from_step,
+        # photo_count is needed by PrepareMap when photo_split is skipped
+        "photo_count": int(item.get("photo_count", 1)),
+    }
+    if photo_index is not None:
+        execution_input["reprocess_photo_index"] = photo_index
+
+    execution_name = f"{job_id}-r{int(time.time())}"
+    try:
+        sfn_resp = sfn.start_execution(
+            stateMachineArn=STATE_MACHINE_ARN,
+            name=execution_name,
+            input=json.dumps(execution_input),
+        )
+        execution_arn = sfn_resp["executionArn"]
+    except Exception as exc:
+        logger.error("Step Functions start_execution (reprocess) failed: %s", exc)
+        return internal("Could not start reprocessing")
+
+    jobs_table.update_item(
+        Key={"user_hash": user_hash, "job_id": job_id},
+        UpdateExpression=(
+            "SET #s = :s, current_step = :cs, step_detail = :sd, "
+            "execution_arn = :ea, error_message = :em, updated_at = :ua"
+        ),
+        ExpressionAttributeNames={"#s": "status"},
+        ExpressionAttributeValues={
+            ":s": "processing",
+            ":cs": from_step,
+            ":sd": f"Reprocessing from {from_step}"
+            + (f" (photo {photo_index})" if photo_index is not None else ""),
+            ":ea": execution_arn,
+            ":em": "",
+            ":ua": now_iso,
+        },
+    )
+    logger.info(
+        "Reprocess job %s from=%s photo_index=%s execution=%s",
+        job_id, from_step, photo_index, execution_arn,
+    )
+    return ok({"status": "processing", "execution_arn": execution_arn, "from_step": from_step})
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

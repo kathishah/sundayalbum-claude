@@ -2,7 +2,10 @@
 from __future__ import annotations
 import logging
 from typing import Any
-from handlers.common import fail_job, make_config, make_storage, update_step, write_thumbnail
+from handlers.common import (
+    fail_job, get_existing_output_key, make_config, make_storage,
+    should_skip_per_photo, update_step, write_thumbnail,
+)
 import src.steps.color_restore as step
 
 logger = logging.getLogger(__name__)
@@ -12,6 +15,22 @@ logger.setLevel(logging.INFO)
 def handler(event: dict, context: Any) -> dict:
     user_hash, job_id, stem = event["user_hash"], event["job_id"], event["stem"]
     photo_index: int = int(event["photo_index"])
+
+    if should_skip_per_photo(event, "color_restore"):
+        logger.info("color_restore[%d]: skipping (start_from=%s)", photo_index, event.get("start_from"))
+        idx = f"{photo_index:02d}"
+        output_key = (
+            get_existing_output_key(user_hash, job_id, photo_index)
+            or f"output/SundayAlbum_{stem}_Photo{idx}.jpg"
+        )
+        return {
+            "photo_index": photo_index,
+            "output_key": output_key,
+            "user_hash": user_hash,
+            "job_id": job_id,
+            "stem": stem,
+        }
+
     update_step(user_hash, job_id, "color_restore", f"Restoring color for photo {photo_index}")
     storage = make_storage(user_hash)
     config = make_config(event.get("config"))

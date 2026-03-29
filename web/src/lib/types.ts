@@ -65,3 +65,15 @@ export interface StartJobResponse {
   status: string
   execution_arn: string
 }
+
+export interface ReprocessRequest {
+  from_step: string
+  photo_index?: number
+  config?: Record<string, unknown>
+}
+
+export interface ReprocessResponse {
+  status: string
+  execution_arn: string
+  from_step: string
+}

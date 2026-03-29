@@ -48,6 +48,26 @@ def run(
 
     image = storage.read_image(in_key)
 
+    # Forced rotation overrides AI entirely — apply and return immediately
+    if config.forced_rotation_degrees is not None:
+        degrees = int(config.forced_rotation_degrees)
+        # np.rot90 k=1 rotates 90° counter-clockwise; to rotate clockwise we invert k
+        # CW 90° → k=3, CW 180° → k=2, CW 270° → k=1
+        k_map = {0: 0, 90: 3, 180: 2, 270: 1}
+        k = k_map.get(degrees % 360, 0)
+        import numpy as np
+        corrected = np.rot90(image, k=k)
+        storage.write_image(out_key, corrected, format="jpeg", quality=95)
+        result = {
+            "rotation_degrees": degrees,
+            "flip_horizontal": False,
+            "orientation_confidence": "forced",
+            "scene_description": "",
+        }
+        storage.write_json(analysis_key, result)
+        logger.info("ai_orient[%d]: forced rotation %d°", photo_index, degrees)
+        return result
+
     if not config.use_ai_orientation:
         logger.info("ai_orient[%d]: disabled — passing through", photo_index)
         storage.write_image(out_key, image, format="jpeg", quality=95)
