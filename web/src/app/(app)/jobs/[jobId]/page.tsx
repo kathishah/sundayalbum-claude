@@ -327,7 +327,6 @@ export default function JobDetailPage({ params }: { params: { jobId: string } })
         const n = photoNum(selection.photoIdx)
         return (
           <GlareRemovalView
-            beforeUrl={job.debug_urls?.[`05b_photo_${n}_oriented`]}
             afterUrl={job.debug_urls?.[`07_photo_${n}_deglared`]}
             photoIdx={selection.photoIdx}
           />

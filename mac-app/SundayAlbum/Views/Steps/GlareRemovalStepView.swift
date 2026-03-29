@@ -13,36 +13,18 @@ struct GlareRemovalStepView: View {
     var photo: ExtractedPhoto? { job.extractedPhotos[safe: photoIndex] }
 
     var body: some View {
-        HStack(spacing: 0) {
-            // Before
-            VStack(spacing: 8) {
-                Text("BEFORE")
-                    .font(.dmSans(10, weight: .semibold))
-                    .foregroundStyle(Color.saStone400)
-                    .tracking(1.5)
-                ImagePane(url: photo?.jobInputURL)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(16)
-
-            Divider()
-
-            // After
-            VStack(spacing: 8) {
-                Text("AFTER")
-                    .font(.dmSans(10, weight: .semibold))
-                    .foregroundStyle(Color.saAmber500)
-                    .tracking(1.5)
-                ImagePane(url: photo?.imageURL)
-                    .shadow(
-                        color: showGlow ? Color.saAmber500.opacity(0.2) : .clear,
-                        radius: 20
-                    )
-                    .opacity(afterOpacity)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(16)
+        // The step tree already shows the oriented "before" image; show only the
+        // glare-removed result here with the reveal animation.
+        VStack(spacing: 8) {
+            ImagePane(url: photo?.imageURL)
+                .shadow(
+                    color: showGlow ? Color.saAmber500.opacity(0.2) : .clear,
+                    radius: 20
+                )
+                .opacity(afterOpacity)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(16)
         .background(Color.saStone900)
         .onAppear { triggerReveal() }
         .onChange(of: photoIndex) { triggerReveal() }
