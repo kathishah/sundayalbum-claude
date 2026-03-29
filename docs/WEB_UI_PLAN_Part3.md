@@ -1,5 +1,5 @@
 # Sunday Album Web UI — Implementation Plan (Part 3 of 3)
-# Phases 4–7: macOS UI Parity, Step Detail, Re-processing, Prod Deployment
+# Phases 4–8: macOS UI Parity, Step Detail, Re-processing, Admin Tools, Prod Deployment
 
 **Version:** 1.6
 **Date:** March 2026
@@ -435,7 +435,163 @@ All images loaded from S3 via presigned URLs from `GET /jobs/{jobId}` response (
 
 ---
 
-## Phase 7: Production Hardening
+## Phase 7: Admin Tools — User Impersonation & Debugging
+
+This phase adds a secure admin panel so the operator can inspect and debug any user's jobs without asking users to share screenshots or reproduce issues manually.
+
+### 7.1 Auth System Extensions
+
+**Backend — `is_admin` flag in auth response**
+
+The `/auth/verify` response currently returns `{ session_token, user_hash, expires_at }`. Add `is_admin: bool` (true if the verified email is in the `ADMIN_EMAILS` environment variable). Store this in the Zustand auth store and localStorage alongside `session_token` and `user_hash`.
+
+**Backend — `X-Impersonate-User` header support in `require_auth()`**
+
+Extend `api/common.py` → `require_auth()`:
+
+1. Validate the caller's Bearer token as normal → get `(email, caller_user_hash)`.
+2. If the request includes `X-Impersonate-User: {target_user_hash}` AND the caller is admin (email in `ADMIN_EMAILS`), return `target_user_hash` as the effective user instead of `caller_user_hash`.
+3. Log an `INFO` line for every impersonated request: `admin={email} impersonating user_hash={target}` for auditability.
+4. If a non-admin sends `X-Impersonate-User`, ignore the header silently (do not error — avoids leaking admin feature existence).
+
+No other handler (`jobs.py`, `settings.py`, etc.) needs to change — they all consume `user_hash` from `require_auth()` already.
+
+**Backend — `/admin/users` endpoint**
+
+Add a new route group under `/admin/*`, handled by the existing `api_fn` Lambda (or a new `admin_fn` — same Lambda is fine for now). All `/admin/*` routes call `require_auth()` first and reject non-admins with 403.
+
+`GET /admin/users?search={email_prefix}&limit={n}`
+
+- Scan the `sa-sessions` DynamoDB table (partition key = `email`). This table always contains the email → user_hash mapping regardless of whether a session is currently active.
+- Optional `search` param: filter scanned items by `begins_with(email, search)` using a FilterExpression.
+- For each unique `user_hash` found, query `sa-jobs` to get: job count total, last job date (`job_id` is a ULID so sort by SK descending), and last job status.
+- Return up to `limit` users (default 50), sorted by most recent job date descending.
+
+Response shape:
+```json
+{
+  "users": [
+    {
+      "email": "user@example.com",
+      "user_hash": "abc123...",
+      "job_count": 12,
+      "last_job_at": "2026-03-28T10:12:00Z",
+      "last_job_status": "complete"
+    }
+  ],
+  "count": 1
+}
+```
+
+**Note on sa-sessions scan:** The TTL on session tokens is 7 days but the underlying email record persists (only the `session_token` field expires). A DynamoDB scan of sa-sessions returns all records including those with expired tokens — email and user_hash are always present. This makes it a reliable user directory even for users who haven't logged in recently. If a user has never verified (only sent code), their record exists but user_hash may be absent — skip those rows.
+
+---
+
+### 7.2 Frontend — Admin Navbar Item
+
+**Navbar change (web/src/components/Navbar.tsx or equivalent):**
+
+- Read `isAdmin` from the Zustand auth store.
+- If `isAdmin === true`, render an "Admin" nav item between the regular nav items and the logout button.
+- Style: same text weight and size as other nav items, but with a subtle `sa-amber-500` dot indicator to the left (matches the "you have elevated access" convention in developer tools).
+- Route: `/admin`
+
+**Auth store update:**
+
+Add `isAdmin: boolean` field. Set it from the `/auth/verify` response. Persist to localStorage under key `sa_is_admin`.
+
+---
+
+### 7.3 Frontend — Admin Page (`/admin`)
+
+Route: `web/src/app/(app)/admin/page.tsx`
+Protected: redirect to `/library` if `!isAdmin`.
+
+**Layout:**
+
+```
+┌─────────────────────────────────────────────────┐
+│  Admin                           [search input] │  header
+├─────────────────────────────────────────────────┤
+│  Email                  Jobs  Last Job  Status  │
+│  ─────────────────────────────────────────────  │
+│  user@example.com        12   2h ago   complete │  → [Impersonate]
+│  other@example.com        3   5d ago   failed   │  → [Impersonate]
+│  ...                                            │
+└─────────────────────────────────────────────────┘
+```
+
+- Calls `GET /admin/users` on mount; re-queries as the search input changes (debounced 300ms).
+- Table columns: Email, Job Count, Last Job (relative time), Last Status (coloured badge matching library card status colours), Impersonate button.
+- "Impersonate" button: amber, `controlSize(.small)`. Clicking calls `startImpersonation(user_hash, email)` in the impersonation store (see 7.4).
+
+---
+
+### 7.4 Frontend — Impersonation Mode
+
+**New Zustand store: `impersonation-store.ts`**
+
+```ts
+interface ImpersonationState {
+  active: boolean
+  targetUserHash: string | null
+  targetEmail: string | null
+  start: (userHash: string, email: string) => void
+  stop: () => void
+}
+```
+
+Persisted to `sessionStorage` only (not localStorage — clears on tab close, prevents accidental lingering).
+
+**`apiFetch()` change (web/src/lib/api.ts):**
+
+When `impersonation.active === true`, append `X-Impersonate-User: {targetUserHash}` to every request header alongside the normal `Authorization: Bearer` header. No other API call sites need to change.
+
+**Impersonation banner:**
+
+A fixed bar at the very top of every `(app)` layout page (above the navbar), shown only when `impersonation.active`:
+
+```
+┌───────────────────────────────────────────────────────────┐
+│  ⚠ Impersonating user@example.com   [View as themselves]  [Exit Impersonation ×]  │
+└───────────────────────────────────────────────────────────┘
+```
+
+- Background: `sa-amber-100`, border-bottom `sa-amber-300`, text `sa-amber-800`
+- "Exit Impersonation" button calls `impersonation.stop()` and navigates to `/admin`
+- After starting impersonation, navigate to `/library` — the library will now show that user's jobs (the API returns results scoped to `target_user_hash` via the header)
+- The admin can click into any job and use the full step detail view, including triggering a reprocess, all scoped to the impersonated user
+
+**Flow summary:**
+
+1. Admin logs in → `/admin` menu item appears
+2. Admin opens `/admin` → sees user list → clicks "Impersonate" next to a user
+3. App navigates to `/library`, impersonation banner appears at top
+4. All API calls now include `X-Impersonate-User: {hash}` → backend scopes all data to target user
+5. Admin browses jobs, opens step detail, can trigger reprocess to debug issues
+6. Admin clicks "Exit Impersonation" → banner disappears, API calls revert to own user_hash
+
+---
+
+### 7.5 Verification Checklist
+
+- [ ] `is_admin: true` returned by `/auth/verify` for admin email; `false` for all others
+- [ ] "Admin" nav item only visible when `isAdmin === true`
+- [ ] Non-admin user navigating to `/admin` is redirected to `/library`
+- [ ] Admin page loads user list from `GET /admin/users`
+- [ ] Search input filters users by email prefix (debounced)
+- [ ] "Impersonate" button starts impersonation and navigates to `/library`
+- [ ] Impersonation banner visible across all pages while active
+- [ ] Library shows impersonated user's jobs (not admin's own)
+- [ ] Step detail page works for impersonated user's jobs (debug images, reprocess)
+- [ ] "Exit Impersonation" clears impersonation state and navigates to `/admin`
+- [ ] Non-admin sending `X-Impersonate-User` header is silently ignored
+- [ ] Every impersonated API call logged server-side (INFO: `admin=… impersonating user_hash=…`)
+- [ ] Impersonation state stored in sessionStorage (cleared on tab close)
+
+---
+
+## Phase 8: Production Hardening
 
 - CloudFront distribution for frontend (S3 static hosting)
 - CORS configuration on API Gateway
