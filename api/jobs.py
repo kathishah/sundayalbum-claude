@@ -161,6 +161,7 @@ def _handle_create(event: dict, user_hash: str) -> dict:
         "photo_count": 0,
         "output_keys": [],
         "debug_keys": {},
+        "thumbnail_keys": {},
         "created_at": now_iso,
         "updated_at": now_iso,
         "ttl": now_ts + JOB_TTL_DAYS * 24 * 3600,
