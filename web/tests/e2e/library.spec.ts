@@ -12,6 +12,15 @@ import fs from 'fs'
 import os from 'os'
 import { test, expect, type Page } from '@playwright/test'
 
+const COMPLETED_JOB_FILE = path.join(__dirname, '../../.auth/completed-job.json')
+
+function readCompletedJobId(): string | null {
+  try {
+    const d = JSON.parse(fs.readFileSync(COMPLETED_JOB_FILE, 'utf-8'))
+    return typeof d.job_id === 'string' ? d.job_id : null
+  } catch { return null }
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /** Create a minimal valid JPEG file in a temp dir. */
@@ -87,32 +96,30 @@ test('T37: before-thumbnail img appears in card after upload', async ({ page }) 
   }
 })
 
-// ── T38: Completed jobs show output photos in card ────────────────────────────
+// ── T38: Completed job shows output photos in card ────────────────────────────
 
 test('T38: complete job shows output photos in the after-section', async ({ page }) => {
+  // global-setup uploads test_photo.jpg and waits for pipeline completion
+  const jobId = readCompletedJobId()
+  if (!jobId) { test.skip(); return }
+
   await page.goto('/library')
   await expect(page.getByRole('heading', { name: 'Library' })).toBeVisible()
 
-  // Look for any existing complete jobs (may be empty in CI — that's OK)
-  const cards = anyCard(page)
-  await page.waitForTimeout(1_000)  // let list load
-  const count = await cards.count()
-  if (count === 0) {
-    test.skip()
-    return
-  }
+  // The list endpoint omits output_urls; AlbumPageCard fires a getJob fetch on
+  // mount to hydrate them. Find the fixture card by its filename and wait for
+  // the after-section img to appear (up to 15 s for the secondary fetch).
+  const fixtureCard = page.locator('p[title="test_photo.jpg"]').locator('xpath=..')
+  await expect(fixtureCard).toBeVisible({ timeout: 10_000 })
 
-  // Find first complete card (has more than one img: before-thumb + output photo)
-  for (let i = 0; i < count; i++) {
-    const card = cards.nth(i)
-    const imgs = card.locator('img')
-    const imgCount = await imgs.count()
-    if (imgCount > 1) {
-      await expect(imgs.nth(1)).toBeVisible()
-      return
-    }
-  }
-  test.skip()
+  // After the card's useEffect fetches the full job, output imgs appear
+  // The after-section renders inside the same card; wait for >1 img total
+  await expect(async () => {
+    const imgCount = await fixtureCard.locator('img').count()
+    expect(imgCount).toBeGreaterThan(1)
+  }).toPass({ timeout: 15_000 })
+
+  await expect(fixtureCard.locator('img').nth(1)).toBeVisible()
 })
 
 // ── T39: Delete button removes the card ──────────────────────────────────────
