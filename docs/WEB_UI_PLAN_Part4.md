@@ -1,9 +1,9 @@
 # Sunday Album Web UI — Implementation Plan (Part 4 of 4)
 # Phases 7–9: Testing, Admin Tools, Production Hardening
 
-**Version:** 1.0
+**Version:** 1.1
 **Date:** March 2026
-**Status:** Phase 7 (Testing) next up. Phases 1–6 complete.
+**Status:** Phase 7.1 and 7.2 complete (36 moto tests green). Phase 7.3 (Playwright) next up.
 **See also:** WEB_UI_PLAN_Part1.md (Phases 0–2: ✅), WEB_UI_PLAN_Part2.md (Phase 3: ✅), WEB_UI_PLAN_Part3.md (Phases 4–6: ✅)
 
 ---
@@ -12,7 +12,7 @@
 
 Cover the API layer, pipeline handler layer, and frontend with targeted functional tests. Priority order: API → Handlers → Frontend.
 
-### 7.1 API Layer Tests (`tests/api/`)
+### 7.1 API Layer Tests (`tests/api/`) ✅ COMPLETE (2026-03-29)
 
 Pure Python tests using `pytest` + `moto` to mock AWS services (DynamoDB, S3, SES, Step Functions). No real AWS calls. Fast — run on every commit.
 
@@ -66,7 +66,7 @@ Pure Python tests using `pytest` + `moto` to mock AWS services (DynamoDB, S3, SE
 
 ---
 
-### 7.2 Pipeline Handler Tests (`tests/handlers/`)
+### 7.2 Pipeline Handler Tests (`tests/handlers/`) ✅ COMPLETE (2026-03-29)
 
 Use `moto` for DynamoDB + S3, and stub out the actual image processing step functions (e.g., `src.steps.load.run`) to return minimal valid outputs. Focus on verifying that each handler correctly writes `debug_keys` and `thumbnail_keys` to DynamoDB and puts files in S3.
 
@@ -100,7 +100,7 @@ Use `moto` for DynamoDB + S3, and stub out the actual image processing step func
 
 ---
 
-### 7.3 Frontend Tests (`tests/web/` — Playwright)
+### 7.3 Frontend Tests (`tests/web/` — Playwright) ← NEXT
 
 Run against the dev environment (`https://dev.sundayalbum.com`). Require a logged-in session (use a dedicated test account). These are slower; run on PR to `main` only, not on every commit.
 
@@ -133,7 +133,7 @@ Run against the dev environment (`https://dev.sundayalbum.com`). Require a logge
 
 ---
 
-### 7.4 CI Integration
+### 7.4 CI Integration (partial)
 
 **`.github/workflows/test-api.yml`** (new) — triggers on push to any branch when `api/**`, `handlers/**`, or `tests/api/**` or `tests/handlers/**` change:
 
@@ -177,13 +177,21 @@ Steps: zip `api/` → `aws lambda update-function-code --function-name sa-jobs-d
 
 ### 7.5 Verification Checklist
 
-- [ ] `pytest tests/api/ -v` passes with all 23 API tests green
-- [ ] `pytest tests/handlers/ -v` passes with all 13 handler tests green
-- [ ] Test #7 (`test_create_job_initializes_maps`) explicitly verifies both `debug_keys: {}` and `thumbnail_keys: {}` are present in the DDB item — regression guard for the bug fixed 2026-03-29
-- [ ] Playwright suite runs against dev env without failures
-- [ ] CI workflow `test-api.yml` runs on push, blocks merge on failure
-- [ ] CI workflow `test-web.yml` runs on PR to main, blocks merge on failure
-- [ ] Lambda deployment workflow deploys `api/` ZIP to dev Lambda on push to `web-ui-implementation`
+- [x] `pytest tests/api/ -v` passes — 23 API tests green (moto, no real AWS)
+- [x] `pytest tests/handlers/ -v` passes — 13 handler tests green (moto, no real AWS)
+- [x] `pytest tests/api/ tests/handlers/ -v` passes together — 36 tests green (2026-03-29)
+- [x] Test #7 (`test_create_job_initializes_maps`) verifies both `debug_keys: {}` and `thumbnail_keys: {}` at creation — regression guard for bug fixed 2026-03-29
+- [x] CI workflow `test-api.yml` created — triggers on `api/**`, `handlers/**`, `tests/api/**`, `tests/handlers/**` changes
+- [ ] Playwright suite runs against `dev.sundayalbum.com` without failures (7.3 — not started)
+- [ ] CI workflow `test-web.yml` created — triggers on PR to `main` (7.3 — not started)
+- [ ] Lambda deployment workflow deploys `api/` ZIP to dev Lambda on push (7.4 — not started)
+
+**Implementation notes (2026-03-29):**
+- Tests use `moto` 5.1.22 with `us-west-2` region throughout.
+- Root `tests/conftest.py` provides single `autouse` `aws_services` fixture — prevents module-level env var conflicts when both suites run together.
+- `--import-mode=importlib` added to pytest config so conftest files from different subdirectories don't shadow each other.
+- Handler tests stub `src.steps.*` at the function level; only DynamoDB writes and S3 puts are exercised against moto.
+- All 36 tests run in ~4s locally.
 
 ---
 
