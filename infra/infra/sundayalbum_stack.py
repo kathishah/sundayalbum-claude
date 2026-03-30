@@ -197,7 +197,7 @@ class SundayAlbumStack(Stack):
         # ── Shared environment variables ─────────────────────────────────────
         # ADMIN_EMAILS: comma-separated list of emails exempt from rate limits.
         # Adding new admins requires a CDK redeploy (deliberate — not a hot config).
-        admin_emails = self.node.try_get_context("admin_emails") or "kathi.shah@gmail.com"
+        admin_emails = self.node.try_get_context("admin_emails") or "kathi.shah@gmail.com,chintan@reachto.me"
 
         common_env = {
             "SESSIONS_TABLE": sessions_table.table_name,
