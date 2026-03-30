@@ -116,13 +116,12 @@ test('T42: breadcrumb shows selected step name', async ({ page }) => {
   await page.goto(`/jobs/${jobId}`)
   await page.waitForLoadState('networkidle')
 
-  // Breadcrumb: Library / filename / StepName
-  // The Library link is always the first breadcrumb segment
-  const libraryLink = page.getByRole('link', { name: 'Library' })
+  // Breadcrumb is inside <main> — scope there to avoid matching the nav header link too
+  const libraryLink = page.getByRole('main').getByRole('link', { name: 'Library' })
   await expect(libraryLink).toBeVisible({ timeout: 10_000 })
 
-  // A step name appears after the filename in the breadcrumb
-  // (any non-Library, non-filename text in the breadcrumb row)
+  // A step name (the third breadcrumb segment) should also be visible
+  // The step detail page always shows a label like "Load", "Orientation", etc.
   const breadcrumbRow = libraryLink.locator('xpath=..')
   await expect(breadcrumbRow).toBeVisible()
 })

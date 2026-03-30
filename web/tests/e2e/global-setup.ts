@@ -2,7 +2,11 @@
  * Playwright global setup — authenticates the test user and saves the session
  * to .auth/session.json so all tests start already logged in.
  *
- * Auth flow:
+ * If .auth/session.json already exists and the token inside is still valid
+ * against the API, the full send-code / verify flow is skipped. This avoids
+ * the auth rate-limiter when re-running tests within the same hour.
+ *
+ * Auth flow (when session is missing or expired):
  *   1. POST /auth/send-code   — triggers a 6-digit verification email
  *   2. Read the code directly from DynamoDB sa-sessions-dev (no email needed in CI)
  *   3. POST /auth/verify      — exchanges code for a session_token
@@ -18,6 +22,7 @@
  *   AWS_DEFAULT_REGION    defaults to us-west-2
  */
 
+import fs from 'fs'
 import { chromium } from '@playwright/test'
 import {
   DynamoDBClient,
@@ -34,9 +39,35 @@ const SESSIONS_TABLE = 'sa-sessions-dev'
 if (!API_URL) throw new Error('DEV_API_URL env var is required')
 if (!EMAIL) throw new Error('TEST_USER_EMAIL env var is required')
 
+/** Extract sa_token from an existing .auth/session.json, or null. */
+function readSavedToken(): string | null {
+  try {
+    const state = JSON.parse(fs.readFileSync(AUTH_FILE, 'utf-8'))
+    for (const origin of state.origins ?? []) {
+      for (const entry of origin.localStorage ?? []) {
+        if (entry.name === 'sa_token') return entry.value as string
+      }
+    }
+  } catch {
+    // file missing or malformed
+  }
+  return null
+}
+
+/** Return true if the token is still accepted by the API. */
+async function isTokenValid(token: string): Promise<boolean> {
+  try {
+    const resp = await fetch(`${API_URL}/jobs`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    return resp.ok
+  } catch {
+    return false
+  }
+}
+
 async function readCodeFromDynamo(): Promise<string> {
   const ddb = new DynamoDBClient({ region: REGION })
-  // Retry up to 10 × 1 s — SES delivery to DynamoDB is near-instant (same region)
   for (let attempt = 0; attempt < 10; attempt++) {
     const resp = await ddb.send(new GetItemCommand({
       TableName: SESSIONS_TABLE,
@@ -55,7 +86,37 @@ async function readCodeFromDynamo(): Promise<string> {
   throw new Error(`Verification code not found in DynamoDB for ${EMAIL} after 10 s`)
 }
 
+async function persistToken(token: string, userHash: string) {
+  const browser = await chromium.launch()
+  const context = await browser.newContext()
+  const page = await context.newPage()
+
+  await page.goto(FRONTEND_URL)
+  await page.evaluate(
+    ({ t, h }: { t: string; h: string }) => {
+      localStorage.setItem('sa_token', t)
+      if (h) localStorage.setItem('sa_user_hash', h)
+    },
+    { t: token, h: userHash },
+  )
+
+  await context.storageState({ path: AUTH_FILE })
+  await browser.close()
+  console.log(`[global-setup] Session saved to ${AUTH_FILE}`)
+}
+
 export default async function globalSetup() {
+  // ── Fast path: reuse existing session if still valid ─────────────────────
+  const savedToken = readSavedToken()
+  if (savedToken) {
+    const valid = await isTokenValid(savedToken)
+    if (valid) {
+      console.log('[global-setup] Existing session is still valid — skipping re-auth')
+      return
+    }
+    console.log('[global-setup] Saved session expired — re-authenticating')
+  }
+
   // ── 1. Request a verification code ───────────────────────────────────────
   const sendResp = await fetch(`${API_URL}/auth/send-code`, {
     method: 'POST',
@@ -86,23 +147,5 @@ export default async function globalSetup() {
   console.log('[global-setup] Session token obtained')
 
   // ── 4. Persist token in browser localStorage → save storageState ─────────
-  const browser = await chromium.launch()
-  const context = await browser.newContext()
-  const page = await context.newPage()
-
-  // Navigate to the frontend so localStorage is scoped to the right origin
-  await page.goto(FRONTEND_URL)
-
-  // Sunday Album stores the token under 'sa_token' and user hash under 'sa_user_hash'
-  await page.evaluate(
-    ({ token, hash }: { token: string; hash: string }) => {
-      localStorage.setItem('sa_token', token)
-      if (hash) localStorage.setItem('sa_user_hash', hash)
-    },
-    { token: session_token, hash: user_hash ?? '' },
-  )
-
-  await context.storageState({ path: AUTH_FILE })
-  await browser.close()
-  console.log(`[global-setup] Session saved to ${AUTH_FILE}`)
+  await persistToken(session_token, user_hash ?? '')
 }
