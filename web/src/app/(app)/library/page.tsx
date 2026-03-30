@@ -217,6 +217,7 @@ export default function LibraryPage() {
         ) : (
           /* Adaptive grid — min 240px, max 400px columns, 16px gap */
           <div
+            data-testid="library-grid"
             className="px-4 sm:px-8 pb-10"
             style={{
               display: 'grid',

@@ -200,6 +200,7 @@ export default function AlbumPageCard({ job, isOtherExpanded, onExpand }: AlbumP
 
   return (
     <motion.div
+      data-testid="album-card"
       layout
       initial={{ opacity: 0, y: 8 }}
       animate={{

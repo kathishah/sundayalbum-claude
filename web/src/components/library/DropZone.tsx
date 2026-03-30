@@ -105,6 +105,7 @@ export default function DropZone({ onFiles, compact = false }: DropZoneProps) {
 
   return (
     <div
+      data-testid="drop-zone"
       onDragEnter={handleDrag}
       onDragLeave={handleDrag}
       onDragOver={handleDrag}

@@ -35,7 +35,7 @@ export default function ResultsView({ job }: ResultsViewProps) {
   const next = () => setSelected((s) => Math.min(total - 1, s + 1))
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
+    <div data-testid="results-view" className="flex-1 flex flex-col overflow-hidden">
       {/* Single large image */}
       <div className="flex-1 flex justify-center p-6 overflow-auto min-h-0">
         {/* eslint-disable-next-line @next/next/no-img-element */}

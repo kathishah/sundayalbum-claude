@@ -94,7 +94,7 @@ function StepTree({
   const isResultsActive = selection.kind === 'results'
 
   return (
-    <nav className="w-[196px] flex-shrink-0 flex flex-col py-2 overflow-y-auto">
+    <nav data-testid="step-tree" className="w-[196px] flex-shrink-0 flex flex-col py-2 overflow-y-auto">
       {/* Pre-split job steps */}
       {JOB_STEP_TREE.map(({ stepKey, label, debugKey }) => (
         <TreeRow
@@ -451,7 +451,7 @@ function StepThumbnailStrip({
   onSelect: (s: StepSelection) => void
 }) {
   return (
-    <div className="flex-shrink-0 border-b border-sa-stone-200 dark:border-sa-stone-800 bg-sa-stone-50 dark:bg-sa-stone-900 overflow-x-auto">
+    <div data-testid="thumb-strip" className="flex-shrink-0 border-b border-sa-stone-200 dark:border-sa-stone-800 bg-sa-stone-50 dark:bg-sa-stone-900 overflow-x-auto">
       <div className="flex gap-1 px-4 py-2 w-max">
         {THUMB_STRIP_KEYS.map((key) => {
           const url = thumbnailUrls[key]
