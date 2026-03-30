@@ -1,0 +1,45 @@
+name: Test API + Handlers
+
+on:
+  push:
+    paths:
+      - "api/**"
+      - "handlers/**"
+      - "tests/api/**"
+      - "tests/handlers/**"
+      - "src/storage/**"
+      - "src/steps/**"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install \
+            pytest \
+            "moto[dynamodb,s3,ses,stepfunctions]>=5.0.0" \
+            boto3 \
+            numpy \
+            Pillow \
+            opencv-python-headless \
+            scipy \
+            scikit-image \
+            anthropic \
+            openai \
+            click \
+            python-dotenv
+
+      - name: Run API and handler tests
+        run: pytest tests/api/ tests/handlers/ -v
+        env:
+          PYTHONPATH: ${{ github.workspace }}

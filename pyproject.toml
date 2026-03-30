@@ -39,6 +39,8 @@ dev = [
     "pytest>=7.4.0",
     "mypy>=1.5.0",
     "ruff>=0.1.0",
+    "moto[dynamodb,s3,ses,stepfunctions]>=5.0.0",
+    "boto3>=1.34.0",
 ]
 
 [project.scripts]
@@ -46,6 +48,9 @@ sundayalbum = "src.cli:main"
 
 [tool.setuptools]
 packages = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "--import-mode=importlib"
 
 [tool.ruff]
 line-length = 100
