@@ -215,27 +215,34 @@ export default function LibraryPage() {
             <DropZone onFiles={handleFiles} />
           </div>
         ) : (
-          /* Adaptive grid — min 240px, max 400px columns, 16px gap */
-          <div
-            data-testid="library-grid"
-            className="px-4 sm:px-8 pb-10"
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(min(240px, 100%), 400px))',
-              gap: 16,
-            }}
-          >
-            {jobs.map((job) => (
-              <AlbumPageCard
-                key={job.job_id}
-                job={job}
-                isOtherExpanded={expandedJobId !== null && expandedJobId !== job.job_id}
-                onExpand={() =>
-                  setExpandedJobId((prev) => (prev === job.job_id ? null : job.job_id))
-                }
-              />
-            ))}
-          </div>
+          <>
+            {/* Compact drop zone — always visible above the grid when jobs exist */}
+            <div className="px-4 sm:px-8 pb-4">
+              <DropZone onFiles={handleFiles} compact />
+            </div>
+
+            {/* Adaptive grid — min 240px, max 400px columns, 16px gap */}
+            <div
+              data-testid="library-grid"
+              className="px-4 sm:px-8 pb-10"
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(min(240px, 100%), 400px))',
+                gap: 16,
+              }}
+            >
+              {jobs.map((job) => (
+                <AlbumPageCard
+                  key={job.job_id}
+                  job={job}
+                  isOtherExpanded={expandedJobId !== null && expandedJobId !== job.job_id}
+                  onExpand={() =>
+                    setExpandedJobId((prev) => (prev === job.job_id ? null : job.job_id))
+                  }
+                />
+              ))}
+            </div>
+          </>
         )}
       </div>
 

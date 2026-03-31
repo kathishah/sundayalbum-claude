@@ -3,7 +3,7 @@
 
 **Version:** 1.1
 **Date:** March 2026
-**Status:** Phase 7.1 and 7.2 complete (36 moto tests green). Phase 7.3 (Playwright) next up.
+**Status:** Phases 7.1–7.5 complete (36 moto tests + 12 Playwright E2E tests + UI polish). Phase 7.4 (Lambda deployment workflow) and Phase 8 (admin tools) next up.
 **See also:** WEB_UI_PLAN_Part1.md (Phases 0–2: ✅), WEB_UI_PLAN_Part2.md (Phase 3: ✅), WEB_UI_PLAN_Part3.md (Phases 4–6: ✅)
 
 ---
@@ -100,7 +100,7 @@ Use `moto` for DynamoDB + S3, and stub out the actual image processing step func
 
 ---
 
-### 7.3 Frontend Tests (`tests/web/` — Playwright) ← NEXT
+### 7.3 Frontend Tests (`tests/web/` — Playwright) ✅ COMPLETE (2026-03-30)
 
 Run against the dev environment (`https://dev.sundayalbum.com`). Require a logged-in session (use a dedicated test account). These are slower; run on PR to `main` only, not on every commit.
 
@@ -130,6 +130,53 @@ Run against the dev environment (`https://dev.sundayalbum.com`). Require a logge
 |---|------|----------------|
 | 46 | `test_ws_step_update_advances_wheel` | Uploading a new image and watching the library page shows the pie wheel advancing as steps complete (without page refresh) |
 | 47 | `test_ws_complete_shows_thumbnails` | When the job completes, the output thumbnails appear in the card AfterSection without a page refresh |
+
+---
+
+### 7.5 UI Polish ✅ COMPLETE (2026-03-30)
+
+Three targeted improvements to the web frontend.
+
+**1. Dark/Light mode — system-aware with manual override**
+
+The app already used `darkMode: 'class'` in Tailwind and had CSS variables for dark/light tokens. This change makes the theme actually respond to the system setting and adds a manual override.
+
+| File | Change |
+|------|--------|
+| `web/src/stores/theme-store.ts` | New Zustand store. Preference is `'system' \| 'light' \| 'dark'`, persisted as plain string in `localStorage` key `sa_theme` |
+| `web/src/app/layout.tsx` | Inline `<script>` in `<head>` runs synchronously before React paint — reads `sa_theme`, applies `dark` class to `<html>` with no flash of wrong theme. Wraps app in `<ThemeProvider>` |
+| `web/src/components/ThemeProvider.tsx` | Client component — hydrates store from localStorage on mount; watches `prefers-color-scheme` media query when preference is `'system'` |
+| `web/src/components/settings/AppearanceSettings.tsx` | 3-segment toggle (System / Light / Dark) with icons, added to the Settings page |
+| `web/src/app/(app)/settings/page.tsx` | Renders `<AppearanceSettings />` above `<ApiKeySettings />` |
+
+**2. Persistent drop zone on Library page**
+
+Previously the compact `DropZone` (drop target + "Choose Files" button) was only shown when the library was empty. Now it appears above the card grid at all times so users can add more photos without hunting for the "Add Photos" button.
+
+| File | Change |
+|------|--------|
+| `web/src/app/(app)/library/page.tsx` | `<DropZone compact />` inserted above the grid in the populated-library branch |
+
+The existing `DropZone` compact variant and full-page drag overlay are unchanged.
+
+**3. Fixed-size output thumbnails in library card**
+
+The `AfterSection` previously used `gridTemplateColumns: repeat(N, 1fr)` with `object-cover` — each output photo filled its column, clipping the image. With 1 photo you got a wide crop; with 3 photos you got 3 narrow slivers.
+
+| File | Change |
+|------|--------|
+| `web/src/components/library/AlbumPageCard.tsx` | Each output photo now renders in a fixed `72×88px` box (`object-contain`, `bg-sa-surface` background). Photos sit in a horizontal flex row that scrolls if needed (hidden scrollbar). Shows the complete image regardless of portrait/landscape aspect ratio or output count. |
+
+**Verification checklist — 7.5**
+
+- [x] System dark/light mode applied on first load with no flash of wrong theme
+- [x] Manually switching to Light/Dark in Settings persists across refreshes
+- [x] Switching back to System follows system preference including live changes
+- [x] Compact drop zone visible on Library page when jobs exist
+- [x] Files dropped onto the compact zone upload correctly
+- [x] Output thumbnails show complete images (no cropping) at fixed 72×88px
+- [x] Multiple output photos scroll horizontally in the card
+- [x] Production build (`npm run build`) passes with no TypeScript errors
 
 ---
 
@@ -182,9 +229,20 @@ Steps: zip `api/` → `aws lambda update-function-code --function-name sa-jobs-d
 - [x] `pytest tests/api/ tests/handlers/ -v` passes together — 36 tests green (2026-03-29)
 - [x] Test #7 (`test_create_job_initializes_maps`) verifies both `debug_keys: {}` and `thumbnail_keys: {}` at creation — regression guard for bug fixed 2026-03-29
 - [x] CI workflow `test-api.yml` created — triggers on `api/**`, `handlers/**`, `tests/api/**`, `tests/handlers/**` changes
-- [ ] Playwright suite runs against `dev.sundayalbum.com` without failures (7.3 — not started)
-- [ ] CI workflow `test-web.yml` created — triggers on PR to `main` (7.3 — not started)
+- [x] Playwright suite runs against `dev.sundayalbum.com` without failures — all 12 tests green (2026-03-30)
+- [x] CI workflow `test-web.yml` created — triggers on PR to `main` touching `web/**` (2026-03-30)
 - [ ] Lambda deployment workflow deploys `api/` ZIP to dev Lambda on push (7.4 — not started)
+
+**Implementation notes (2026-03-30 — Phase 7.3):**
+- Tests live in `web/tests/e2e/` (not `tests/web/` as originally planned) to keep them alongside the Next.js app.
+- Test fixture: `web/tests/e2e/fixtures/test_photo.jpg` — real 900×1200 JPEG (253 KB) converted from `test-images/IMG_skydiving_normal.HEIC` using PIL. Committed to repo so CI doesn't need test-images downloaded.
+- Global setup (`global-setup.ts`) authenticates via `send-code` → DynamoDB code read → `verify`, saves session to `.auth/session.json` (storageState), then uploads the fixture and polls `GET /jobs/{id}` every 5s until `status === complete` (3-min timeout). Both the session token and the completed `job_id` are cached across runs: subsequent `npx playwright test` calls reuse both, completing in ~24s instead of ~3.5min.
+- Selector strategy: all locators use `.or()` fallbacks (text / structural) so tests pass against the pre-deploy DOM (no `data-testid`), while `data-testid` attributes added to key components will be preferred in future builds.
+- `stepTree(page)` scoped to `page.getByRole('main').locator('nav')` to avoid matching the top-level header `<nav>`.
+- `test.skip()` inside `try/catch` is swallowed by Playwright — conditional skips use `waitFor().then(() => true).catch(() => false)` pattern instead.
+- SES sandbox: `chintan@reachto.me` verified as an email identity before tests could run (one-time setup, already done).
+- T38 uses `expect().toPass({ timeout: 15_000 })` to wait for the card's secondary `getJob` fetch (library list omits `output_urls`).
+- All 12 tests (T36–T47) pass in ~24s on second run. First run takes ~3.5min waiting for pipeline completion.
 
 **Implementation notes (2026-03-29):**
 - Tests use `moto` 5.1.22 with `us-west-2` region throughout.

@@ -76,26 +76,25 @@ function AfterSection({ job, height }: AfterSectionProps) {
 
   if (job.status === 'complete' && job.output_urls && job.output_urls.length > 0) {
     const photos = job.output_urls
-    // CSS Grid with repeat(N, 1fr) — the only layout that guarantees perfectly equal
-    // column widths regardless of image natural dimensions. flex-1 lets natural image
-    // sizes bleed through even with min-w-0; 1fr columns are mathematically equal.
+    // Fixed-size thumbnails — each photo gets its own 72×88px box showing the full
+    // image (object-contain). Row scrolls horizontally if there are many photos.
+    const thumbW = 72
     return (
       <div
-        className="w-full overflow-hidden"
-        style={{
-          display: 'grid',
-          gridTemplateColumns: `repeat(${photos.length}, 1fr)`,
-          gap: 4,
-          height,
-        }}
+        className="flex gap-[4px] overflow-x-auto [&::-webkit-scrollbar]:hidden"
+        style={{ scrollbarWidth: 'none', height }}
       >
         {photos.map((url, i) => (
-          <div key={i} className="overflow-hidden rounded-[6px]" style={{ height }}>
+          <div
+            key={i}
+            className="flex-shrink-0 rounded-[6px] overflow-hidden bg-sa-surface"
+            style={{ width: thumbW, height }}
+          >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={url}
               alt={`Photo ${i + 1}`}
-              className="w-full h-full object-cover"
+              className="w-full h-full object-contain"
             />
           </div>
         ))}
