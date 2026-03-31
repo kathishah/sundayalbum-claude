@@ -129,11 +129,28 @@ test('T39: delete button removes card from library', async ({ page }) => {
 
   const tmpFile = makeTinyJpeg()
   try {
+    // Set up the intercept BEFORE triggering the upload so we capture the
+    // GET /jobs response that handleFiles() fires after createJob → s3Upload →
+    // startJob → listJobs completes. Once this resolves, the optimistic
+    // 'uploading-{ts}' card has been replaced by the real job in the store, so
+    // clicking delete will target the real job_id and won't be undone by the
+    // subsequent setJobs() call.
+    const uploadCycleDone = page.waitForResponse(
+      (r) =>
+        /\/jobs(\?|$)/.test(new URL(r.url()).pathname) &&
+        r.request().method() === 'GET' &&
+        r.status() === 200,
+      { timeout: 20_000 },
+    )
+
     const fileInput = page.locator('input[type="file"]').first()
     await fileInput.setInputFiles(tmpFile)
 
     const filename = path.basename(tmpFile)
     await expect(page.getByText(filename, { exact: false })).toBeVisible({ timeout: 10_000 })
+
+    // Wait for handleFiles upload cycle to complete
+    await uploadCycleDone
 
     const countBefore = await anyCard(page).count()
 
@@ -146,7 +163,7 @@ test('T39: delete button removes card from library', async ({ page }) => {
     await deleteBtn.click()
 
     // Filename text should disappear
-    await expect(page.getByText(filename, { exact: false })).not.toBeAttached({ timeout: 5_000 })
+    await expect(page.getByText(filename, { exact: false })).not.toBeAttached({ timeout: 8_000 })
 
     const countAfter = await anyCard(page).count()
     expect(countAfter).toBeLessThan(countBefore)
