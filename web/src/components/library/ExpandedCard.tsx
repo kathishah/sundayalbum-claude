@@ -120,37 +120,34 @@ function AfterSection({ job }: { job: Job }) {
   if (job.status === 'complete' && job.output_urls && job.output_urls.length > 0) {
     const photos = job.output_urls
     // Fixed-size thumbnails (120×160px) showing the full image (object-contain).
-    // Centered when content fits the row; scrolls horizontally when it overflows.
+    // sa-flex-safe-center centers when content fits; falls back to flex-start
+    // (scrollable) when it overflows.
     return (
       <div
-        className="overflow-x-auto [&::-webkit-scrollbar]:hidden"
-        style={{ scrollbarWidth: 'none', height }}
+        className="sa-flex-safe-center [&::-webkit-scrollbar]:hidden"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          height,
+          overflowX: 'auto',
+          scrollbarWidth: 'none',
+        }}
       >
-        <div
-          style={{
-            display: 'inline-flex',
-            gap: 8,
-            height,
-            minWidth: '100%',
-            justifyContent: 'center',
-            alignItems: 'center',
-          }}
-        >
-          {photos.map((url, i) => (
-            <div
-              key={i}
-              className="flex-shrink-0 rounded-[6px] overflow-hidden bg-sa-surface"
-              style={{ width: thumbW, height }}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={url}
-                alt={`Photo ${i + 1}`}
-                className="w-full h-full object-contain"
-              />
-            </div>
-          ))}
-        </div>
+        {photos.map((url, i) => (
+          <div
+            key={i}
+            className="flex-shrink-0 rounded-[6px] overflow-hidden bg-sa-surface"
+            style={{ width: thumbW, height }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={url}
+              alt={`Photo ${i + 1}`}
+              className="w-full h-full object-contain"
+            />
+          </div>
+        ))}
       </div>
     )
   }

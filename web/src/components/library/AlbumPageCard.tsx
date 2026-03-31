@@ -76,40 +76,37 @@ function AfterSection({ job, height }: AfterSectionProps) {
 
   if (job.status === 'complete' && job.output_urls && job.output_urls.length > 0) {
     const photos = job.output_urls
-    // Fixed-size thumbnails — each photo gets its own 72×88px box showing the full
-    // image (object-contain). Centered when content fits; scrolls horizontally
-    // when it overflows (inline-flex + minWidth:'100%' trick).
+    // Fixed-size thumbnails — each photo gets its own 72×88px box showing the
+    // full image (object-contain). sa-flex-safe-center centers items when they
+    // fit; falls back to flex-start (scrollable) when they overflow so the
+    // right side remains reachable via horizontal scroll.
     const thumbW = 72
     return (
       <div
-        className="overflow-x-auto [&::-webkit-scrollbar]:hidden"
-        style={{ scrollbarWidth: 'none', height }}
+        className="sa-flex-safe-center [&::-webkit-scrollbar]:hidden"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4,
+          height,
+          overflowX: 'auto',
+          scrollbarWidth: 'none',
+        }}
       >
-        <div
-          style={{
-            display: 'inline-flex',
-            gap: 4,
-            height,
-            minWidth: '100%',
-            justifyContent: 'center',
-            alignItems: 'center',
-          }}
-        >
-          {photos.map((url, i) => (
-            <div
-              key={i}
-              className="flex-shrink-0 rounded-[6px] overflow-hidden bg-sa-surface"
-              style={{ width: thumbW, height }}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={url}
-                alt={`Photo ${i + 1}`}
-                className="w-full h-full object-contain"
-              />
-            </div>
-          ))}
-        </div>
+        {photos.map((url, i) => (
+          <div
+            key={i}
+            className="flex-shrink-0 rounded-[6px] overflow-hidden bg-sa-surface"
+            style={{ width: thumbW, height }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={url}
+              alt={`Photo ${i + 1}`}
+              className="w-full h-full object-contain"
+            />
+          </div>
+        ))}
       </div>
     )
   }

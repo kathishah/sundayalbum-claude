@@ -30,6 +30,18 @@
   box-sizing: border-box;
 }
 
+/*
+ * Centers flex children when they fit; falls back to flex-start (scrollable)
+ * when they overflow — prevents the left-side clipping that plain
+ * justify-content:center causes when content is wider than the container.
+ * The duplicate declaration is intentional: browsers that don't support
+ * the 'safe' keyword ignore the second line and use the first (center).
+ */
+.sa-flex-safe-center {
+  justify-content: center;
+  justify-content: safe center; /* stylelint-disable-line declaration-block-no-duplicate-properties */
+}
+
 html {
   font-family: var(--font-dm-sans);
 }
