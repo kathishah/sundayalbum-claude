@@ -107,49 +107,50 @@ function ThumbBox({ src }: { src: string | undefined }) {
   )
 }
 
-// ── AfterSection (expanded natural-ratio mode) ─────────────────────────────
+// ── AfterSection (expanded) ───────────────────────────────────────────────────
 
 function AfterSection({ job }: { job: Job }) {
   const height = 160
+  const thumbW = 120  // matches ThumbBox width for visual symmetry
   const completedCount =
     job.status === 'complete'
       ? TOTAL_VISUAL_STEPS
       : BACKEND_TO_VISUAL[job.current_step] ?? 0
 
   if (job.status === 'complete' && job.output_urls && job.output_urls.length > 0) {
-    const visible = job.output_urls.slice(0, 3)
-    const overflow = job.output_urls.length - visible.length
-    // CSS Grid with 1fr columns: every slot is mathematically equal regardless of
-    // the photo's natural aspect ratio. Overflow badge shares the same row as a
-    // fixed-width auto column so it doesn't inflate the photo slots.
-    const cols = overflow > 0
-      ? `repeat(${visible.length}, 1fr) ${Math.round(height * 0.65)}px`
-      : `repeat(${visible.length}, 1fr)`
+    const photos = job.output_urls
+    // Fixed-size thumbnails (120×160px) showing the full image (object-contain).
+    // Centered when content fits the row; scrolls horizontally when it overflows.
     return (
       <div
-        className="w-full overflow-hidden"
-        style={{ display: 'grid', gridTemplateColumns: cols, gap: 8, height }}
+        className="overflow-x-auto [&::-webkit-scrollbar]:hidden"
+        style={{ scrollbarWidth: 'none', height }}
       >
-        {visible.map((url, i) => (
-          <div key={i} className="overflow-hidden rounded-[6px]" style={{ height }}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={url}
-              alt={`Photo ${i + 1}`}
-              className="w-full h-full object-cover"
-            />
-          </div>
-        ))}
-        {overflow > 0 && (
-          <div
-            className="flex items-center justify-center rounded-[6px] bg-sa-stone-200 dark:bg-sa-stone-700"
-            style={{ height }}
-          >
-            <span className="text-xs font-semibold text-sa-stone-500 dark:text-sa-stone-400">
-              +{overflow}
-            </span>
-          </div>
-        )}
+        <div
+          style={{
+            display: 'inline-flex',
+            gap: 8,
+            height,
+            minWidth: '100%',
+            justifyContent: 'center',
+            alignItems: 'center',
+          }}
+        >
+          {photos.map((url, i) => (
+            <div
+              key={i}
+              className="flex-shrink-0 rounded-[6px] overflow-hidden bg-sa-surface"
+              style={{ width: thumbW, height }}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={url}
+                alt={`Photo ${i + 1}`}
+                className="w-full h-full object-contain"
+              />
+            </div>
+          ))}
+        </div>
       </div>
     )
   }

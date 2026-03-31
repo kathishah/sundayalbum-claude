@@ -135,12 +135,13 @@ test('T39: delete button removes card from library', async ({ page }) => {
     const filename = path.basename(tmpFile)
     await expect(page.getByText(filename, { exact: false })).toBeVisible({ timeout: 10_000 })
 
-    const card = anyCard(page).first()
     const countBefore = await anyCard(page).count()
 
-    // Hover to reveal the delete button
+    // Scope to the specific card for our uploaded file — avoids false hits from
+    // other cards left in the library by previous test runs.
+    const card = page.locator('p[title]').filter({ hasText: filename }).locator('xpath=..')
     await card.hover()
-    const deleteBtn = page.getByRole('button', { name: 'Delete job' }).first()
+    const deleteBtn = card.getByRole('button', { name: 'Delete job' })
     await expect(deleteBtn).toBeVisible({ timeout: 3_000 })
     await deleteBtn.click()
 
