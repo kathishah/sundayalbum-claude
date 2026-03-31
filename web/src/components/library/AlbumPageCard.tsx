@@ -241,8 +241,11 @@ export default function AlbumPageCard({ job, isOtherExpanded, onExpand }: AlbumP
             →
           </span>
 
-          {/* After section — flex:1 fills remaining space */}
-          <div className="flex-1 min-w-0 overflow-hidden">
+          {/* After section — flex:1 fills remaining space.
+              No overflow-hidden here: the card root already clips for rounded
+              corners, and a parent overflow:hidden would collapse the child
+              overflow-x-auto scroll container used for centering thumbnails. */}
+          <div className="flex-1 min-w-0">
             <AfterSection job={job} height={thumbH} />
           </div>
         </div>
