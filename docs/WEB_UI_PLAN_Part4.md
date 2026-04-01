@@ -1,9 +1,9 @@
 # Sunday Album Web UI — Implementation Plan (Part 4 of 4)
 # Phases 7–9: Testing, Admin Tools, Production Hardening
 
-**Version:** 1.1
+**Version:** 1.2
 **Date:** March 2026
-**Status:** Phases 7.1–7.5 complete (36 moto tests + 12 Playwright E2E tests + UI polish). Phase 7.4 (Lambda deployment workflow) and Phase 8 (admin tools) next up.
+**Status:** Phases 7.1–7.5 + 7.4 complete (36 moto tests + 12 Playwright E2E tests + UI polish + Lambda CI deployment). Phase 8 (admin tools) next up.
 **See also:** WEB_UI_PLAN_Part1.md (Phases 0–2: ✅), WEB_UI_PLAN_Part2.md (Phase 3: ✅), WEB_UI_PLAN_Part3.md (Phases 4–6: ✅)
 
 ---
@@ -231,7 +231,7 @@ Steps: zip `api/` → `aws lambda update-function-code --function-name sa-jobs-d
 - [x] CI workflow `test-api.yml` created — triggers on `api/**`, `handlers/**`, `tests/api/**`, `tests/handlers/**` changes
 - [x] Playwright suite runs against `dev.sundayalbum.com` without failures — all 12 tests green (2026-03-30)
 - [x] CI workflow `test-web.yml` created — triggers on PR to `main` touching `web/**` (2026-03-30)
-- [ ] Lambda deployment workflow deploys `api/` ZIP to dev Lambda on push (7.4 — not started)
+- [x] Lambda deployment workflow deploys `api/` ZIP + pipeline Docker image to dev Lambda on push (7.4 — `.github/workflows/deploy-lambda.yml`, 2026-03-31)
 
 **Implementation notes (2026-03-30 — Phase 7.3):**
 - Tests live in `web/tests/e2e/` (not `tests/web/` as originally planned) to keep them alongside the Next.js app.
