@@ -68,11 +68,23 @@ jobs:
           echo "tag=${SHORT_SHA}" >> $GITHUB_OUTPUT
           echo "latest_tag=${STAGE}-latest" >> $GITHUB_OUTPUT
 
+          # Resolve stage-specific API/WS URLs so build args can be set before docker build
+          if [ "${STAGE}" = "prod" ]; then
+            echo "api_url=https://e1f6o1ah49.execute-api.us-west-2.amazonaws.com" >> $GITHUB_OUTPUT
+            echo "ws_url=wss://l7t59cvhyh.execute-api.us-west-2.amazonaws.com/\$default" >> $GITHUB_OUTPUT
+          else
+            echo "api_url=https://nodcooz758.execute-api.us-west-2.amazonaws.com" >> $GITHUB_OUTPUT
+            echo "ws_url=wss://0rqvs3ydf9.execute-api.us-west-2.amazonaws.com/\$default" >> $GITHUB_OUTPUT
+          fi
+
       - name: Build Docker image
         working-directory: web
         run: |
+          # NEXT_PUBLIC_* vars must be baked in at build time — pass as --build-arg
           docker build \
             --provenance=false \
+            --build-arg NEXT_PUBLIC_API_URL=${{ steps.image.outputs.api_url }} \
+            --build-arg NEXT_PUBLIC_WS_URL=${{ steps.image.outputs.ws_url }} \
             -t ${{ steps.image.outputs.uri }}:${{ steps.image.outputs.tag }} \
             -t ${{ steps.image.outputs.uri }}:${{ steps.image.outputs.latest_tag }} \
             .

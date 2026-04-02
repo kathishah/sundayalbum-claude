@@ -9,33 +9,33 @@
  *
  * 2. Seed job — uploads tests/e2e/fixtures/test_photo.jpg to the real pipeline
  *    and polls until status === 'complete' (up to PIPELINE_TIMEOUT_MS).
- *    The completed job_id is saved to .auth/completed-job.json so tests that
- *    require a finished job (T38, T43–T45) can read it without waiting again.
+ *    The completed job_id is saved to .auth/completed-job-{stage}.json so tests
+ *    that require a finished job (T38, T43–T45) can read it without waiting again.
  *    If the saved job is already complete it is reused across runs.
  *
  * Required env vars:
  *   TEST_USER_EMAIL        e.g. chintan@reachto.me
  *   DEV_FRONTEND_URL       e.g. https://dev.sundayalbum.com
  *   DEV_API_URL            e.g. https://nodcooz758.execute-api.us-west-2.amazonaws.com
- *   AWS_ACCESS_KEY_ID      IAM read on sa-sessions-dev DynamoDB table
+ *   AWS_ACCESS_KEY_ID      IAM read on sa-sessions(-dev) DynamoDB table
  *   AWS_SECRET_ACCESS_KEY
  *   AWS_DEFAULT_REGION     defaults to us-west-2
+ *   SESSIONS_TABLE         DynamoDB table name (default: sa-sessions-dev)
  */
 
 import fs from 'fs'
 import path from 'path'
 import { chromium } from '@playwright/test'
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb'
-import { AUTH_FILE } from '../../playwright.config'
+import { AUTH_FILE, COMPLETED_JOB_FILE } from '../../playwright.config'
 
 const API_URL    = process.env.DEV_API_URL ?? ''
 const FRONTEND   = process.env.DEV_FRONTEND_URL ?? 'https://dev.sundayalbum.com'
 const EMAIL      = process.env.TEST_USER_EMAIL ?? ''
 const REGION     = process.env.AWS_DEFAULT_REGION ?? 'us-west-2'
-const SESSIONS_TABLE = 'sa-sessions-dev'
+const SESSIONS_TABLE = process.env.SESSIONS_TABLE ?? 'sa-sessions-dev'
 
 const FIXTURE_IMAGE = path.join(__dirname, 'fixtures', 'test_photo.jpg')
-const COMPLETED_JOB_FILE = path.join(__dirname, '../../.auth/completed-job.json')
 
 /** Max time to wait for the pipeline to finish (ms). */
 const PIPELINE_TIMEOUT_MS = 3 * 60 * 1000   // 3 minutes
@@ -146,7 +146,7 @@ async function getJobStatus(token: string, jobId: string): Promise<string> {
   return j.status as string
 }
 
-/** Read saved completed job_id from .auth/completed-job.json, or null. */
+/** Read saved completed job_id from the stage-scoped file, or null. */
 function readSavedJobId(): string | null {
   try {
     const d = JSON.parse(fs.readFileSync(COMPLETED_JOB_FILE, 'utf-8'))

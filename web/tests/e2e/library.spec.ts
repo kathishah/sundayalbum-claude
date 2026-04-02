@@ -11,8 +11,7 @@ import path from 'path'
 import fs from 'fs'
 import os from 'os'
 import { test, expect, type Page } from '@playwright/test'
-
-const COMPLETED_JOB_FILE = path.join(__dirname, '../../.auth/completed-job.json')
+import { COMPLETED_JOB_FILE } from '../../playwright.config'
 
 function readCompletedJobId(): string | null {
   try {
