@@ -3,8 +3,8 @@
 #
 # Runs on every commit:
 #   1. Python API + handler tests (pytest + moto, ~5 s, no real AWS)
-#   2. Playwright E2E tests — only when web/.auth/session.json exists
-#      (run `npx playwright test` once after deploy to create the session file)
+#   2. Playwright E2E tests — only when web/.auth/session-dev.json exists
+#      (run `STAGE=dev npx playwright test` once after deploying dev to create it)
 #
 # Install into the active repo:
 #   git config core.hooksPath .githooks
@@ -49,13 +49,15 @@ echo "  ✓ API + handler tests passed"
 # ── 2. Playwright E2E tests ────────────────────────────────────────────────────
 echo ""
 
-SESSION_FILE="$REPO_ROOT/web/.auth/session.json"
+SESSION_FILE="$REPO_ROOT/web/.auth/session-dev.json"
 PLAYWRIGHT_BIN="$REPO_ROOT/web/node_modules/.bin/playwright"
 
 if [ ! -f "$SESSION_FILE" ]; then
-  echo "  ⚠  Playwright skipped — no session file found"
-  echo "     Run 'npx playwright test' from web/ once after deploying to create it"
-  echo "     Required env vars: TEST_USER_EMAIL, DEV_FRONTEND_URL, DEV_API_URL, AWS_ACCESS_KEY_ID"
+  echo "  ⚠  Playwright skipped — no dev session file found (web/.auth/session-dev.json)"
+  echo "     Run once from web/ to create it:"
+  echo "       STAGE=dev TEST_USER_EMAIL=... DEV_FRONTEND_URL=https://dev.sundayalbum.com \\"
+  echo "         DEV_API_URL=https://nodcooz758.execute-api.us-west-2.amazonaws.com \\"
+  echo "         SESSIONS_TABLE=sa-sessions-dev npx playwright test"
 elif [ ! -f "$PLAYWRIGHT_BIN" ]; then
   echo "  ⚠  Playwright skipped — node_modules not installed"
   echo "     Run 'npm ci' from web/ first"
@@ -63,10 +65,13 @@ else
   echo "  ▶ Playwright E2E tests (against dev.sundayalbum.com)"
   : "${DEV_FRONTEND_URL:=https://dev.sundayalbum.com}"
   : "${DEV_API_URL:=https://nodcooz758.execute-api.us-west-2.amazonaws.com}"
+  : "${SESSIONS_TABLE:=sa-sessions-dev}"
 
   (cd "$REPO_ROOT/web" && \
+    STAGE=dev \
     DEV_FRONTEND_URL="$DEV_FRONTEND_URL" \
     DEV_API_URL="$DEV_API_URL" \
+    SESSIONS_TABLE="$SESSIONS_TABLE" \
     "$PLAYWRIGHT_BIN" test 2>&1 | sed 's/^/    /')
 
   echo "  ✓ Playwright E2E tests passed"

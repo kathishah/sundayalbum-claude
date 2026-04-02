@@ -7,10 +7,8 @@
  */
 
 import fs from 'fs'
-import path from 'path'
 import { test, expect, type Page } from '@playwright/test'
-
-const COMPLETED_JOB_FILE = path.join(__dirname, '../../.auth/completed-job.json')
+import { COMPLETED_JOB_FILE } from '../../playwright.config'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
