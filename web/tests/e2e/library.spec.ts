@@ -130,57 +130,38 @@ test('T39: delete button removes card from library', async ({ page }) => {
 
   const tmpFile = makeTinyJpeg()
   try {
-    // Set up the intercept BEFORE triggering the upload so we capture the
-    // GET /jobs response that handleFiles() fires after createJob → s3Upload →
-    // startJob → listJobs completes. Once this resolves, the optimistic
-    // 'uploading-{ts}' card has been replaced by the real job in the store, so
-    // clicking delete will target the real job_id and won't be undone by the
-    // subsequent setJobs() call.
-    const uploadCycleDone = page.waitForResponse(
-      (r) =>
-        /\/jobs(\?|$)/.test(new URL(r.url()).pathname) &&
-        r.request().method() === 'GET' &&
-        r.status() === 200,
-      { timeout: 20_000 },
-    )
-
     const fileInput = page.locator('input[type="file"]').first()
     await fileInput.setInputFiles(tmpFile)
 
     const filename = path.basename(tmpFile)
-    await expect(page.getByText(filename, { exact: false })).toBeVisible({ timeout: 10_000 })
 
-    // Wait for handleFiles upload cycle to complete
-    await uploadCycleDone
-    // waitForResponse resolves when the network response arrives, but the
-    // component's setJobs() runs asynchronously in the next microtask. Give
-    // React a moment to flush the state update so the real job_id is in the
-    // store before we click delete — otherwise removeJob() fires before
-    // setJobs() and the card reappears immediately after deletion.
-    await page.waitForTimeout(500)
+    // Wait for the card to have a real job_id — i.e. the optimistic
+    // "uploading-{ts}" card has been replaced by the real job from setJobs().
+    // Using data-job-id is more reliable than waitForResponse(GET /jobs) which
+    // can resolve on a background poll before the upload cycle's own listJobs()
+    // fires. If we proceeded on the wrong GET /jobs, the card still has the
+    // optimistic id and deleteJob() would send DELETE /jobs/uploading-{ts} → 404.
+    const realCard = page
+      .locator('[data-job-id]:not([data-job-id^="uploading-"])')
+      .filter({ has: page.locator(`p[title="${filename}"]`) })
+    await expect(realCard).toBeVisible({ timeout: 20_000 })
 
     const countBefore = await anyCard(page).count()
 
-    // Scope to the specific card for our uploaded file — avoids false hits from
-    // other cards left in the library by previous test runs.
-    const card = page.locator('p[title]').filter({ hasText: filename }).locator('xpath=..')
-    await card.hover()
-    const deleteBtn = card.getByRole('button', { name: 'Delete job' })
-    await expect(deleteBtn).toBeVisible({ timeout: 3_000 })
-
-    // Intercept the DELETE before clicking so we can await the full API
-    // round-trip. handleDelete() calls removeJob() in a finally block — the
-    // card only disappears after deleteJob() resolves, so we must wait for the
-    // response, not just the click event.
-    // 25 s timeout: the delete Lambda can cold-start in ~10-15 s; first attempt
-    // after a period of inactivity would time out at 15 s. Retry is always warm.
+    // Intercept the DELETE before hovering so we never miss the response.
+    // handleDelete() calls removeJob() in a finally block after deleteJob()
+    // resolves — the card only disappears once the API round-trip completes.
     const deletionComplete = page.waitForResponse(
       (r) =>
         r.url().includes('/jobs/') &&
         r.request().method() === 'DELETE' &&
         r.status() === 200,
-      { timeout: 25_000 },
+      { timeout: 20_000 },
     )
+
+    await realCard.hover()
+    const deleteBtn = realCard.getByRole('button', { name: 'Delete job' })
+    await expect(deleteBtn).toBeVisible({ timeout: 3_000 })
     await deleteBtn.click()
     await deletionComplete
 
