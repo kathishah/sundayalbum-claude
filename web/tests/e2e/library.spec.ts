@@ -151,6 +151,12 @@ test('T39: delete button removes card from library', async ({ page }) => {
 
     // Wait for handleFiles upload cycle to complete
     await uploadCycleDone
+    // waitForResponse resolves when the network response arrives, but the
+    // component's setJobs() runs asynchronously in the next microtask. Give
+    // React a moment to flush the state update so the real job_id is in the
+    // store before we click delete — otherwise removeJob() fires before
+    // setJobs() and the card reappears immediately after deletion.
+    await page.waitForTimeout(500)
 
     const countBefore = await anyCard(page).count()
 
@@ -160,10 +166,24 @@ test('T39: delete button removes card from library', async ({ page }) => {
     await card.hover()
     const deleteBtn = card.getByRole('button', { name: 'Delete job' })
     await expect(deleteBtn).toBeVisible({ timeout: 3_000 })
-    await deleteBtn.click()
 
-    // Filename text should disappear
-    await expect(page.getByText(filename, { exact: false })).not.toBeAttached({ timeout: 8_000 })
+    // Intercept the DELETE before clicking so we can await the full API
+    // round-trip. handleDelete() calls removeJob() in a finally block — the
+    // card only disappears after deleteJob() resolves, so we must wait for the
+    // response, not just the click event.
+    const deletionComplete = page.waitForResponse(
+      (r) =>
+        r.url().includes('/jobs/') &&
+        r.request().method() === 'DELETE' &&
+        r.status() === 200,
+      { timeout: 15_000 },
+    )
+    await deleteBtn.click()
+    await deletionComplete
+
+    // removeJob() fires synchronously after the DELETE response — card should
+    // be gone within one React render cycle.
+    await expect(page.getByText(filename, { exact: false })).not.toBeAttached({ timeout: 5_000 })
 
     const countAfter = await anyCard(page).count()
     expect(countAfter).toBeLessThan(countBefore)
