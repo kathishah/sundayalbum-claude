@@ -1,9 +1,9 @@
 # Sunday Album Web UI — Implementation Plan (Part 4 of 4)
 # Phases 7–9: Testing, Admin Tools, Production Hardening
 
-**Version:** 1.2
-**Date:** March 2026
-**Status:** Phases 7.1–7.5 + 7.4 complete (36 moto tests + 12 Playwright E2E tests + UI polish + Lambda CI deployment). Phase 8 (admin tools) next up.
+**Version:** 1.3
+**Date:** April 2026
+**Status:** Phases 7.1–7.5 + 7.4 complete. Pre-commit hook added (36 moto tests + 12 Playwright E2E). PR #32 (`web-ui-implementation` → `main`) is conflict-free and ready to merge. Phase 8 (admin tools) next up.
 **See also:** WEB_UI_PLAN_Part1.md (Phases 0–2: ✅), WEB_UI_PLAN_Part2.md (Phase 3: ✅), WEB_UI_PLAN_Part3.md (Phases 4–6: ✅)
 
 ---
@@ -100,9 +100,9 @@ Use `moto` for DynamoDB + S3, and stub out the actual image processing step func
 
 ---
 
-### 7.3 Frontend Tests (`tests/web/` — Playwright) ✅ COMPLETE (2026-03-30)
+### 7.3 Frontend Tests (`web/tests/e2e/` — Playwright) ✅ COMPLETE (2026-03-30, updated 2026-04-02)
 
-Run against the dev environment (`https://dev.sundayalbum.com`). Require a logged-in session (use a dedicated test account). These are slower; run on PR to `main` only, not on every commit.
+Run against the dev environment (`https://dev.sundayalbum.com`). Require a logged-in session (use a dedicated test account). These are slower (~33 s with warm session cache); run locally via the pre-commit hook (see §7.6) after each deploy, not in CI.
 
 **Library page**
 
@@ -180,9 +180,9 @@ The `AfterSection` previously used `gridTemplateColumns: repeat(N, 1fr)` with `o
 
 ---
 
-### 7.4 CI Integration (partial)
+### 7.4 CI Integration ✅ COMPLETE (2026-03-31, updated 2026-04-02)
 
-**`.github/workflows/test-api.yml`** (new) — triggers on push to any branch when `api/**`, `handlers/**`, or `tests/api/**` or `tests/handlers/**` change:
+**`.github/workflows/test-api.yml`** — triggers on push to any branch when `api/**`, `handlers/**`, or `tests/api/**` / `tests/handlers/**` change:
 
 ```yaml
 on:
@@ -196,29 +196,20 @@ on:
 
 Steps: checkout → setup Python 3.12 → `pip install pytest moto boto3` → `pytest tests/api/ tests/handlers/ -v`
 
-**`.github/workflows/test-web.yml`** (new) — triggers on PR to `main` only:
+**`.github/workflows/test-web.yml`** — Playwright E2E tests. **Removed auto-trigger on 2026-04-02.** The workflow now only has `workflow_dispatch` (manual trigger from GitHub UI). Reason: the deploy workflow (`deploy-web.yml`) and the test workflow ran in parallel — tests always ran against the pre-deploy build, causing false failures as test fixes raced with the deployment that needed to serve them. Playwright now runs locally via the pre-commit hook (§7.6) after each deploy.
 
 ```yaml
 on:
-  pull_request:
-    branches: [main]
+  workflow_dispatch:   # manual only
 ```
 
-Steps: checkout → install Playwright → `playwright test tests/web/` against dev environment
+**`.github/workflows/deploy-web.yml`** — triggers on push to `web-ui-implementation` (→ dev) or `main` (→ prod) when `web/**` changes:
 
-**Lambda deployment workflow (new)** — the current CI only deploys the Next.js web app. Add a new workflow triggered on `api/**` or `handlers/**` changes to deploy Lambda code:
+- `web-ui-implementation` → `sundayalbum-web-dev` App Runner (dev.sundayalbum.com)
+- `main` → `sundayalbum-web-prod` App Runner (awaiting custom domain)
+- Waits for App Runner to reach `RUNNING` before the job completes (~4–5 min)
 
-```yaml
-on:
-  push:
-    branches: [main, web-ui-implementation]
-    paths:
-      - "api/**"
-      - "handlers/**"
-      - "Dockerfile"
-```
-
-Steps: zip `api/` → `aws lambda update-function-code --function-name sa-jobs-dev` (and other API Lambdas). Pipeline Lambdas (Docker) require CDK deploy — that step can be added here too or remain manual.
+**`.github/workflows/deploy-lambda.yml`** — triggers on push to `web-ui-implementation` or `main` when `api/**`, `handlers/**`, or `src/steps/**` change. Zips and updates the API Lambda + pipeline step Lambdas.
 
 ---
 
@@ -230,26 +221,82 @@ Steps: zip `api/` → `aws lambda update-function-code --function-name sa-jobs-d
 - [x] Test #7 (`test_create_job_initializes_maps`) verifies both `debug_keys: {}` and `thumbnail_keys: {}` at creation — regression guard for bug fixed 2026-03-29
 - [x] CI workflow `test-api.yml` created — triggers on `api/**`, `handlers/**`, `tests/api/**`, `tests/handlers/**` changes
 - [x] Playwright suite runs against `dev.sundayalbum.com` without failures — all 12 tests green (2026-03-30)
-- [x] CI workflow `test-web.yml` created — triggers on PR to `main` touching `web/**` (2026-03-30)
+- [x] CI workflow `test-web.yml` updated to `workflow_dispatch` only — Playwright no longer runs in CI (2026-04-02)
 - [x] Lambda deployment workflow deploys `api/` ZIP + pipeline Docker image to dev Lambda on push (7.4 — `.github/workflows/deploy-lambda.yml`, 2026-03-31)
+- [x] Pre-commit hook installed — runs 36 pytest + 12 Playwright on every commit (2026-04-02)
+- [x] PR #32 (`web-ui-implementation` → `main`) made conflict-free via `git merge -s ours main` (2026-04-02)
+
+**Implementation notes (2026-04-02 — T38/T39 fixes):**
+- **T38 strict-mode violation**: The library accumulates multiple `test_photo.jpg` cards from prior test runs (the global setup never cleans up old fixture jobs). Using `p[title="test_photo.jpg"]` triggered Playwright's strict-mode error once 2+ cards matched. Fix: added `data-job-id={job.job_id}` attribute to `AlbumPageCard`'s root `<motion.div>`, then narrowed the T38 locator to `[data-job-id="${jobId}"]` using the ID from `readCompletedJobId()`.
+- **T39 optimistic-card race**: The test previously used `waitForResponse(GET /jobs)` to detect when the upload cycle's `setJobs()` had run. But `waitForResponse` resolves when the network response arrives, not when React has processed it — a background poll on GET /jobs could resolve the promise before the upload cycle's own response, leaving the card with its optimistic `job_id: "uploading-{ts}"`. Clicking delete on an optimistic card sent `DELETE /jobs/uploading-{ts}` → 404 → the `waitForResponse(DELETE, status 200)` timed out. Fix: use `[data-job-id]:not([data-job-id^="uploading-"])` scoped to the filename's card — this directly observes React state and resolves as soon as the real job is in the store. T39 now completes in ~4s.
+- **Auth rate limit**: `send-code` endpoint applies a 3-requests-per-hour rate limit unconditionally, including for admin emails. The `is_admin()` bypass only applies to the daily job creation rate limit. After 3 CI runs in one hour exhausted the quota, tests must wait for the 1-hour window to reset. Mitigation: `web/.auth/session.json` and `.auth/completed-job.json` are cached locally — subsequent pre-commit hook runs reuse both, skipping auth entirely.
 
 **Implementation notes (2026-03-30 — Phase 7.3):**
 - Tests live in `web/tests/e2e/` (not `tests/web/` as originally planned) to keep them alongside the Next.js app.
 - Test fixture: `web/tests/e2e/fixtures/test_photo.jpg` — real 900×1200 JPEG (253 KB) converted from `test-images/IMG_skydiving_normal.HEIC` using PIL. Committed to repo so CI doesn't need test-images downloaded.
-- Global setup (`global-setup.ts`) authenticates via `send-code` → DynamoDB code read → `verify`, saves session to `.auth/session.json` (storageState), then uploads the fixture and polls `GET /jobs/{id}` every 5s until `status === complete` (3-min timeout). Both the session token and the completed `job_id` are cached across runs: subsequent `npx playwright test` calls reuse both, completing in ~24s instead of ~3.5min.
-- Selector strategy: all locators use `.or()` fallbacks (text / structural) so tests pass against the pre-deploy DOM (no `data-testid`), while `data-testid` attributes added to key components will be preferred in future builds.
+- Global setup (`global-setup.ts`) authenticates via `send-code` → DynamoDB code read → `verify`, saves session to `.auth/session.json` (storageState), then uploads the fixture and polls `GET /jobs/{id}` every 5s until `status === complete` (3-min timeout). Both the session token and the completed `job_id` are cached across runs: subsequent `npx playwright test` calls reuse both, completing in ~33s instead of ~3.5min.
 - `stepTree(page)` scoped to `page.getByRole('main').locator('nav')` to avoid matching the top-level header `<nav>`.
-- `test.skip()` inside `try/catch` is swallowed by Playwright — conditional skips use `waitFor().then(() => true).catch(() => false)` pattern instead.
 - SES sandbox: `chintan@reachto.me` verified as an email identity before tests could run (one-time setup, already done).
-- T38 uses `expect().toPass({ timeout: 15_000 })` to wait for the card's secondary `getJob` fetch (library list omits `output_urls`).
-- All 12 tests (T36–T47) pass in ~24s on second run. First run takes ~3.5min waiting for pipeline completion.
+- T38 uses `[data-job-id="${jobId}"]` to target the exact fixture card (see T38/T39 notes above).
+- All 12 tests (T36–T47) pass in ~33s on second run. First run takes ~3.5min waiting for pipeline completion.
 
 **Implementation notes (2026-03-29):**
 - Tests use `moto` 5.1.22 with `us-west-2` region throughout.
 - Root `tests/conftest.py` provides single `autouse` `aws_services` fixture — prevents module-level env var conflicts when both suites run together.
 - `--import-mode=importlib` added to pytest config so conftest files from different subdirectories don't shadow each other.
 - Handler tests stub `src.steps.*` at the function level; only DynamoDB writes and S3 puts are exercised against moto.
-- All 36 tests run in ~4s locally.
+- All 36 tests run in ~4–5s locally.
+
+---
+
+### 7.6 Pre-commit Hook ✅ COMPLETE (2026-04-02)
+
+A git pre-commit hook runs both test suites automatically on every commit.
+
+**Location:** `.githooks/pre-commit` (versioned in the repo)
+
+**Install (one-time per clone):**
+
+```bash
+git config core.hooksPath .githooks
+```
+
+This tells git to load hooks from `.githooks/` instead of `.git/hooks/`. All hooks in `.githooks/` are committed to the repo and shared across the team.
+
+**What it runs:**
+
+1. **Python API + handler tests** (always) — `pytest tests/api/ tests/handlers/ -q --tb=short` via `.venv`. Runs in ~5s with no external dependencies (moto mocks all AWS calls).
+
+2. **Playwright E2E tests** (when session is available) — `npx playwright test` from `web/`. Runs in ~33s. Skipped gracefully if `web/.auth/session.json` doesn't exist (e.g., fresh clone before first local auth).
+
+**Skip hook for a one-off commit:**
+
+```bash
+SKIP_HOOKS=1 git commit -m "wip"
+```
+
+**First-time setup on a fresh clone:**
+
+```bash
+# 1. Install Python deps
+python3 -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"
+
+# 2. Install Node deps + Playwright browser
+cd web && npm ci && npx playwright install chromium --with-deps && cd ..
+
+# 3. Set env vars and run Playwright once to authenticate + seed the fixture job
+export TEST_USER_EMAIL=chintan@reachto.me
+export DEV_FRONTEND_URL=https://dev.sundayalbum.com
+export DEV_API_URL=https://nodcooz758.execute-api.us-west-2.amazonaws.com
+export AWS_ACCESS_KEY_ID=<from secrets.json>
+export AWS_SECRET_ACCESS_KEY=<from secrets.json>
+cd web && npx playwright test && cd ..
+
+# 4. Install the hook
+git config core.hooksPath .githooks
+```
+
+After step 3, `web/.auth/session.json` and `web/.auth/completed-job.json` are cached. The pre-commit hook reuses them on every subsequent commit — no re-authentication needed.
 
 ---
 
