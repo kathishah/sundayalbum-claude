@@ -1,12 +1,6 @@
 name: Test Web E2E (Playwright)
 
 on:
-  pull_request:
-    branches:
-      - main
-    paths:
-      - "web/**"
-      - ".github/workflows/test-web.yml"
   workflow_dispatch:
 
 jobs:
