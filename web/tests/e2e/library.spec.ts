@@ -107,9 +107,10 @@ test('T38: complete job shows output photos in the after-section', async ({ page
   await expect(page.getByRole('heading', { name: 'Library' })).toBeVisible()
 
   // The list endpoint omits output_urls; AlbumPageCard fires a getJob fetch on
-  // mount to hydrate them. Find the fixture card by its filename and wait for
-  // the after-section img to appear (up to 15 s for the secondary fetch).
-  const fixtureCard = page.locator('p[title="test_photo.jpg"]').locator('xpath=..')
+  // mount to hydrate them. Find the fixture card by its job_id (data-job-id
+  // attribute) — the library can accumulate multiple test_photo.jpg cards from
+  // previous runs, so matching by filename alone triggers strict-mode violations.
+  const fixtureCard = page.locator(`[data-job-id="${jobId}"]`)
   await expect(fixtureCard).toBeVisible({ timeout: 10_000 })
 
   // After the card's useEffect fetches the full job, output imgs appear
@@ -171,12 +172,14 @@ test('T39: delete button removes card from library', async ({ page }) => {
     // round-trip. handleDelete() calls removeJob() in a finally block — the
     // card only disappears after deleteJob() resolves, so we must wait for the
     // response, not just the click event.
+    // 25 s timeout: the delete Lambda can cold-start in ~10-15 s; first attempt
+    // after a period of inactivity would time out at 15 s. Retry is always warm.
     const deletionComplete = page.waitForResponse(
       (r) =>
         r.url().includes('/jobs/') &&
         r.request().method() === 'DELETE' &&
         r.status() === 200,
-      { timeout: 15_000 },
+      { timeout: 25_000 },
     )
     await deleteBtn.click()
     await deletionComplete
