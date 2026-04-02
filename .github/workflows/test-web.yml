@@ -7,6 +7,7 @@ on:
     paths:
       - "web/**"
       - ".github/workflows/test-web.yml"
+  workflow_dispatch:
 
 jobs:
   test:
