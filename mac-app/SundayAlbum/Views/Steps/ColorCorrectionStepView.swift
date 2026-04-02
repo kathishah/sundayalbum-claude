@@ -8,96 +8,75 @@ struct ColorCorrectionStepView: View {
     let photoIndex: Int   // 0-based
 
     @State private var image: NSImage?
-    @State private var brightness: Double = 0.05
     @State private var saturation: Double = 0.15
-    @State private var warmth: Double = 0.10
     @State private var sharpness: Double = 0.50
-    @State private var showBefore = false
 
     var photo: ExtractedPhoto? { job.extractedPhotos[safe: photoIndex] }
 
+    private let defaultSaturation = 0.15
+    private let defaultSharpness  = 0.50
+
+    var isDirty: Bool {
+        abs(saturation - defaultSaturation) > 0.001 || abs(sharpness - defaultSharpness) > 0.001
+    }
+
     var body: some View {
-        HStack(spacing: 0) {
+        VStack(spacing: 0) {
             // ── Image canvas ────────────────────────────────────────
             ZStack {
                 Color.saStone900
-
                 if let img = image {
                     Image(nsImage: img)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
+                        .padding(24)
                 } else {
                     ProgressView().controlSize(.large)
-                }
-
-                // Before/after toggle hint
-                VStack {
-                    Spacer()
-                    HStack {
-                        Spacer()
-                        Toggle(isOn: $showBefore) {
-                            Text(showBefore ? "Before" : "After")
-                                .font(.dmSans(11, weight: .medium))
-                                .foregroundStyle(Color.saStone300)
-                        }
-                        .toggleStyle(.button)
-                        .controlSize(.small)
-                        .padding(12)
-                    }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            // ── Controls panel ──────────────────────────────────────
-            VStack(alignment: .leading, spacing: 0) {
-                Text("Color Adjustments")
-                    .font(.dmSans(13, weight: .semibold))
-                    .foregroundStyle(Color.saStone700)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 20)
-                    .padding(.bottom, 16)
+            Divider()
 
-                Divider()
+            // ── Controls footer (horizontal) ─────────────────────────
+            HStack(spacing: 20) {
+                InlineSlider(
+                    label: "Saturation",
+                    icon: "drop",
+                    value: $saturation,
+                    range: 0...0.5
+                )
 
-                ScrollView {
-                    VStack(spacing: 20) {
-                        AdjustmentSlider(label: "Brightness",
-                                         icon: "sun.max",
-                                         value: $brightness,
-                                         range: -0.5...0.5)
-                        AdjustmentSlider(label: "Saturation",
-                                         icon: "drop",
-                                         value: $saturation,
-                                         range: -0.5...0.5)
-                        AdjustmentSlider(label: "Warmth",
-                                         icon: "thermometer.sun",
-                                         value: $warmth,
-                                         range: -0.5...0.5)
-                        AdjustmentSlider(label: "Sharpness",
-                                         icon: "camera.aperture",
-                                         value: $sharpness,
-                                         range: 0...1)
+                InlineSlider(
+                    label: "Sharpness",
+                    icon: "camera.aperture",
+                    value: $sharpness,
+                    range: 0...1.0
+                )
+
+                Spacer()
+
+                if isDirty {
+                    Button("Discard") {
+                        withAnimation(.saStandard) {
+                            saturation = defaultSaturation
+                            sharpness  = defaultSharpness
+                        }
                     }
-                    .padding(16)
-                }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
 
-                Divider()
-
-                Button("Reset to Defaults") {
-                    withAnimation(.saStandard) {
-                        brightness = 0.05
-                        saturation = 0.15
-                        warmth = 0.10
-                        sharpness = 0.50
+                    Button("Apply & Reprocess") {
+                        // TODO: wire to reprocess API when CLI bridge supports it
                     }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color.saAmber500)
+                    .controlSize(.small)
                 }
-                .buttonStyle(.plain)
-                .font(.dmSans(12))
-                .foregroundStyle(Color.saStone400)
-                .padding(16)
             }
-            .frame(width: 220)
-            .background(Color.saStone50)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+            .background(Color.saCard)
         }
         .task(id: photoIndex) {
             image = nil
@@ -106,36 +85,35 @@ struct ColorCorrectionStepView: View {
                 photoIndex: photoIndex + 1
             ) ?? photo?.imageURL ?? job.inputURL
             if let u = url { image = NSImage(contentsOf: u) }
+            saturation = defaultSaturation
+            sharpness  = defaultSharpness
         }
     }
 }
 
-// MARK: - Slider component
+// MARK: - Inline slider (label + track in a compact row)
 
-private struct AdjustmentSlider: View {
+private struct InlineSlider: View {
     let label: String
     let icon: String
     @Binding var value: Double
     let range: ClosedRange<Double>
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Image(systemName: icon)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Color.saStone400)
-                    .frame(width: 16)
-                Text(label)
-                    .font(.dmSans(12, weight: .medium))
-                    .foregroundStyle(Color.saStone700)
-                Spacer()
-                Text(String(format: "%+.0f%%", value * 100))
-                    .font(.jetbrainsMono(11))
-                    .foregroundStyle(Color.saStone400)
-                    .frame(width: 44, alignment: .trailing)
-            }
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 11))
+                .foregroundStyle(Color.saStone400)
+            Text(label)
+                .font(.dmSans(12, weight: .medium))
+                .foregroundStyle(Color.saStone700)
             Slider(value: $value, in: range)
                 .tint(Color.saAmber500)
+                .frame(width: 120)
+            Text(String(format: "%+.0f%%", value * 100))
+                .font(.jetbrainsMono(11))
+                .foregroundStyle(Color.saStone400)
+                .frame(width: 40, alignment: .trailing)
         }
     }
 }

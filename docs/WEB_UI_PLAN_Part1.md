@@ -1,9 +1,11 @@
-# Sunday Album Web UI — Implementation Plan
+# Sunday Album Web UI — Implementation Plan (Part 1 of 3)
+# Phases 0–2: Infrastructure, Auth, Pipeline Lambdas
 
-**Version:** 1.0
+**Version:** 1.4
 **Date:** March 2026
-**Status:** Approved
+**Status:** Phases 0–2 complete — branch `web-ui-implementation`
 **Companion Documents:** PRD_Album_Digitizer.md, UI_Design_Album_Digitizer.md, PHASED_PLAN_Claude_Code.md
+**See also:** WEB_UI_PLAN_Part2.md (Phase 3: ✅), WEB_UI_PLAN_Part3.md (Phases 4–6: ✅), WEB_UI_PLAN_Part4.md (Phases 7–9: Testing, Admin, Prod)
 
 ---
 
@@ -23,7 +25,7 @@ Sunday Album has a feature-complete Python CLI pipeline and a native macOS Swift
 
 ---
 
-## Phase 0: Refactor Existing Codebase for Pluggable Storage
+## Phase 0: Refactor Existing Codebase for Pluggable Storage ✅ COMPLETE (2026-03-25)
 
 **Goal:** Abstract file I/O so the same pipeline code works with local filesystem (CLI/macOS) and S3 (web). Each step becomes independently callable with clear serializable I/O. CLI and macOS app continue to work unchanged.
 
@@ -155,22 +157,28 @@ def run(storage: StorageBackend, stem: str, config: PipelineConfig,
 
 Rewrite the body of `Pipeline.process()` to call `steps.load.run(storage, stem, config)`, `steps.normalize.run(storage, stem, config)`, etc. in sequence. This is a pure refactor — same behavior, same output, but using the storage abstraction and step functions.
 
-### 0.6 Verify CLI + macOS App Still Work
+### 0.6 Verify CLI + macOS App Still Work ✅
 
-- Run `python -m src.cli process test-images/IMG_three_pics_normal.HEIC --output ./output/ --debug`
-- Confirm all debug images and output JPEGs are identical to pre-refactor
-- Run existing tests: `pytest tests/ -v`
+- Run `python -m src.cli process test-images/IMG_cave_normal.HEIC --output ./output/ --no-openai-glare --no-ai-orientation`
+- All debug images written flat to `debug/` with stem prefix (e.g. `IMG_cave_normal_01_loaded.jpg`)
+- Output JPEG written to `output/SundayAlbum_IMG_cave_normal_Photo01.jpg`
+- `pytest tests/ -v` — 72 passed, 6 skipped ✅
 
-**Files modified in Phase 0:**
-- `src/pipeline.py` — use StorageBackend + step functions
-- `src/utils/debug.py` — accept StorageBackend
-- New: `src/storage/__init__.py`, `backend.py`, `local.py`
-- New: `src/steps/__init__.py`, `load.py`, `normalize.py`, `page_detect.py`, `perspective.py`, `photo_detect.py`, `photo_split.py`, `ai_orient.py`, `glare_remove.py`, `geometry.py`, `color_restore.py`
-- `src/cli.py` — pass `LocalStorage` to Pipeline
+**Implementation notes vs original plan:**
+- `src/utils/debug.py` was NOT modified — pipeline steps now write to storage directly; `save_debug_image` is only used by CLI utility commands (compare, check).
+- Debug images are always written (even without `--debug` flag) because intermediate images serve as inter-step state. This is intentional for the storage-driven architecture.
+- Output filenames always use `_PhotoNN` suffix (e.g. `SundayAlbum_{stem}_Photo01.jpg`), even for single photos, matching the S3 key convention.
+
+**Files added/modified in Phase 0:**
+- New: `src/storage/__init__.py`, `src/storage/backend.py`, `src/storage/local.py`
+- New: `src/steps/__init__.py`, `src/steps/load.py`, `src/steps/normalize.py`, `src/steps/page_detect.py`, `src/steps/perspective.py`, `src/steps/photo_detect.py`, `src/steps/photo_split.py`, `src/steps/ai_orient.py`, `src/steps/glare_remove.py`, `src/steps/geometry.py`, `src/steps/color_restore.py`
+- Modified: `src/pipeline.py` — uses StorageBackend + step functions
+- Modified: `src/cli.py` — creates LocalStorage per file, passes to pipeline
+- Modified: `.gitignore` — added `uploads/`
 
 ---
 
-## Phase 1: AWS Infrastructure + Auth + Upload
+## Phase 1: AWS Infrastructure + Auth + Upload ✅ COMPLETE (2026-03-25)
 
 ### 1.1 S3 Bucket: `sundayalbum-data`
 
@@ -263,15 +271,34 @@ New: `api/` directory at project root:
 
 AWS CDK stack defining all resources. New: `infra/` directory.
 
-### 1.7 Verification
+### 1.7 Verification ✅
 
-- Sign in with email, receive code, verify
-- Create job, get presigned upload URL, upload HEIC file
-- Confirm file lands in S3 at `{user_hash}/uploads/{filename}`
+- Sign in with email, receive code, verify ✅
+- Create job, get presigned upload URL, upload HEIC file ✅
+- Confirm file lands in S3 at `{user_hash}/uploads/{filename}` ✅
+- POST /jobs/{jobId}/start responds with processing status ✅
+- GET /jobs/{jobId} returns job state with correct metadata ✅
+- GET /jobs lists all user jobs in reverse-ULID order ✅
+- POST /auth/logout revokes token; subsequent requests return 401 ✅
+
+**Implementation notes:**
+- CDK stack name: `SundayAlbumStack` in `infra/infra/sundayalbum_stack.py`
+- API base URL: `https://e1f6o1ah49.execute-api.us-west-2.amazonaws.com`
+- S3 bucket: `sundayalbum-data-680073251743-us-west-2`
+- DynamoDB tables: `sa-sessions` (GSI: `token-index`), `sa-jobs` (DynamoDB Streams enabled), `sa-ws-connections` (GSI: `job-index`)
+- Lambda code in `api/` directory — shared zip across all 3 functions
+- SES sender uses verified identity; configured via `ses_sender_email` CDK context key
+- S3 client uses regional endpoint (`s3.{REGION}.amazonaws.com`) + SigV4 to avoid 307 redirects on presigned PUT URLs
+- `session_token` omitted from DynamoDB Item when not yet set (GSI key cannot be empty string)
+- `POST /jobs/{jobId}/start` is a no-op placeholder until Step Functions state machine is added in Phase 2
+
+**Files added in Phase 1:**
+- New: `infra/app.py` (updated), `infra/infra/sundayalbum_stack.py`
+- New: `api/__init__.py`, `api/common.py`, `api/auth.py`, `api/jobs.py`, `api/websocket.py`
 
 ---
 
-## Phase 2: Pipeline Lambdas + Step Functions
+## Phase 2: Pipeline Lambdas + Step Functions ✅ COMPLETE (2026-03-26)
 
 ### 2.1 Lambda Container Image
 
@@ -343,129 +370,31 @@ Each state updates DynamoDB `sa-jobs.current_step`. DynamoDB Streams trigger Web
 | `sa-geometry` | `handlers/geometry.handler` | 1024MB | 30s | Passthrough currently |
 | `sa-color-restore` | `handlers/color_restore.handler` | 1024MB | 30s | WB + deyellow + CLAHE + sharpen |
 
-### 2.6 Verification
+### 2.6 Verification ✅
 
-- Trigger pipeline via `POST /jobs/{jobId}/start` for a HEIC test image
-- All 10 Lambda steps run in sequence, per-photo steps fan out
-- Output JPEGs appear in `{user_hash}/output/`
-- Debug images appear in `{user_hash}/debug/`
-- DynamoDB job record shows `status: complete`
+- Trigger pipeline via `POST /jobs/{jobId}/start` for `IMG_three_pics_normal.HEIC` ✅
+- All 11 Lambda steps run in sequence, per-photo steps fan out in Map state (MaxConcurrency=4) ✅
+- 3 photos detected and processed ✅
+- Output JPEGs appear at `{user_hash}/output/SundayAlbum_{stem}_PhotoNN.jpg` ✅
+- DynamoDB job record shows `status: complete`, `photo_count: 3`, `processing_time: 44s` ✅
+- Presigned GET URLs in `GET /jobs/{jobId}` response work for all 3 output photos ✅
 
----
+**Implementation notes:**
+- Lambda container image built from repo root with `--platform linux/arm64 --provenance=false` (OCI attestation manifests are not supported by Lambda)
+- Docker CMD override set via `DockerImageCode.from_image_asset(cmd=[handler])` — CDK deduplicates the image build; each function gets its own Lambda imageConfig.command override
+- Step Functions `OutputPath: "$.Payload"` unwraps the Lambda response wrapper so each handler receives `{user_hash, job_id, stem, ...}` directly (not `{Payload: {...}}`)
+- Memory raised to 3008MB for all image-processing Lambdas (24MP HEIC decoding requires ~600MB float32 array + Python overhead; 1024MB caused OOM in Load step)
+- `start_time` and `config` must be included in Step Functions execution input from `_handle_start()` — the PrepareMap Pass state passes them through to each per-photo task
+- `finalize_job()` prefixes `output_keys` with `{user_hash}/` so DynamoDB stores full S3 paths; `jobs.py` `presign_get()` can then generate correct presigned URLs
+- Step Functions state machine ARN: `arn:aws:states:us-west-2:680073251743:stateMachine:sa-pipeline`
+- ECR repo: `680073251743.dkr.ecr.us-west-2.amazonaws.com/cdk-hnb659fds-container-assets-680073251743-us-west-2`
 
-## Phase 3: Real-time Progress + Library UI
-
-### 3.1 WebSocket Progress
-
-- API Gateway WebSocket API + broadcaster Lambda
-- DynamoDB Streams on `sa-jobs` table → Lambda → push to connected clients
-- Frontend `useJobProgress` hook: WebSocket primary, polling `GET /jobs/{jobId}` every 3s fallback
-
-Progress message format:
-```json
-{
-  "type": "step_update",
-  "jobId": "...",
-  "step": "sa-glare-remove",
-  "detail": "Photo 2 of 3",
-  "progress": 0.55
-}
-```
-
-### 3.2 Frontend: Library Page
-
-Replicate `mac-app/SundayAlbum/Views/LibraryView.swift`:
-
-- Adaptive grid of `AlbumPageCard` components
-- `DropZone` when empty (drag-drop + "Choose Files" button)
-- Cards show: before thumbnail → progress wheel → after thumbnails
-- Single-click card → expanded overlay
-- Double-click card → navigate to step detail
-- Real-time progress updates from WebSocket → Zustand store → re-render
-
-### 3.3 Frontend: Auth Pages
-
-- `/login` — email input → code verification → redirect to `/library`
-
-### 3.4 Design System (Tailwind config)
-
-Translate from `mac-app/SundayAlbum/Theme/DesignSystem.swift`:
-- Colors: `sa-amber-{50..700}`, `sa-stone-{50..950}`, `sa-success`, `sa-error`
-- Fonts: Fraunces (display), DM Sans (body), JetBrains Mono (mono)
-- Animations: `sa-standard` (200ms), `sa-slide` (350ms), `sa-reveal` (600ms)
-
-### 3.5 Verification
-
-- Upload file from browser, watch card progress update in real-time
-- See output thumbnails appear when processing completes
-
----
-
-## Phase 4: Step Detail Views
-
-Replicate `mac-app/SundayAlbum/Views/StepDetailView.swift` and all step-specific views.
-
-### 4.1 StepDetailLayout
-
-3-pane layout: breadcrumb (top), StepTree (left 196px), StepCanvas (right).
-
-### 4.2 Step-Specific Views
-
-| View | macOS Reference | Key Interactions |
-|------|----------------|------------------|
-| PageDetectionView | `Views/Steps/PageDetectionStepView.swift` | SVG overlay with draggable corner handles |
-| PhotoSplitView | `Views/Steps/PhotoSplitStepView.swift` | Colored region rectangles |
-| OrientationView | `Views/Steps/OrientationStepView.swift` | Rotation picker (0/90/180/270) + scene desc editor |
-| GlareRemovalView | `Views/Steps/GlareRemovalStepView.swift` | Before/after with `.saReveal` animation |
-| ColorCorrectionView | `Views/Steps/ColorCorrectionStepView.swift` | Sliders (brightness, saturation, warmth, sharpness) |
-| ResultsView | `Views/Steps/ResultsStepView.swift` | Photo grid + ComparisonView + export/download |
-
-All images loaded from S3 via presigned URLs from `GET /jobs/{jobId}` response (which includes `debug_keys` map).
-
-### 4.3 Verification
-
-- Navigate to step detail for a completed job
-- Click through all steps in the tree, see corresponding images
-- Verify animations match macOS app timing
-
----
-
-## Phase 5: Re-processing + Polish
-
-### 5.1 Re-process from Step
-
-- `POST /jobs/{jobId}/reprocess { from_step, photo_index, overrides }`
-- Backend starts a new Step Functions execution with `start_from` parameter
-- State machine uses Choice states to skip steps before `start_from`
-- Overrides (e.g., adjusted corners, rotation change) saved to `debug/{stem}_overrides.json`
-
-### 5.2 Wire Up Interactive Controls
-
-- PageDetectionView corner drag → reprocess from perspective
-- OrientationView rotation change → reprocess from ai_orient
-- ColorCorrectionView slider change → reprocess from color_restore
-
-### 5.3 Polish
-
-- Error handling: retry buttons, error messages per step
-- Mobile responsive: library + step detail adapt to smaller screens
-- Loading states and skeleton placeholders for images
-
-### 5.4 Verification
-
-- Adjust corners in PageDetectionView, see pipeline re-run from perspective step
-- Change rotation, see glare removal re-run with correct orientation
-
----
-
-## Phase 6: Production Hardening
-
-- CloudFront distribution for frontend (S3 static hosting)
-- CORS configuration on API Gateway
-- Per-user rate limiting (3 concurrent jobs, 50 photos/day)
-- CloudWatch dashboards + alarms
-- "Delete my data" endpoint
-- Provisioned concurrency on critical Lambdas (optional, for cold start mitigation)
+**Files added in Phase 2:**
+- New: `src/storage/s3.py` — S3Storage backend (boto3, regional endpoint, SigV4)
+- New: `handlers/__init__.py`, `handlers/common.py`, `handlers/load.py`, `handlers/normalize.py`, `handlers/page_detect.py`, `handlers/perspective.py`, `handlers/photo_detect.py`, `handlers/photo_split.py`, `handlers/ai_orient.py`, `handlers/glare_remove.py`, `handlers/geometry.py`, `handlers/color_restore.py`, `handlers/finalize.py`
+- New: `Dockerfile`, `requirements-lambda.txt`, `.dockerignore`
+- Modified: `infra/infra/sundayalbum_stack.py` — added 11 container Lambda functions + Step Functions state machine
+- Modified: `api/jobs.py` — `_handle_start()` now sends `start_time` + `config` in execution input
 
 ---
 

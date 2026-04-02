@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# .githooks/pre-commit
+#
+# Runs on every commit:
+#   1. Python API + handler tests (pytest + moto, ~5 s, no real AWS)
+#   2. Playwright E2E tests — only when web/.auth/session.json exists
+#      (run `npx playwright test` once after deploy to create the session file)
+#
+# Install into the active repo:
+#   git config core.hooksPath .githooks
+# Or copy manually:
+#   cp .githooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+#
+# Skip all checks for a one-off commit:
+#   SKIP_HOOKS=1 git commit ...
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+if [ "${SKIP_HOOKS:-0}" = "1" ]; then
+  echo "pre-commit: SKIP_HOOKS=1 — skipping all checks"
+  exit 0
+fi
+
+echo ""
+echo "pre-commit: running checks..."
+
+# ── 1. Python API + handler tests ─────────────────────────────────────────────
+echo ""
+echo "  ▶ API + handler tests (pytest / moto — no real AWS)"
+
+VENV_PYTHON=""
+if [ -f "$REPO_ROOT/.venv/bin/python" ]; then
+  VENV_PYTHON="$REPO_ROOT/.venv/bin/python"
+elif command -v python3 &>/dev/null; then
+  VENV_PYTHON="python3"
+else
+  echo "  ✗ Python not found — install or activate the venv"
+  exit 1
+fi
+
+PYTHONPATH="$REPO_ROOT" "$VENV_PYTHON" -m pytest tests/api/ tests/handlers/ \
+  -q --tb=short 2>&1 | sed 's/^/    /'
+
+echo "  ✓ API + handler tests passed"
+
+# ── 2. Playwright E2E tests ────────────────────────────────────────────────────
+echo ""
+
+SESSION_FILE="$REPO_ROOT/web/.auth/session.json"
+PLAYWRIGHT_BIN="$REPO_ROOT/web/node_modules/.bin/playwright"
+
+if [ ! -f "$SESSION_FILE" ]; then
+  echo "  ⚠  Playwright skipped — no session file found"
+  echo "     Run 'npx playwright test' from web/ once after deploying to create it"
+  echo "     Required env vars: TEST_USER_EMAIL, DEV_FRONTEND_URL, DEV_API_URL, AWS_ACCESS_KEY_ID"
+elif [ ! -f "$PLAYWRIGHT_BIN" ]; then
+  echo "  ⚠  Playwright skipped — node_modules not installed"
+  echo "     Run 'npm ci' from web/ first"
+else
+  echo "  ▶ Playwright E2E tests (against dev.sundayalbum.com)"
+  : "${DEV_FRONTEND_URL:=https://dev.sundayalbum.com}"
+  : "${DEV_API_URL:=https://nodcooz758.execute-api.us-west-2.amazonaws.com}"
+
+  (cd "$REPO_ROOT/web" && \
+    DEV_FRONTEND_URL="$DEV_FRONTEND_URL" \
+    DEV_API_URL="$DEV_API_URL" \
+    "$PLAYWRIGHT_BIN" test 2>&1 | sed 's/^/    /')
+
+  echo "  ✓ Playwright E2E tests passed"
+fi
+
+echo ""
+echo "pre-commit: all checks passed"
+echo ""
