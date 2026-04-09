@@ -128,11 +128,18 @@ def restore_fading(
     hsv = cv2.cvtColor(img_uint8, cv2.COLOR_RGB2HSV).astype(np.float32)
 
     S = hsv[:, :, 1]  # [0, 255]
+    V = hsv[:, :, 2]  # [0, 255]
     mean_sat_before = float(np.mean(S)) / 255.0
 
-    # Boost inversely proportional to existing saturation — vivid colours
-    # barely change; faded/muted ones receive the most lift.
-    boost_per_pixel = vibrance_boost * (1.0 - S / 255.0)
+    # Boost is weighted by two factors:
+    #   1. Saturation weight:  (1 - S/255) — already-vivid colours get less boost
+    #   2. Value weight:       (1 - (V/255)^2) — near-white/highlight pixels get
+    #      near-zero boost.  This prevents undefined/noisy Hue values in bright
+    #      areas (white car, oily skin, sky) from being amplified into a visible
+    #      pink or yellow tint.
+    sat_weight = 1.0 - S / 255.0
+    value_weight = 1.0 - (V / 255.0) ** 2
+    boost_per_pixel = vibrance_boost * sat_weight * value_weight
     S_new = np.clip(S + boost_per_pixel * 255.0, 0.0, 255.0)
     hsv[:, :, 1] = S_new
 

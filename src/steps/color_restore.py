@@ -51,7 +51,7 @@ def run(
         assess_white_balance_quality,
         remove_yellowing_adaptive,
         restore_fading,
-        enhance_adaptive,
+        enhance,
     )
 
     idx = f"{photo_index:02d}"
@@ -120,8 +120,13 @@ def run(
         f"debug/{stem}_13_photo_{idx}_restored.jpg", photo, format="jpeg", quality=95
     )
 
-    # 4. Sharpening
-    photo, enhance_info = enhance_adaptive(photo)
+    # 4. Sharpening only — no sigmoid contrast (contrast is handled by color restore)
+    photo, enhance_info = enhance(
+        photo,
+        sharpen_radius=config.sharpen_radius,
+        sharpen_amount=config.sharpen_amount,
+        apply_contrast=False,
+    )
     result["sharpen"] = {
         "sharpen_amount": float(enhance_info.get("sharpen_amount", 0.0)),
         "sharpness_improvement": float(enhance_info.get("sharpness_improvement", 1.0)),
