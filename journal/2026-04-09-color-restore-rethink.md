@@ -153,18 +153,8 @@ Use the existing batch mode to process all HEIC files in one command:
 ```bash
 source .venv/bin/activate
 
-python -m src.cli process test-images/ \
-  --batch \
-  --filter "*.HEIC" \
-  --output ./output/ \
-  --debug \
-  --no-openai-glare \
-  --no-ai-orientation \
-  --steps load,normalize,page_detect,photo_detect,white_balance,color_restore,deyellow,sharpen
+python -m src.cli process test-images/ --batch --filter "*.HEIC" --output ./output/ --debug
 ```
-
-Using `--no-openai-glare` and `--no-ai-orientation` to avoid API costs and focus only on the
-color restore change. The glare and orientation debug outputs are irrelevant here.
 
 ### 2. What to inspect manually
 
