@@ -191,6 +191,14 @@ Before deleting the old `restore_fading()` code, keep it as `_restore_fading_cla
 
 ---
 
+## Branch Policy
+
+All implementation work happens exclusively on `feature/color-restore-enhancements`. No
+changes to `main`. Commit and push to the remote branch after each logical step (e.g. after
+Stage 1 is implemented, after Stage 2, after config knobs are added, after tests pass).
+
+---
+
 ## Files to Modify
 
 | File | Change |
