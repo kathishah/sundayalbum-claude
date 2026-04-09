@@ -1,8 +1,21 @@
-"""Fade restoration for aged photos using CLAHE and saturation adjustment.
+"""Fade restoration for aged photos using adaptive brightness lift and vibrance.
 
-This module restores contrast and color vibrancy to faded photos using
-Contrast Limited Adaptive Histogram Equalization (CLAHE) and selective
-saturation boosting.
+Replaces the previous CLAHE-based approach which caused two regressions:
+  - Dimming: CLAHE redistributed luminance across local tiles, pulling highlights
+    down on already well-exposed photos.
+  - Grain: CLAHE amplified sensor noise in smooth-toned regions (sky, walls).
+
+The new algorithm has three self-limiting stages:
+  1. White-point stretch  — scale so the 99th-percentile luminance hits 0.96.
+     Already-bright photos barely change; faded ones lift naturally.
+  2. Shadow lift          — tone-curve lift applied only to dark pixels, leaving
+     highlights untouched.  Skipped entirely when the image is already bright.
+     Preserves intentionally dark scenes (cave, candlelit dinner).
+  3. Vibrance saturation  — per-pixel saturation boost inversely proportional to
+     existing saturation.  Already-vivid colours are protected; faded/muted ones
+     lift the most.
+
+A brightness ceiling guard at the end scales back if the mean luminance overshoots.
 """
 
 import logging
@@ -14,269 +27,300 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
 def restore_fading(
     photo: np.ndarray,
-    clahe_clip_limit: float = 2.0,
-    clahe_grid_size: tuple = (8, 8),
-    saturation_boost: float = 0.15,
-    auto_detect_fading: bool = True
+    wp_percentile: float = 99.0,
+    wp_target: float = 0.96,
+    shadow_lift_max: float = 0.15,
+    brightness_ceiling: float = 0.75,
+    vibrance_boost: float = 0.25,
 ) -> Tuple[np.ndarray, dict]:
-    """Restore contrast and color to faded photos.
-
-    Uses CLAHE (Contrast Limited Adaptive Histogram Equalization) on the L channel
-    in LAB color space to restore local contrast. Optionally boosts saturation if
-    the photo is detected to be faded.
+    """Restore exposure and colour vibrancy to a faded photo.
 
     Args:
-        photo: Input image as float32 RGB [0, 1], shape (H, W, 3)
-        clahe_clip_limit: CLAHE clip limit (higher = more contrast, but more artifacts)
-        clahe_grid_size: CLAHE grid size (smaller = more local, larger = more global)
-        saturation_boost: Saturation multiplier (0.0 = no boost, 0.15 = 15% increase)
-        auto_detect_fading: Only boost saturation if fading detected
+        photo: Input image as float32 RGB [0, 1], shape (H, W, 3).
+        wp_percentile: Percentile of luminance used as the white-point
+            reference (default 99 — ignores the top 1 % as potential glare).
+        wp_target: Target value that ``wp_percentile`` is scaled to.
+            0.96 leaves 4 % headroom to avoid clipping.
+        shadow_lift_max: Maximum additive lift applied to the darkest pixels
+            in Stage 2.  0.15 ≈ lifting pure black to 15 % grey.
+        brightness_ceiling: If mean luminance after all stages exceeds this
+            value the image is scaled back proportionally.  Prevents
+            over-brightening images that are already well-exposed.
+        vibrance_boost: Base per-pixel saturation boost for Stage 3.
+            The effective boost is ``vibrance_boost * (1 − current_sat)``,
+            so already-vivid pixels receive near-zero additional saturation.
 
     Returns:
         Tuple of:
-            - Restored image as float32 RGB [0, 1]
-            - Info dict with metrics about the restoration
+            - Restored image as float32 RGB [0, 1].
+            - Info dict with metrics about each stage.
     """
     if photo.ndim != 3 or photo.shape[2] != 3:
-        logger.warning(f"Invalid photo shape: {photo.shape}, expected (H, W, 3)")
-        return photo, {'error': 'invalid_shape'}
+        logger.warning("restore_fading: invalid shape %s, returning unchanged", photo.shape)
+        return photo, {"error": "invalid_shape"}
 
-    # Assess fading before restoration
-    fading_info_before = assess_fading(photo)
-    logger.debug(
-        f"Fading assessment before: contrast={fading_info_before['contrast_score']:.3f}, "
-        f"saturation={fading_info_before['mean_saturation']:.3f}"
-    )
+    result: dict = {}
+    img = photo.copy()
 
-    # Convert to LAB color space
-    photo_uint8 = (photo * 255).astype(np.uint8)
-    lab = cv2.cvtColor(photo_uint8, cv2.COLOR_RGB2LAB)
+    # ------------------------------------------------------------------
+    # Stage 1: White-point stretch
+    # ------------------------------------------------------------------
+    lum = _luminance(img)
+    wp_before = float(np.percentile(lum, wp_percentile))
+    result["wp_before"] = wp_before
 
-    # Extract L, a, b channels
-    L, a, b = cv2.split(lab)
-
-    # Apply CLAHE to L channel (contrast restoration)
-    clahe = cv2.createCLAHE(
-        clipLimit=clahe_clip_limit,
-        tileGridSize=clahe_grid_size
-    )
-    L_clahe = clahe.apply(L)
-
-    # Measure contrast improvement
-    contrast_before = _compute_local_contrast(L)
-    contrast_after = _compute_local_contrast(L_clahe)
-    contrast_improvement = contrast_after / (contrast_before + 1e-6)
-
-    logger.debug(
-        f"CLAHE applied: contrast improved by {contrast_improvement:.2f}x "
-        f"(before={contrast_before:.3f}, after={contrast_after:.3f})"
-    )
-
-    # Merge back to LAB
-    lab_clahe = cv2.merge([L_clahe, a, b])
-
-    # Convert back to RGB
-    rgb_clahe_uint8 = cv2.cvtColor(lab_clahe, cv2.COLOR_LAB2RGB)
-    rgb_clahe = rgb_clahe_uint8.astype(np.float32) / 255.0
-
-    # Saturation boost (if needed)
-    saturation_boost_applied = 0.0
-    if auto_detect_fading:
-        # Only boost if fading detected
-        if fading_info_before['is_faded']:
-            # Adaptive boost: more boost for more faded photos
-            fading_severity = fading_info_before['fading_score']
-            adaptive_boost = saturation_boost * min(1.0, fading_severity / 0.3)
-            rgb_restored = _boost_saturation(rgb_clahe, adaptive_boost)
-            saturation_boost_applied = adaptive_boost
-            logger.info(
-                f"Fading detected (score={fading_severity:.3f}), "
-                f"applying saturation boost: {adaptive_boost:.3f}"
-            )
-        else:
-            rgb_restored = rgb_clahe
-            logger.debug("No fading detected, skipping saturation boost")
+    if wp_before > 0.05:
+        scale = wp_target / wp_before
+        scale = float(np.clip(scale, 1.0, 2.0))  # never darken; cap lift at 2×
+        img = np.clip(img * scale, 0.0, 1.0)
+        logger.debug(
+            "restore_fading: Stage 1 — wp=%.3f → scale=%.3f", wp_before, scale
+        )
     else:
-        # Always apply fixed boost
-        rgb_restored = _boost_saturation(rgb_clahe, saturation_boost)
-        saturation_boost_applied = saturation_boost
+        scale = 1.0
+        logger.debug("restore_fading: Stage 1 skipped — image nearly black (wp=%.3f)", wp_before)
 
-    # Assess fading after restoration
-    fading_info_after = assess_fading(rgb_restored)
+    result["wp_scale"] = scale
+
+    # ------------------------------------------------------------------
+    # Stage 2: Shadow lift (skipped when image already bright)
+    # ------------------------------------------------------------------
+    mean_lum_after_stretch = float(np.mean(_luminance(img)))
+    result["mean_lum_after_stretch"] = mean_lum_after_stretch
+
+    brightness_threshold = 0.60
+    if mean_lum_after_stretch < brightness_threshold:
+        # Intensity proportional to how far below the threshold we are
+        intensity = np.clip(
+            (brightness_threshold - mean_lum_after_stretch) / brightness_threshold,
+            0.0,
+            1.0,
+        )
+        # Per-pixel lift: quadratic falloff — dark pixels get max_lift,
+        # bright pixels (near 1.0) get ~0.  Applied uniformly per channel
+        # so colour ratios are preserved.
+        lift = shadow_lift_max * intensity * (1.0 - img) ** 2
+        img = np.clip(img + lift, 0.0, 1.0)
+        logger.debug(
+            "restore_fading: Stage 2 — mean_lum=%.3f, intensity=%.3f, lift_max=%.3f",
+            mean_lum_after_stretch,
+            intensity,
+            shadow_lift_max * intensity,
+        )
+        result["shadow_lift_intensity"] = float(intensity)
+    else:
+        logger.debug(
+            "restore_fading: Stage 2 skipped — image already bright (mean_lum=%.3f)",
+            mean_lum_after_stretch,
+        )
+        result["shadow_lift_intensity"] = 0.0
+
+    # ------------------------------------------------------------------
+    # Stage 3: Vibrance-style saturation boost
+    # ------------------------------------------------------------------
+    img_uint8 = (img * 255.0).astype(np.uint8)
+    hsv = cv2.cvtColor(img_uint8, cv2.COLOR_RGB2HSV).astype(np.float32)
+
+    S = hsv[:, :, 1]  # [0, 255]
+    mean_sat_before = float(np.mean(S)) / 255.0
+
+    # Boost inversely proportional to existing saturation — vivid colours
+    # barely change; faded/muted ones receive the most lift.
+    boost_per_pixel = vibrance_boost * (1.0 - S / 255.0)
+    S_new = np.clip(S + boost_per_pixel * 255.0, 0.0, 255.0)
+    hsv[:, :, 1] = S_new
+
+    img = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2RGB).astype(np.float32) / 255.0
+    mean_sat_after = float(np.mean(S_new)) / 255.0
+
+    logger.debug(
+        "restore_fading: Stage 3 — saturation %.3f → %.3f", mean_sat_before, mean_sat_after
+    )
+    result["saturation_before"] = mean_sat_before
+    result["saturation_after"] = mean_sat_after
+
+    # ------------------------------------------------------------------
+    # Brightness ceiling guard
+    # ------------------------------------------------------------------
+    mean_lum_final = float(np.mean(_luminance(img)))
+    if mean_lum_final > brightness_ceiling:
+        scale_down = brightness_ceiling / mean_lum_final
+        img = np.clip(img * scale_down, 0.0, 1.0)
+        logger.debug(
+            "restore_fading: ceiling guard — mean_lum=%.3f → scaled down by %.3f",
+            mean_lum_final,
+            scale_down,
+        )
+        result["ceiling_scale_down"] = float(scale_down)
+        mean_lum_final = float(np.mean(_luminance(img)))
+    else:
+        result["ceiling_scale_down"] = 1.0
+
+    result["mean_lum_final"] = mean_lum_final
 
     logger.info(
-        f"Fade restoration complete: contrast {contrast_improvement:.2f}x, "
-        f"saturation {fading_info_before['mean_saturation']:.3f} → "
-        f"{fading_info_after['mean_saturation']:.3f}"
+        "restore_fading: wp_scale=%.2f  shadow_lift=%.2f  sat %.3f→%.3f  mean_lum=%.3f",
+        scale,
+        result["shadow_lift_intensity"],
+        mean_sat_before,
+        mean_sat_after,
+        mean_lum_final,
     )
 
-    return rgb_restored, {
-        'contrast_before': float(contrast_before),
-        'contrast_after': float(contrast_after),
-        'contrast_improvement': float(contrast_improvement),
-        'saturation_before': fading_info_before['mean_saturation'],
-        'saturation_after': fading_info_after['mean_saturation'],
-        'saturation_boost_applied': float(saturation_boost_applied),
-        'was_faded': fading_info_before['is_faded'],
-        'fading_score_before': fading_info_before['fading_score'],
-        'fading_score_after': fading_info_after['fading_score'],
-    }
-
-
-def _compute_local_contrast(gray_image: np.ndarray, kernel_size: int = 5) -> float:
-    """Compute average local contrast in an image.
-
-    Uses standard deviation in local neighborhoods as a measure of contrast.
-
-    Args:
-        gray_image: Grayscale image as uint8
-        kernel_size: Size of local neighborhood
-
-    Returns:
-        Average local standard deviation (measure of contrast)
-    """
-    # Convert to float for computation
-    img_float = gray_image.astype(np.float32)
-
-    # Compute local mean
-    kernel = np.ones((kernel_size, kernel_size), np.float32) / (kernel_size ** 2)
-    local_mean = cv2.filter2D(img_float, -1, kernel)
-
-    # Compute local variance
-    local_mean_sq = cv2.filter2D(img_float ** 2, -1, kernel)
-    local_var = local_mean_sq - local_mean ** 2
-    local_var = np.maximum(local_var, 0)  # Numerical stability
-
-    # Standard deviation is square root of variance
-    local_std = np.sqrt(local_var)
-
-    # Average local std across the image
-    avg_contrast = np.mean(local_std)
-
-    return float(avg_contrast)
-
-
-def _boost_saturation(photo: np.ndarray, boost: float) -> np.ndarray:
-    """Boost color saturation in HSV space.
-
-    Args:
-        photo: Input image as float32 RGB [0, 1]
-        boost: Saturation multiplier (e.g., 0.15 = increase by 15%)
-
-    Returns:
-        Image with boosted saturation as float32 RGB [0, 1]
-    """
-    if boost <= 0.0:
-        return photo
-
-    # Convert to HSV
-    photo_uint8 = (photo * 255).astype(np.uint8)
-    hsv = cv2.cvtColor(photo_uint8, cv2.COLOR_RGB2HSV).astype(np.float32)
-
-    # Boost saturation channel
-    hsv[:, :, 1] = np.clip(hsv[:, :, 1] * (1.0 + boost), 0, 255)
-
-    # Convert back to RGB
-    hsv_uint8 = hsv.astype(np.uint8)
-    rgb_boosted_uint8 = cv2.cvtColor(hsv_uint8, cv2.COLOR_HSV2RGB)
-    rgb_boosted = rgb_boosted_uint8.astype(np.float32) / 255.0
-
-    return rgb_boosted
-
-
-def assess_fading(photo: np.ndarray) -> dict:
-    """Assess if a photo is faded and needs restoration.
-
-    Checks both contrast (using local standard deviation) and color saturation.
-
-    Args:
-        photo: Input image as float32 RGB [0, 1]
-
-    Returns:
-        Dict with 'is_faded' (bool), 'fading_score' (0-1), 'contrast_score',
-        'mean_saturation', and 'saturation_percentile_25'
-    """
-    # Convert to grayscale to measure contrast
-    photo_uint8 = (photo * 255).astype(np.uint8)
-    gray = cv2.cvtColor(photo_uint8, cv2.COLOR_RGB2GRAY)
-
-    # Compute contrast
-    contrast_score = _compute_local_contrast(gray, kernel_size=5)
-    # Normalize: typical unfaded photos have contrast ~15-30
-    normalized_contrast = contrast_score / 25.0
-
-    # Compute saturation
-    hsv = cv2.cvtColor(photo_uint8, cv2.COLOR_RGB2HSV)
-    saturation = hsv[:, :, 1].astype(np.float32) / 255.0
-
-    mean_saturation = np.mean(saturation)
-    saturation_p25 = np.percentile(saturation, 25)
-
-    # Fading score: combination of low contrast and low saturation
-    # Typical unfaded photos: contrast ~1.0, saturation ~0.3-0.5
-    # Faded photos: contrast <0.6, saturation <0.2
-    contrast_deficit = max(0.0, 0.8 - normalized_contrast)  # How much below normal
-    saturation_deficit = max(0.0, 0.3 - mean_saturation)  # How much below normal
-
-    fading_score = (contrast_deficit + saturation_deficit * 2) / 3.0  # Weight saturation more
-
-    # Threshold: fading_score > 0.2 indicates noticeable fading
-    is_faded = fading_score > 0.2
-
-    logger.debug(
-        f"Fading assessment: score={fading_score:.3f}, contrast={contrast_score:.2f}, "
-        f"saturation={mean_saturation:.3f}, is_faded={is_faded}"
-    )
-
-    return {
-        'is_faded': bool(is_faded),
-        'fading_score': float(fading_score),
-        'contrast_score': float(contrast_score),
-        'normalized_contrast': float(normalized_contrast),
-        'mean_saturation': float(mean_saturation),
-        'saturation_percentile_25': float(saturation_p25),
-    }
+    return img, result
 
 
 def restore_fading_conservative(photo: np.ndarray) -> Tuple[np.ndarray, dict]:
-    """Restore fading with conservative settings to avoid over-processing.
-
-    Uses lower CLAHE clip limit and moderate saturation boost.
-    Good for photos where you want subtle enhancement.
+    """Restore fading with conservative settings — subtle enhancement only.
 
     Args:
-        photo: Input image as float32 RGB [0, 1]
+        photo: Input image as float32 RGB [0, 1].
 
     Returns:
-        Tuple of (restored image, info dict)
+        Tuple of (restored image, info dict).
     """
     return restore_fading(
         photo,
-        clahe_clip_limit=1.5,  # Lower than default 2.0
-        clahe_grid_size=(8, 8),
-        saturation_boost=0.10,  # Lower than default 0.15
-        auto_detect_fading=True
+        wp_percentile=99.0,
+        wp_target=0.92,         # gentler stretch target
+        shadow_lift_max=0.08,   # half the default lift
+        brightness_ceiling=0.72,
+        vibrance_boost=0.15,    # half the default vibrance
     )
 
 
 def restore_fading_aggressive(photo: np.ndarray) -> Tuple[np.ndarray, dict]:
     """Restore fading with aggressive settings for heavily faded photos.
 
-    Uses higher CLAHE clip limit and stronger saturation boost.
-    Good for very old, severely faded photos.
-
     Args:
-        photo: Input image as float32 RGB [0, 1]
+        photo: Input image as float32 RGB [0, 1].
 
     Returns:
-        Tuple of (restored image, info dict)
+        Tuple of (restored image, info dict).
     """
     return restore_fading(
         photo,
-        clahe_clip_limit=3.0,  # Higher than default 2.0
-        clahe_grid_size=(6, 6),  # Smaller grid = more local
-        saturation_boost=0.25,  # Higher than default 0.15
-        auto_detect_fading=True
+        wp_percentile=98.0,     # use 98th percentile — more aggressive stretch
+        wp_target=0.98,
+        shadow_lift_max=0.25,
+        brightness_ceiling=0.80,
+        vibrance_boost=0.40,
     )
+
+
+def assess_fading(photo: np.ndarray) -> dict:
+    """Assess whether a photo is faded and needs restoration.
+
+    Retained for diagnostic use.  The new ``restore_fading`` algorithm is
+    self-limiting and does not require this gate, but the metrics are still
+    useful for logging and debugging.
+
+    Args:
+        photo: Input image as float32 RGB [0, 1].
+
+    Returns:
+        Dict with ``is_faded`` (bool), ``fading_score`` (0–1),
+        ``contrast_score``, ``mean_saturation``, and
+        ``saturation_percentile_25``.
+    """
+    photo_uint8 = (photo * 255).astype(np.uint8)
+    gray = cv2.cvtColor(photo_uint8, cv2.COLOR_RGB2GRAY)
+
+    contrast_score = _compute_local_contrast(gray, kernel_size=5)
+    normalized_contrast = contrast_score / 25.0
+
+    hsv = cv2.cvtColor(photo_uint8, cv2.COLOR_RGB2HSV)
+    saturation = hsv[:, :, 1].astype(np.float32) / 255.0
+
+    mean_saturation = float(np.mean(saturation))
+    saturation_p25 = float(np.percentile(saturation, 25))
+
+    contrast_deficit = max(0.0, 0.8 - normalized_contrast)
+    saturation_deficit = max(0.0, 0.3 - mean_saturation)
+
+    fading_score = (contrast_deficit + saturation_deficit * 2) / 3.0
+    is_faded = fading_score > 0.2
+
+    return {
+        "is_faded": bool(is_faded),
+        "fading_score": float(fading_score),
+        "contrast_score": float(contrast_score),
+        "normalized_contrast": float(normalized_contrast),
+        "mean_saturation": mean_saturation,
+        "saturation_percentile_25": saturation_p25,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Legacy (kept for side-by-side comparison if needed, not called by pipeline)
+# ---------------------------------------------------------------------------
+
+def _restore_fading_clahe_legacy(
+    photo: np.ndarray,
+    clahe_clip_limit: float = 2.0,
+    clahe_grid_size: tuple = (8, 8),
+    saturation_boost: float = 0.15,
+    auto_detect_fading: bool = True,
+) -> Tuple[np.ndarray, dict]:
+    """CLAHE-based fade restoration — legacy implementation, not in active use.
+
+    Retained so the old behaviour can be compared against the new algorithm
+    during evaluation.  Do not call from the pipeline.
+    """
+    photo_uint8 = (photo * 255).astype(np.uint8)
+    lab = cv2.cvtColor(photo_uint8, cv2.COLOR_RGB2LAB)
+    L, a, b = cv2.split(lab)
+
+    clahe = cv2.createCLAHE(clipLimit=clahe_clip_limit, tileGridSize=clahe_grid_size)
+    L_clahe = clahe.apply(L)
+
+    lab_clahe = cv2.merge([L_clahe, a, b])
+    rgb_clahe = cv2.cvtColor(lab_clahe, cv2.COLOR_LAB2RGB).astype(np.float32) / 255.0
+
+    if auto_detect_fading:
+        fading_info = assess_fading(photo)
+        if fading_info["is_faded"]:
+            fading_severity = fading_info["fading_score"]
+            adaptive_boost = saturation_boost * min(1.0, fading_severity / 0.3)
+            result_img = _boost_saturation_fixed(rgb_clahe, adaptive_boost)
+        else:
+            result_img = rgb_clahe
+    else:
+        result_img = _boost_saturation_fixed(rgb_clahe, saturation_boost)
+
+    return result_img, {"legacy_clahe": True}
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _luminance(img: np.ndarray) -> np.ndarray:
+    """Return perceptual luminance array (float32, same H×W as img)."""
+    return 0.2126 * img[:, :, 0] + 0.7152 * img[:, :, 1] + 0.0722 * img[:, :, 2]
+
+
+def _compute_local_contrast(gray_image: np.ndarray, kernel_size: int = 5) -> float:
+    """Compute average local contrast via local standard deviation."""
+    img_float = gray_image.astype(np.float32)
+    kernel = np.ones((kernel_size, kernel_size), np.float32) / (kernel_size ** 2)
+    local_mean = cv2.filter2D(img_float, -1, kernel)
+    local_mean_sq = cv2.filter2D(img_float ** 2, -1, kernel)
+    local_var = np.maximum(local_mean_sq - local_mean ** 2, 0)
+    return float(np.mean(np.sqrt(local_var)))
+
+
+def _boost_saturation_fixed(photo: np.ndarray, boost: float) -> np.ndarray:
+    """Fixed-multiplier saturation boost (used only by the legacy path)."""
+    if boost <= 0.0:
+        return photo
+    photo_uint8 = (photo * 255).astype(np.uint8)
+    hsv = cv2.cvtColor(photo_uint8, cv2.COLOR_RGB2HSV).astype(np.float32)
+    hsv[:, :, 1] = np.clip(hsv[:, :, 1] * (1.0 + boost), 0, 255)
+    return cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2RGB).astype(np.float32) / 255.0
