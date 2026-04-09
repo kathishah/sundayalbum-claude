@@ -148,20 +148,19 @@ rm -rf debug/* output/*
 
 ### 1. Run all test-images in debug mode (HEIC only for speed)
 
-Run the pipeline with `--steps` limited to the color restore stage and its dependencies,
-plus `--debug`, on every HEIC in `test-images/`:
+Use the existing batch mode to process all HEIC files in one command:
 
 ```bash
 source .venv/bin/activate
 
-for f in test-images/*.HEIC; do
-  python -m src.cli process "$f" \
-    --output ./output/ \
-    --debug \
-    --no-openai-glare \
-    --no-ai-orientation \
-    --steps load,normalize,page_detect,photo_detect,white_balance,color_restore,deyellow,sharpen
-done
+python -m src.cli process test-images/ \
+  --batch \
+  --filter "*.HEIC" \
+  --output ./output/ \
+  --debug \
+  --no-openai-glare \
+  --no-ai-orientation \
+  --steps load,normalize,page_detect,photo_detect,white_balance,color_restore,deyellow,sharpen
 ```
 
 Using `--no-openai-glare` and `--no-ai-orientation` to avoid API costs and focus only on the
