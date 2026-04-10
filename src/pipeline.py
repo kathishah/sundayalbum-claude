@@ -102,7 +102,7 @@ PIPELINE_STEPS = [
     {
         'id': 'color_restore',
         'name': 'Color Restoration',
-        'description': 'Fade restoration with CLAHE, saturation boost',
+        'description': 'Adaptive brightness lift (white-point stretch + shadow lift) and vibrance saturation boost',
         'priority': 4,
         'implemented': True,
     },
@@ -174,12 +174,14 @@ class PipelineConfig:
     dewarp_detection_threshold: float = 0.02
     use_dewarp: bool = False
 
-    # Color
-    clahe_clip_limit: float = 2.0
-    clahe_grid_size: tuple = (8, 8)
+    # Color — brightness lift + vibrance (see src/color/restore.py)
+    color_restore_wp_percentile: float = 99.0   # white-point percentile for stretch
+    color_restore_wp_target: float = 0.96       # target brightness after stretch
+    color_restore_shadow_lift_max: float = 0.15 # max lift applied to darkest pixels
+    color_restore_brightness_ceiling: float = 0.75  # scale back if mean lum exceeds this
+    color_restore_vibrance_boost: float = 0.25  # base per-pixel saturation boost
     sharpen_radius: float = 1.5
     sharpen_amount: float = 0.5
-    saturation_boost: float = 0.15
 
     # Output
     output_format: str = "jpeg"

@@ -51,7 +51,7 @@ def run(
         assess_white_balance_quality,
         remove_yellowing_adaptive,
         restore_fading,
-        enhance_adaptive,
+        enhance,
     )
 
     idx = f"{photo_index:02d}"
@@ -100,24 +100,33 @@ def run(
             f"debug/{stem}_12_photo_{idx}_deyellow.jpg", photo, format="jpeg", quality=95
         )
 
-    # 3. Fade restoration
+    # 3. Fade restoration — adaptive brightness lift + vibrance
     photo, restore_info = restore_fading(
         photo,
-        clahe_clip_limit=config.clahe_clip_limit,
-        clahe_grid_size=config.clahe_grid_size,
-        saturation_boost=config.saturation_boost,
-        auto_detect_fading=True,
+        wp_percentile=config.color_restore_wp_percentile,
+        wp_target=config.color_restore_wp_target,
+        shadow_lift_max=config.color_restore_shadow_lift_max,
+        brightness_ceiling=config.color_restore_brightness_ceiling,
+        vibrance_boost=config.color_restore_vibrance_boost,
     )
     result["color_restore"] = {
-        "contrast_improvement": float(restore_info.get("contrast_improvement", 1.0)),
-        "saturation_boost_applied": float(restore_info.get("saturation_boost_applied", 0.0)),
+        "wp_scale": float(restore_info.get("wp_scale", 1.0)),
+        "shadow_lift_intensity": float(restore_info.get("shadow_lift_intensity", 0.0)),
+        "saturation_before": float(restore_info.get("saturation_before", 0.0)),
+        "saturation_after": float(restore_info.get("saturation_after", 0.0)),
+        "mean_lum_final": float(restore_info.get("mean_lum_final", 0.0)),
     }
     storage.write_image(
         f"debug/{stem}_13_photo_{idx}_restored.jpg", photo, format="jpeg", quality=95
     )
 
-    # 4. Sharpening
-    photo, enhance_info = enhance_adaptive(photo)
+    # 4. Sharpening only — no sigmoid contrast (contrast is handled by color restore)
+    photo, enhance_info = enhance(
+        photo,
+        sharpen_radius=config.sharpen_radius,
+        sharpen_amount=config.sharpen_amount,
+        apply_contrast=False,
+    )
     result["sharpen"] = {
         "sharpen_amount": float(enhance_info.get("sharpen_amount", 0.0)),
         "sharpness_improvement": float(enhance_info.get("sharpness_improvement", 1.0)),
