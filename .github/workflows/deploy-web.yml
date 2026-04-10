@@ -85,6 +85,7 @@ jobs:
             --provenance=false \
             --build-arg NEXT_PUBLIC_API_URL=${{ steps.image.outputs.api_url }} \
             --build-arg NEXT_PUBLIC_WS_URL=${{ steps.image.outputs.ws_url }} \
+            --build-arg NEXT_PUBLIC_STAGE=${{ steps.stage.outputs.stage }} \
             -t ${{ steps.image.outputs.uri }}:${{ steps.image.outputs.tag }} \
             -t ${{ steps.image.outputs.uri }}:${{ steps.image.outputs.latest_tag }} \
             .
