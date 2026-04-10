@@ -1,8 +1,12 @@
+> **HISTORICAL — Original phased build plan from early 2026. All phases complete.**
+> Config parameter references (e.g. `clahe_clip_limit`, `saturation_boost`) are stale — see `CLAUDE.md` for the current `PipelineConfig`.
+> For the current system design, see **`docs/SYSTEM_ARCHITECTURE.md`**.
+
 # Sunday Album — Claude Code Phased Build Plan
 
-This document is your step-by-step guide for building the processing engine using Claude Code CLI. Each phase is a self-contained prompt session with clear inputs, outputs, and validation criteria.
+This document is a historical record of the step-by-step build plan used to construct the processing engine. All phases described are now complete.
 
-**How to use this:** Work through each phase sequentially. Copy the prompt into Claude Code, let it build, then validate the output visually against your real test images before moving on.
+**How to use this:** For reference only. The prompts and phases here reflect the original construction sequence — they are not intended for re-execution.
 
 ---
 

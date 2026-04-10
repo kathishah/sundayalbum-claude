@@ -1,3 +1,8 @@
+> **DEPRECATED — Historical implementation plan only.**
+> This document records the design decisions made during Phases 4–6 web UI development.
+> For the current system design, resource names, and SDLC process, see **`docs/SYSTEM_ARCHITECTURE.md`**.
+> For the current CLAUDE instructions, see **`CLAUDE.md`**.
+
 # Sunday Album Web UI — Implementation Plan (Part 3 of 4)
 # Phases 4–6: macOS UI Parity, Step Detail, Re-processing
 
