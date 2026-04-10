@@ -1,5 +1,6 @@
 import ApiKeySettings from '@/components/settings/ApiKeySettings'
 import AppearanceSettings from '@/components/settings/AppearanceSettings'
+import VersionInfo from '@/components/settings/VersionInfo'
 
 export const metadata = {
   title: 'Settings — Sunday Album',
@@ -14,6 +15,7 @@ export default function SettingsPage() {
       <div className="flex flex-col gap-6">
         <AppearanceSettings />
         <ApiKeySettings />
+        <VersionInfo />
       </div>
     </div>
   )

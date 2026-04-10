@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { isAuthenticated, clearToken } from '@/lib/auth'
 import { useAuthStore } from '@/stores/auth-store'
 import { logout } from '@/lib/api'
+import VersionFooter from '@/components/VersionFooter'
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter()
@@ -64,6 +65,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <main className="flex-1 max-w-6xl mx-auto w-full px-4 py-8">
         {children}
       </main>
+      <VersionFooter />
     </div>
   )
 }
