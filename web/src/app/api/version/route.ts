@@ -57,10 +57,9 @@ async function latestCommitDate(paths: string[]): Promise<string | null> {
       })
     )
   )
-  const dates = results
-    .filter((r): r is PromiseFulfilledResult<string | null> => r.status === 'fulfilled')
-    .map((r) => r.value)
-    .filter((d): d is string => d !== null)
+  const dates = results.flatMap((r) =>
+    r.status === 'fulfilled' && r.value !== null ? [r.value] : []
+  )
   if (dates.length === 0) return null
   return dates.sort().at(-1)! // ISO strings sort lexicographically
 }
