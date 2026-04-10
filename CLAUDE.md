@@ -71,7 +71,7 @@ Use `scripts/fetch-test-images.sh` which will download from github release
 - **Python packages (pip in venv):**
   - `opencv-python-headless` — OpenCV Python bindings
   - `numpy`, `scipy` — array ops, interpolation, optimization
-  - `scikit-image` — advanced image processing (CLAHE, morphology, segmentation)
+  - `scikit-image` — **removed** (was used for CLAHE; replaced by adaptive brightness algorithm in April 2026)
   - `Pillow` — image I/O, format handling, EXIF
   - `pillow-heif` — HEIC/HEIF format support for Pillow
   - `rawpy` — RAW/DNG file reading (wraps LibRaw)
@@ -134,7 +134,11 @@ sundayalbum-claude/
 │   ├── 2026-02-16-single-print-fix.md     # Fix: single-print false splits
 │   ├── 2026-02-17-multi-photo-detection-fix.md  # Fix: three_pics detection
 │   ├── 2026-02-18-openai-glare-and-orientation.md  # OpenAI glare + AI orientation
-│   └── 2026-02-19-rotation-fix.md        # Fix: Hough false corrections + AI direction confusion
+│   ├── 2026-02-19-rotation-fix.md        # Fix: Hough false corrections + AI direction confusion
+│   ├── 2026-02-20-color-restoration-fix.md  # Fix: white balance + color tuning
+│   ├── 2026-03-04-photo-boundary-detection-fix-and-background-stripping.md  # Fix: spine-separated album pages
+│   ├── 2026-04-09-color-restore-rethink.md  # Rework: replace CLAHE with adaptive brightness lift
+│   └── 2026-04-09-dev-branch-strategy.md   # SDLC: feature → dev → main branch model
 │
 ├── scripts/
 │   └── fetch-test-images.sh     # Download test images from GitHub releases
@@ -189,7 +193,7 @@ sundayalbum-claude/
 │   ├── color/
 │   │   ├── __init__.py
 │   │   ├── white_balance.py     # Auto white balance correction
-│   │   ├── restore.py           # Fade restoration (CLAHE, saturation)
+│   │   ├── restore.py           # Fade restoration (adaptive brightness lift + vibrance saturation)
 │   │   ├── deyellow.py          # Yellowing removal
 │   │   └── enhance.py           # Sharpening, contrast, final touches
 │   │
@@ -239,14 +243,14 @@ python -m src.cli status
 - Detailed descriptions of each step
 - Comprehensive usage examples
 
-**Current Progress (as of 2026-03-25):**
-- **Overall:** All major pipeline steps implemented and producing quality output. macOS app built (SwiftUI). Web UI planned (see `docs/WEB_UI_PLAN.md`).
+**Current Progress (as of 2026-04-10):**
+- **Overall:** All major pipeline steps implemented and producing quality output. macOS app built (SwiftUI). Web UI live at dev.sundayalbum.com (dev) and app.sundayalbum.com (prod). See `docs/SYSTEM_ARCHITECTURE.md` for full system design.
 - **Priority 1 (Glare):** OpenAI `gpt-image-1.5` removal is the default path. OpenCV inpainting is the fallback when no OpenAI key is available. Multi-shot compositing deferred (needs multi-angle images).
 - **Priority 2 (Splitting):** 2/2 steps complete. GrabCut page detection + contour photo detection working on all test images including spine-separated album pages (fixed 2026-03-04).
 - **Priority 3 (Geometry):** AI orientation correction (Step 4.5) handles gross 90°/180°/270° errors per-photo. Small-angle Hough-line rotation disabled (fires on image content; border-based replacement pending).
-- **Priority 4 (Color):** 4/4 steps complete (white balance, deyellowing, CLAHE fade restore, sharpening).
+- **Priority 4 (Color):** 4/4 steps complete (white balance, deyellowing, adaptive brightness lift + vibrance, sharpening). CLAHE replaced April 2026.
 - **macOS App:** Native SwiftUI app with Python CLI bridge, step-by-step UI, drag-drop input. See `mac-app/`.
-- **Web UI (next):** AWS Lambda per pipeline step + Step Functions orchestration + S3 storage + Next.js frontend. Requires codebase refactor first (pluggable storage backend). See `docs/WEB_UI_PLAN.md`.
+- **Web App:** Live on AWS (App Runner + Lambda + Step Functions + S3). See `docs/SYSTEM_ARCHITECTURE.md`.
 
 ### Process Command
 
@@ -351,8 +355,12 @@ Input Image (HEIC, DNG, JPEG, or PNG)
 [7. Color Restoration]  ← PRIORITY 4
     - Auto white balance (gray-world method)
     - Deyellowing (adaptive LAB b* shift)
-    - Fade restoration (CLAHE on L channel + saturation boost)
-    - Sharpening (unsharp mask)
+    - Fade restoration — 3-stage adaptive algorithm:
+        • White-point stretch (99th-percentile → 0.96 target; self-limiting)
+        • Shadow lift tone curve (skipped when mean luminance ≥ 0.60)
+        • Vibrance-style saturation boost (per-pixel, protects highlights and vivid colors)
+        • Brightness ceiling guard (scale back if mean luminance > 0.75)
+    - Sharpening (unsharp mask; no sigmoid contrast)
     │
     ▼
 [8. Output]
@@ -468,12 +476,14 @@ class PipelineConfig:
     dewarp_detection_threshold: float = 0.02
     use_dewarp: bool = False  # Disabled: false positives on content-rich photos; iPhone corrects in-camera
 
-    # Color
-    clahe_clip_limit: float = 2.0
-    clahe_grid_size: tuple = (8, 8)
+    # Color — adaptive fade restoration (see src/color/restore.py)
+    color_restore_wp_percentile: float = 99.0      # white-point percentile for Stage 1 stretch
+    color_restore_wp_target: float = 0.96          # target luminance for white-point stretch
+    color_restore_shadow_lift_max: float = 0.15    # max additive lift for dark pixels in Stage 2
+    color_restore_brightness_ceiling: float = 0.75 # scale back if mean luminance exceeds this
+    color_restore_vibrance_boost: float = 0.25     # base per-pixel saturation boost in Stage 3
     sharpen_radius: float = 1.5
     sharpen_amount: float = 0.5
-    saturation_boost: float = 0.15
 
     # Output
     output_format: str = "jpeg"
@@ -531,6 +541,23 @@ user-supplied key (sa-user-settings DynamoDB)
 ```
 
 The resolved keys are injected into `PipelineConfig` before any step runs.
+
+## Branch Strategy & SDLC
+
+```
+feature/my-change  ──PR──►  dev  ──PR──►  main
+                              │              │
+                              ▼              ▼
+                           dev env        prod env
+                      (auto-deploy)    (auto-deploy)
+```
+
+- **All feature work** starts from `dev`. Create a branch: `git checkout dev && git checkout -b feature/my-change`.
+- **Merge to `dev`** → GitHub Actions automatically deploys API Lambdas + pipeline Lambdas + web to dev environment.
+- **Merge to `main`** → GitHub Actions automatically deploys to prod environment.
+- **CDK (infrastructure) changes** are deployed manually via `cdk deploy` from `infra/`. Not automated.
+
+See `docs/SYSTEM_ARCHITECTURE.md` for full CI/CD details, AWS resource names, and environment URLs.
 
 ## Key Technical Decisions
 

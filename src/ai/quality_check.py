@@ -2,13 +2,55 @@
 
 import logging
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional
 
 import numpy as np
-from skimage.metrics import structural_similarity as ssim
 
 from src.ai.claude_vision import assess_quality, QualityAssessment
 from src.utils.metrics import compute_sharpness, compute_histogram_stats
+
+
+def _compute_ssim(img1: np.ndarray, img2: np.ndarray) -> float:
+    """Compute structural similarity index (SSIM) between two float32 RGB images.
+
+    Pure numpy/scipy implementation — no scikit-image dependency.
+
+    Args:
+        img1: First image, float32 RGB [0, 1], shape (H, W, 3).
+        img2: Second image, float32 RGB [0, 1], shape (H, W, 3).
+
+    Returns:
+        Mean SSIM across all three channels, in [-1, 1].
+    """
+    from scipy.ndimage import gaussian_filter  # scipy is already a project dependency
+
+    C1 = (0.01) ** 2   # stability constant for luminance
+    C2 = (0.03) ** 2   # stability constant for contrast
+
+    scores = []
+    for c in range(img1.shape[2]):
+        x = img1[:, :, c].astype(np.float64)
+        y = img2[:, :, c].astype(np.float64)
+
+        mu_x = gaussian_filter(x, sigma=1.5)
+        mu_y = gaussian_filter(y, sigma=1.5)
+
+        mu_x2 = mu_x * mu_x
+        mu_y2 = mu_y * mu_y
+        mu_xy = mu_x * mu_y
+
+        sig_x2 = gaussian_filter(x * x, sigma=1.5) - mu_x2
+        sig_y2 = gaussian_filter(y * y, sigma=1.5) - mu_y2
+        sig_xy = gaussian_filter(x * y, sigma=1.5) - mu_xy
+
+        ssim_map = (
+            (2.0 * mu_xy + C1) * (2.0 * sig_xy + C2)
+        ) / (
+            (mu_x2 + mu_y2 + C1) * (sig_x2 + sig_y2 + C2)
+        )
+        scores.append(float(np.mean(ssim_map)))
+
+    return float(np.mean(scores))
 
 logger = logging.getLogger(__name__)
 
@@ -78,12 +120,7 @@ def compute_quality_metrics(
     # Higher = more similar (0-1 scale)
     # For restoration, we expect SSIM to be moderate (0.7-0.9)
     # Too high (>0.95) means nothing changed, too low (<0.5) means over-processing
-    ssim_score = ssim(
-        original,
-        processed,
-        channel_axis=2,  # RGB channels
-        data_range=1.0   # float32 [0, 1]
-    )
+    ssim_score = _compute_ssim(original, processed)
 
     # 2. Sharpness (Laplacian variance)
     # Higher = sharper
