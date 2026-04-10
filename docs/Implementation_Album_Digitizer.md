@@ -1,8 +1,12 @@
+> **HISTORICAL — Original implementation plan from February 2026.**
+> Algorithms described here (e.g. CLAHE for color restoration) have since been superseded.
+> For the current system design and algorithm decisions, see **`docs/SYSTEM_ARCHITECTURE.md`** and **`CLAUDE.md`**.
+
 # Album Digitizer — Technical Implementation Plan
 
 **Version:** 1.0  
 **Date:** February 2026  
-**Status:** Draft  
+**Status:** Historical reference  
 **Companion Document:** PRD_Album_Digitizer.md
 
 ---

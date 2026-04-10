@@ -1,9 +1,15 @@
+> **DEPRECATED — Historical implementation plan only.**
+> This document records the design decisions made during Phases 7–9 web UI development.
+> Branch references to `web-ui-implementation` are stale — the active staging branch is now `dev`.
+> For the current system design, resource names, and SDLC process, see **`docs/SYSTEM_ARCHITECTURE.md`**.
+> For the current CLAUDE instructions, see **`CLAUDE.md`**.
+
 # Sunday Album Web UI — Implementation Plan (Part 4 of 4)
 # Phases 7–9: Testing, Admin Tools, Production Hardening
 
 **Version:** 1.3
 **Date:** April 2026
-**Status:** Phases 7.1–7.5 + 7.4 complete. Pre-commit hook added (36 moto tests + 12 Playwright E2E). PR #32 (`web-ui-implementation` → `main`) is conflict-free and ready to merge. Phase 8 (admin tools) next up.
+**Status:** Phases 7.1–7.5 + 7.4 complete. Pre-commit hook added (36 moto tests + 12 Playwright E2E). Phase 8 (admin tools) not yet implemented. Phase 9 (production hardening) not yet implemented.
 **See also:** WEB_UI_PLAN_Part1.md (Phases 0–2: ✅), WEB_UI_PLAN_Part2.md (Phase 3: ✅), WEB_UI_PLAN_Part3.md (Phases 4–6: ✅)
 
 ---

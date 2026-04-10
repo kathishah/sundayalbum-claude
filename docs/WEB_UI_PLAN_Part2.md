@@ -1,4 +1,9 @@
-# Sunday Album Web UI — Implementation Plan (Part 2 of 3)
+> **DEPRECATED — Historical implementation plan only.**
+> This document records the design decisions made during Phase 3 web UI development.
+> For the current system design, resource names, and SDLC process, see **`docs/SYSTEM_ARCHITECTURE.md`**.
+> For the current CLAUDE instructions, see **`CLAUDE.md`**.
+
+# Sunday Album Web UI — Implementation Plan (Part 2 of 4)
 # Phase 3: Real-time Progress + Library UI (dev.sundayalbum.com)
 
 **Version:** 1.5

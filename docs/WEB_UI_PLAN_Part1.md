@@ -1,4 +1,9 @@
-# Sunday Album Web UI — Implementation Plan (Part 1 of 3)
+> **DEPRECATED — Historical implementation plan only.**
+> This document records the design decisions made during initial web UI development (Phases 0–2).
+> For the current system design, resource names, and SDLC process, see **`docs/SYSTEM_ARCHITECTURE.md`**.
+> For the current CLAUDE instructions, see **`CLAUDE.md`**.
+
+# Sunday Album Web UI — Implementation Plan (Part 1 of 4)
 # Phases 0–2: Infrastructure, Auth, Pipeline Lambdas
 
 **Version:** 1.4
