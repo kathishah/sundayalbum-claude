@@ -136,19 +136,28 @@ jobs:
         id: image
         run: |
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          STAGE="${{ needs.resolve-stage.outputs.stage }}"
           ECR_REPO="${{ steps.ecr.outputs.repo }}"
           IMAGE_URI="${ECR_REPO}:${SHORT_SHA}"
 
-          docker buildx build \
-            --platform linux/arm64 \
-            --provenance=false \
-            --push \
-            -t "${IMAGE_URI}" \
-            .
+          # Skip build if this SHA was already pushed (e.g. prod and dev share a commit).
+          # ECR immutability would reject the push anyway; just reuse the existing image.
+          if aws ecr describe-images \
+              --repository-name "$(echo ${ECR_REPO} | sed 's|.*/||')" \
+              --image-ids imageTag="${SHORT_SHA}" \
+              --no-cli-pager \
+              > /dev/null 2>&1; then
+            echo "Image ${IMAGE_URI} already exists in ECR — skipping build."
+          else
+            docker buildx build \
+              --platform linux/arm64 \
+              --provenance=false \
+              --push \
+              -t "${IMAGE_URI}" \
+              .
+            echo "Built and pushed: ${IMAGE_URI}"
+          fi
 
           echo "uri=${IMAGE_URI}" >> $GITHUB_OUTPUT
-          echo "Built and pushed: ${IMAGE_URI}"
 
       - name: Update pipeline Lambda functions
         run: |
