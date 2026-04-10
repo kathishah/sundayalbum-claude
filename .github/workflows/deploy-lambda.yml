@@ -139,22 +139,30 @@ jobs:
           ECR_REPO="${{ steps.ecr.outputs.repo }}"
           IMAGE_URI="${ECR_REPO}:${SHORT_SHA}"
 
-          # Skip build if this SHA was already pushed (e.g. prod and dev share a commit).
-          # ECR immutability would reject the push anyway; just reuse the existing image.
-          if aws ecr describe-images \
-              --repository-name "$(echo ${ECR_REPO} | sed 's|.*/||')" \
-              --image-ids imageTag="${SHORT_SHA}" \
-              --no-cli-pager \
-              > /dev/null 2>&1; then
-            echo "Image ${IMAGE_URI} already exists in ECR — skipping build."
-          else
-            docker buildx build \
+          ECR_REPO_NAME="$(echo ${ECR_REPO} | sed 's|.*/||')"
+
+          # Build and push. If the push fails because the tag already exists in the
+          # immutable ECR repo (race condition: another run pushed the same SHA first),
+          # confirm via describe-images and treat it as success. Any other failure exits.
+          if docker buildx build \
               --platform linux/arm64 \
               --provenance=false \
               --push \
               -t "${IMAGE_URI}" \
-              .
+              .; then
             echo "Built and pushed: ${IMAGE_URI}"
+          else
+            echo "docker build/push failed — checking if tag already exists in ECR..."
+            if aws ecr describe-images \
+                --repository-name "${ECR_REPO_NAME}" \
+                --image-ids imageTag="${SHORT_SHA}" \
+                --no-cli-pager \
+                > /dev/null 2>&1; then
+              echo "Image ${IMAGE_URI} already exists in ECR — reusing (race condition)."
+            else
+              echo "Build failed and image does not exist in ECR — aborting."
+              exit 1
+            fi
           fi
 
           echo "uri=${IMAGE_URI}" >> $GITHUB_OUTPUT
