@@ -6,17 +6,33 @@ Sunday Album digitizes physical photo album pages into clean individual digital 
 repo contains the Python CLI processing engine, the macOS SwiftUI app, the AWS web backend,
 and the Next.js web frontend.
 
-**Read the docs first:**
-- `docs/SYSTEM_ARCHITECTURE.md` — canonical reference: pipeline, AWS resources, SDLC, key technical decisions
-- `docs/PIPELINE_STEPS.md` — per-step implementation details, tunable params, debug output
-- `docs/README.md` — docs folder index
+---
+
+## Documentation — What to Read This Session
+
+Load only what's relevant to the current task. Don't read everything.
+
+| If this session involves… | Read |
+|---------------------------|------|
+| A specific pipeline step | `docs/PIPELINE_STEPS.md` → that step's section |
+| Color / glare / geometry tuning | `docs/PIPELINE_STEPS.md` + recent entries in `journal/INDEX.md` |
+| Web frontend (Next.js) | `docs/SYSTEM_ARCHITECTURE.md` → Web Application section |
+| Web API or Lambda handlers | `docs/SYSTEM_ARCHITECTURE.md` → Web Application + API Key Resolution |
+| AWS infrastructure / CDK | `docs/SYSTEM_ARCHITECTURE.md` → Web Application + SDLC sections |
+| macOS app | `docs/SYSTEM_ARCHITECTURE.md` → macOS App section |
+| Adding a new pipeline step | `docs/CONTRIBUTING.md` → "How to Add a Pipeline Step" |
+| Debugging a specific test image | `docs/PIPELINE_STEPS.md` + `docs/CONTRIBUTING.md` → Test Image Catalog |
+| Understanding a past decision | `journal/INDEX.md` → find the relevant entry |
+| First session / onboarding | `docs/CONTRIBUTING.md` (read fully) |
+| Full architecture orientation | `docs/SYSTEM_ARCHITECTURE.md` (read fully) |
+
+All docs are indexed in `docs/README.md`.
 
 ---
 
 ## Development Machine
 
-- **MacBook Air M4, 24 GB RAM**, macOS Tahoe 26.2, Apple Silicon (ARM64)
-- **Homebrew** for system dependencies; **Python venv** for Python packages — never install globally
+- **MacBook Air M4, 24 GB RAM**, macOS Tahoe 26.2, Apple Silicon (ARM64) — Homebrew + Python venv; never install packages globally
 
 ---
 
@@ -47,11 +63,20 @@ python -c "import cv2; print(f'OpenCV {cv2.__version__} OK')"
 Alternatively, set `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` env vars. The CLI reads these once
 at startup and injects them into `PipelineConfig`. Steps never read env vars directly.
 
+### Pre-commit hooks
+
+```bash
+git config core.hooksPath .githooks   # runs pytest + Playwright before every commit
+SKIP_HOOKS=1 git commit -m "wip: …"  # escape hatch
+```
+
 ### Test images
 
 ```bash
-bash scripts/fetch-test-images.sh   # downloads from GitHub releases into test-images/
+bash scripts/fetch-test-images.sh   # downloads into test-images/ (gitignored)
 ```
+
+See `docs/CONTRIBUTING.md` → Test Image Catalog for what each image exercises.
 
 ---
 

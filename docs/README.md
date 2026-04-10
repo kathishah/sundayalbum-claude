@@ -6,6 +6,18 @@ Documentation for the Sunday Album project.
 
 ## Current reference docs
 
+### `CONTRIBUTING.md`
+Onboarding and contributor guide. Covers:
+- Quick start (clone to first processed image)
+- Understanding the 3-surface architecture
+- Test image catalog (14 images, what each scenario exercises)
+- "Where do I start?" — task to code navigation
+- How to add a new pipeline step (5-file pattern)
+- Testing guide (what each suite covers, how to write tests)
+- Commit and PR conventions
+
+Read this first if you're new to the project.
+
 ### `SYSTEM_ARCHITECTURE.md`
 **The canonical reference.** Covers:
 - High-level architecture (CLI, macOS app, web/AWS)
