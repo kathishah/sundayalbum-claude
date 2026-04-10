@@ -145,7 +145,6 @@ jobs:
             --provenance=false \
             --push \
             -t "${IMAGE_URI}" \
-            -t "${ECR_REPO}:${STAGE}-latest" \
             .
 
           echo "uri=${IMAGE_URI}" >> $GITHUB_OUTPUT
