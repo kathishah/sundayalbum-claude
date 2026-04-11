@@ -118,6 +118,9 @@ regressions: `python -m src.cli process test-images/ --output ./output/ --batch 
 | Fix a Lambda handler bug | `handlers/` + `tests/handlers/` |
 | Change AWS infrastructure (CDK) | `infra/infra/sundayalbum_stack.py` |
 | Update the macOS app | `mac-app/SundayAlbum/` |
+| Edit a public marketing page | `web/src/app/(public)/` |
+| Edit the marketing nav or footer | `web/src/components/MarketingNav.tsx`, `MarketingFooter.tsx` |
+| Replace pipeline page demo images | Resize from `debug/` into `web/public/demo/pipeline/` (see `journal/2026-04-10-public-website.md`) |
 | Understand a past algorithm decision | `journal/INDEX.md` → find the relevant entry |
 
 ---
