@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { motion, AnimatePresence } from 'framer-motion'
 import { isAuthenticated } from '@/lib/auth'
@@ -174,9 +174,22 @@ const pipelineSteps = [
 export default function HomePage() {
   const [authed, setAuthed] = useState(false)
   const [activeStep, setActiveStep] = useState<string | null>(null)
+  // Measure Pair A's rendered width so Pair B can use it as its height
+  const pairARef = useRef<HTMLDivElement>(null)
+  const [pairBHeight, setPairBHeight] = useState(0)
 
   useEffect(() => {
     setAuthed(isAuthenticated())
+  }, [])
+
+  useEffect(() => {
+    const el = pairARef.current
+    if (!el) return
+    const ro = new ResizeObserver(([entry]) => {
+      setPairBHeight(entry.contentRect.width)
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
   }, [])
 
   const primaryCta = authed
@@ -313,8 +326,8 @@ export default function HomePage() {
 
             {/* Center: both sliders */}
             <motion.div variants={fadeUp} className="flex flex-col gap-6">
-              {/* Pair A: single print quality */}
-              <div className="flex flex-col gap-2">
+              {/* Pair A: single print quality — landscape, full column width × h-72 */}
+              <div ref={pairARef} className="flex flex-col gap-2">
                 <BeforeAfterSlider
                   beforeSrc="/demo/pair-a-before.jpg"
                   afterSrc="/demo/pair-a-after.jpg"
@@ -323,27 +336,28 @@ export default function HomePage() {
                   beforeAlt="Photo before processing — yellowed, with glare"
                   afterAlt="Photo after processing — glare removed, colors restored"
                   initialPosition={0}
-                  className="h-72"
+                  className="h-72 w-full"
                 />
                 <p className="text-xs text-center text-sa-stone-400 dark:text-sa-stone-500">
                   Single print — drag right to reveal restored
                 </p>
               </div>
 
-              {/* Pair B: album page → 3 photos (portrait) */}
+              {/* Pair B: album page → 3 photos
+                  Width  = Pair A's height (h-72 = 18rem = 288px)
+                  Height = Pair A's rendered width (measured via ResizeObserver) */}
               <div className="flex flex-col gap-2 items-center">
-                <div className="w-full max-w-[13rem]">
-                  <BeforeAfterSlider
-                    beforeSrc="/demo/pair-b-before.jpg"
-                    afterSlot={<PairBAfterSlot />}
-                    beforeLabel="Album page"
-                    afterLabel="3 photos"
-                    beforeAlt="Album page with three prints"
-                    afterAlt="Three individually extracted and restored photos"
-                    initialPosition={0}
-                    className="aspect-[3/4] w-full"
-                  />
-                </div>
+                <BeforeAfterSlider
+                  beforeSrc="/demo/pair-b-before.jpg"
+                  afterSlot={<PairBAfterSlot />}
+                  beforeLabel="Album page"
+                  afterLabel="3 photos"
+                  beforeAlt="Album page with three prints"
+                  afterAlt="Three individually extracted and restored photos"
+                  initialPosition={0}
+                  className="w-72 flex-shrink-0"
+                  style={pairBHeight ? { height: pairBHeight } : { aspectRatio: '3/4' }}
+                />
                 <p className="text-xs text-center text-sa-stone-400 dark:text-sa-stone-500">
                   Album page — drag right to see 3 individual photos
                 </p>

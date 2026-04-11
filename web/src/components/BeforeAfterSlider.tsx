@@ -11,6 +11,7 @@ interface BeforeAfterSliderProps {
   beforeAlt?: string
   afterAlt?: string
   className?: string
+  style?: React.CSSProperties
   /** Render slot for 'before' pane when no beforeSrc is supplied */
   beforeSlot?: React.ReactNode
   /** Render slot for 'after' pane when no afterSrc is supplied */
@@ -35,6 +36,7 @@ export default function BeforeAfterSlider({
   beforeSlot,
   afterSlot,
   initialPosition = 0,
+  style,
 }: BeforeAfterSliderProps) {
   const [position, setPosition] = useState(initialPosition)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -100,6 +102,7 @@ export default function BeforeAfterSlider({
         'border border-sa-stone-200 dark:border-sa-stone-700',
         className,
       )}
+      style={style}
       onMouseDown={onMouseDown}
       onTouchStart={onTouchStart}
       role="img"
