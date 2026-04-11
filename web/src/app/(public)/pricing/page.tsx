@@ -121,7 +121,7 @@ export default function PricingPage() {
               ))}
             </ul>
             <Link
-              href="https://app.sundayalbum.com"
+              href="/login"
               className="block w-full px-4 py-3 rounded-xl text-sm font-medium text-center bg-sa-amber-500 hover:bg-sa-amber-600 text-white transition-colors duration-[200ms]"
             >
               Get started free
@@ -153,7 +153,7 @@ export default function PricingPage() {
               ))}
             </ul>
             <Link
-              href="https://app.sundayalbum.com/settings"
+              href="/settings"
               className="block w-full px-4 py-3 rounded-xl text-sm font-medium text-center border border-sa-stone-200 dark:border-sa-stone-700 text-sa-stone-700 dark:text-sa-stone-200 hover:bg-sa-stone-50 dark:hover:bg-sa-stone-800 transition-colors duration-[200ms]"
             >
               Add your keys in Settings

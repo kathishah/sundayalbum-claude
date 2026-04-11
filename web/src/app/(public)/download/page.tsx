@@ -123,7 +123,7 @@ export default function DownloadPage() {
 
             <div className="flex flex-col gap-3">
               <Link
-                href="https://app.sundayalbum.com"
+                href="/login"
                 className="block w-full px-4 py-3 rounded-xl text-sm font-medium text-center bg-sa-amber-500 hover:bg-sa-amber-600 text-white transition-colors duration-[200ms]"
               >
                 Open Web App →

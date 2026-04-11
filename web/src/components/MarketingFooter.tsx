@@ -6,7 +6,7 @@ const footerLinks = [
     links: [
       { href: '/pricing', label: 'Pricing' },
       { href: '/download', label: 'Download for Mac' },
-      { href: 'https://app.sundayalbum.com', label: 'Web App', external: true },
+      { href: '/login', label: 'Web App' },
     ],
   },
   {

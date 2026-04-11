@@ -68,7 +68,7 @@ export default function MarketingNav() {
                 Sign in
               </Link>
               <Link
-                href="https://app.sundayalbum.com"
+                href="/login"
                 className="px-4 py-2 rounded-xl text-sm font-medium bg-sa-amber-500 hover:bg-sa-amber-600 text-white transition-colors duration-[200ms]"
               >
                 Try it free
@@ -133,7 +133,7 @@ export default function MarketingNav() {
                   Sign in
                 </Link>
                 <Link
-                  href="https://app.sundayalbum.com"
+                  href="/login"
                   className="px-4 py-2 rounded-xl text-sm font-medium bg-sa-amber-500 text-white text-center"
                 >
                   Try it free
