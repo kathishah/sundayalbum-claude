@@ -212,6 +212,7 @@ white-point stretch → shadow lift → vibrance saturation. See `journal/2026-0
 - **DNG (48 MP ProRAW):** Maximum data for quality validation. 2× slower to process.
 - The pipeline handles both transparently — the loader normalizes to float32 RGB [0, 1].
 
+
 ---
 
 ## Public Marketing Site

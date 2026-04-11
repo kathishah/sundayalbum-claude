@@ -116,16 +116,18 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Discover ECR repo from existing Lambda
+      - name: Resolve ECR repo for stage
         id: ecr
         run: |
-          SUFFIX="${{ needs.resolve-stage.outputs.suffix }}"
-          # Get the current image URI from the load Lambda to find our ECR repo.
-          # Strips the tag/digest to get just the repo base URI.
-          IMAGE_URI=$(aws lambda get-function \
-            --function-name "sa-pipeline-load${SUFFIX}" \
-            --query 'Code.ImageUri' --output text)
-          ECR_REPO=$(echo "$IMAGE_URI" | sed 's/:[^:@]*$//' | sed 's/@sha256:.*$//')
+          STAGE="${{ needs.resolve-stage.outputs.stage }}"
+          # Each stage has its own dedicated ECR repo:
+          #   dev  → sundayalbum-pipeline-dev  (MUTABLE tags — no collision possible)
+          #   prod → cdk-hnb659fds-container-assets-* (IMMUTABLE tags — CDK-managed)
+          if [ "${STAGE}" = "prod" ]; then
+            ECR_REPO="680073251743.dkr.ecr.us-west-2.amazonaws.com/cdk-hnb659fds-container-assets-680073251743-us-west-2"
+          else
+            ECR_REPO="680073251743.dkr.ecr.us-west-2.amazonaws.com/sundayalbum-pipeline-dev"
+          fi
           echo "repo=${ECR_REPO}" >> $GITHUB_OUTPUT
           echo "ECR repo: ${ECR_REPO}"
 
@@ -136,7 +138,6 @@ jobs:
         id: image
         run: |
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          STAGE="${{ needs.resolve-stage.outputs.stage }}"
           ECR_REPO="${{ steps.ecr.outputs.repo }}"
           IMAGE_URI="${ECR_REPO}:${SHORT_SHA}"
 
