@@ -15,6 +15,9 @@ build/
 tmp/
 .DS_Store
 
+test-images-2/
+test-images-3/
+
 # macOS app build artifacts
 mac-app/.build/
 mac-app/SundayAlbum.xcodeproj/project.xcworkspace/
