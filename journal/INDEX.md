@@ -34,3 +34,5 @@ Development log for Sunday Album. Entries fall into two categories:
 | 2026-03-04 | [photo-boundary-detection-fix](2026-03-04-photo-boundary-detection-fix-and-background-stripping.md) | Fix: spine-separated album pages; background stripping improvements |
 | 2026-04-09 | [color-restore-rethink](2026-04-09-color-restore-rethink.md) | Rework: replaced CLAHE with adaptive brightness lift + vibrance saturation |
 | 2026-04-09 | [dev-branch-strategy](2026-04-09-dev-branch-strategy.md) | Decision: feature → dev → main branch model, dev as staging environment |
+| 2026-04-10 | [public-website-plan](2026-04-10-public-website-plan.md) | Plan: www.sundayalbum.com public site — page structure, pricing, video script, DNS |
+| 2026-04-10 | [public-website](2026-04-10-public-website.md) | Implementation: (public) route group, 5 marketing pages, pipeline page with real images, BeforeAfterSlider, re-run integration |
