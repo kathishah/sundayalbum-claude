@@ -330,18 +330,20 @@ export default function HomePage() {
                 </p>
               </div>
 
-              {/* Pair B: album page → 3 photos */}
-              <div className="flex flex-col gap-2">
-                <BeforeAfterSlider
-                  beforeSrc="/demo/pair-b-before.jpg"
-                  afterSlot={<PairBAfterSlot />}
-                  beforeLabel="Album page"
-                  afterLabel="3 photos"
-                  beforeAlt="Album page with three prints"
-                  afterAlt="Three individually extracted and restored photos"
-                  initialPosition={0}
-                  className="h-72"
-                />
+              {/* Pair B: album page → 3 photos (portrait) */}
+              <div className="flex flex-col gap-2 items-center">
+                <div className="w-full max-w-[13rem]">
+                  <BeforeAfterSlider
+                    beforeSrc="/demo/pair-b-before.jpg"
+                    afterSlot={<PairBAfterSlot />}
+                    beforeLabel="Album page"
+                    afterLabel="3 photos"
+                    beforeAlt="Album page with three prints"
+                    afterAlt="Three individually extracted and restored photos"
+                    initialPosition={0}
+                    className="aspect-[3/4] w-full"
+                  />
+                </div>
                 <p className="text-xs text-center text-sa-stone-400 dark:text-sa-stone-500">
                   Album page — drag right to see 3 individual photos
                 </p>
