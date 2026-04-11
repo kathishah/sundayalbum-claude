@@ -417,6 +417,14 @@ Email-only OTP — no passwords:
 Rate limits: 3 code sends/email/hour; 5 verify attempts per code.  
 Daily job limit: 20 jobs/user/day (bypassed for admins and users with own API keys).
 
+### Transactional email (Amazon SES)
+
+OTP messages are sent with **Amazon SES** in **`us-west-2`**. The **verified domain identity** is **`sundayalbum.com`** (Easy DKIM). The **From** address is **`noreply@sundayalbum.com`**, supplied to Lambda as **`SES_SENDER`** (CDK default `infra/infra/sundayalbum_stack.py`; optional deploy-time override `ses_sender_email` in `infra/cdk.json`).
+
+**DNS:** SPF (apex TXT), DKIM (`*_domainkey` CNAMEs), and a starter **DMARC** (`_dmarc` TXT) live in the same Route 53 zone as the app. One-time setup and AWS CLI commands are recorded in **`journal/2026-04-11-ses-email-deliverability.md`**; the applied Route 53 change batch is **`infra/ses-sundayalbum-dns-changes.json`**.
+
+**Sandbox vs production:** SES may still be in **sandbox** mode until **production access** is approved in the account. Sandbox limits who can receive mail and daily volume; approve production access for unrestricted transactional sending to real users.
+
 ---
 
 ## Live Progress (WebSocket)

@@ -15,7 +15,6 @@
     ]
   },
   "context": {
-    "ses_sender_email": "kathi.shah@gmail.com",
     "@aws-cdk/aws-signer:signingProfileNamePassedToCfn": true,
     "@aws-cdk/aws-ecs-patterns:secGroupsDisablesImplicitOpenListener": true,
     "@aws-cdk/aws-lambda:recognizeLayerVersion": true,
