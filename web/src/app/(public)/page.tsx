@@ -102,24 +102,6 @@ const pipelineSteps = [
   { id: 'done', label: 'Done', detail: 'Download your clean, individually restored digital photos.' },
 ]
 
-// ─── Pair B "after" slot — 3 real output photos in a grid ────────────────────
-
-function MultiAfterSlot() {
-  return (
-    <div className="w-full h-full bg-sa-stone-100 dark:bg-sa-stone-800 p-2 grid grid-rows-3 gap-1.5">
-      {[1, 2, 3].map((n) => (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          key={n}
-          src={`/demo/pair-b-after-${n}.jpg`}
-          alt={`Restored photo ${n}`}
-          className="w-full h-full object-cover rounded-lg"
-          draggable={false}
-        />
-      ))}
-    </div>
-  )
-}
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
@@ -287,51 +269,91 @@ export default function HomePage() {
               See the difference
             </motion.p>
             <motion.h2 variants={fadeUp} className="font-display text-3xl md:text-4xl font-bold text-sa-stone-900 dark:text-sa-stone-50">
-              Drag to compare
+              See the results
             </motion.h2>
             <motion.p variants={fadeUp} className="mt-3 text-sa-stone-500 dark:text-sa-stone-400 max-w-xl mx-auto">
-              Move the slider to see the transformation. Every photo is processed individually.
+              Drag the slider to compare before and after. Real pipeline output from actual test images.
             </motion.p>
           </motion.div>
 
+          {/* Pair A — Single print: drag-to-compare slider */}
+          <motion.div
+            initial="hidden"
+            whileInView="show"
+            viewport={{ once: true, margin: '-60px' }}
+            variants={fadeUp}
+            className="flex flex-col gap-3 max-w-2xl mx-auto"
+          >
+            <BeforeAfterSlider
+              beforeSrc="/demo/pair-a-before.jpg"
+              afterSrc="/demo/pair-a-after.jpg"
+              beforeLabel="Raw extract"
+              afterLabel="Restored"
+              beforeAlt="Photo before processing — yellowed, with glare"
+              afterAlt="Photo after processing — glare removed, colors restored"
+              className="h-72 md:h-80"
+            />
+            <p className="text-xs text-center text-sa-stone-400 dark:text-sa-stone-500">
+              Glare removed · Colors restored · Real pipeline output
+            </p>
+          </motion.div>
+
+          {/* Pair B — Album page → 3 individual photos */}
           <motion.div
             initial="hidden"
             whileInView="show"
             viewport={{ once: true, margin: '-60px' }}
             variants={stagger}
-            className="grid md:grid-cols-2 gap-8"
+            className="mt-12 flex flex-col gap-4"
           >
-            {/* Pair A — Single print quality */}
-            <motion.div variants={fadeUp} className="flex flex-col gap-3">
-              <BeforeAfterSlider
-                beforeSrc="/demo/pair-a-before.jpg"
-                afterSrc="/demo/pair-a-after.jpg"
-                beforeLabel="Raw extract"
-                afterLabel="Restored"
-                beforeAlt="Photo before processing — yellowed, with glare"
-                afterAlt="Photo after processing — glare removed, colors restored"
-                className="h-64 md:h-72"
-              />
-              <p className="text-xs text-center text-sa-stone-400 dark:text-sa-stone-500">
-                Glare removed · Colors restored · Real pipeline output
-              </p>
-            </motion.div>
+            <motion.p variants={fadeUp} className="text-sm text-center font-medium text-sa-stone-500 dark:text-sa-stone-400">
+              One album page, three individual photos — detected and restored automatically
+            </motion.p>
+            <div className="flex flex-col md:flex-row items-center gap-4 md:gap-6">
+              {/* Before: album page */}
+              <motion.div variants={fadeUp} className="flex flex-col items-center gap-2 w-full md:w-auto">
+                <div className="relative rounded-2xl overflow-hidden border border-sa-stone-200 dark:border-sa-stone-700 shadow-sm">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src="/demo/pair-b-before.jpg"
+                    alt="Album page with three prints"
+                    className="w-full md:w-56 object-cover"
+                    draggable={false}
+                  />
+                  <span className="absolute bottom-2 left-2 text-xs font-medium text-white bg-black/50 px-2 py-1 rounded-full">
+                    Album page
+                  </span>
+                </div>
+              </motion.div>
 
-            {/* Pair B — Album page → 3 individual photos */}
-            <motion.div variants={fadeUp} className="flex flex-col gap-3">
-              <BeforeAfterSlider
-                beforeSrc="/demo/pair-b-before.jpg"
-                beforeLabel="Album page"
-                afterLabel="3 photos extracted"
-                beforeAlt="Album page photo — 3 prints behind plastic sleeve"
-                afterAlt="Three individually extracted and restored photos"
-                afterSlot={<MultiAfterSlot />}
-                className="h-64 md:h-72"
-              />
-              <p className="text-xs text-center text-sa-stone-400 dark:text-sa-stone-500">
-                1 album page → 3 individual restored photos
-              </p>
-            </motion.div>
+              {/* Arrow */}
+              <motion.div variants={fadeUp} className="flex-shrink-0 text-sa-amber-500">
+                <svg viewBox="0 0 40 24" className="w-10 h-6 hidden md:block" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M2 12h36M28 4l10 8-10 8" />
+                </svg>
+                <svg viewBox="0 0 24 40" className="w-6 h-10 md:hidden" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 2v36M4 28l8 10 8-10" />
+                </svg>
+              </motion.div>
+
+              {/* After: 3 individual photos */}
+              <motion.div variants={fadeUp} className="flex-1 grid grid-cols-3 gap-3 w-full">
+                {[1, 2, 3].map((n) => (
+                  <div key={n} className="flex flex-col items-center gap-1.5">
+                    <div className="rounded-xl overflow-hidden border border-sa-stone-200 dark:border-sa-stone-700 shadow-sm w-full">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={`/demo/pair-b-after-${n}.jpg`}
+                        alt={`Extracted photo ${n}`}
+                        className="w-full object-cover"
+                        draggable={false}
+                      />
+                    </div>
+                    <span className="text-xs text-sa-stone-400 dark:text-sa-stone-500">Photo {n}</span>
+                  </div>
+                ))}
+              </motion.div>
+            </div>
           </motion.div>
         </div>
       </section>
