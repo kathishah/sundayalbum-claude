@@ -102,75 +102,21 @@ const pipelineSteps = [
   { id: 'done', label: 'Done', detail: 'Download your clean, individually restored digital photos.' },
 ]
 
-// ─── Demo image slots (CSS placeholders until real pipeline images are added) ─
+// ─── Pair B "after" slot — 3 real output photos in a grid ────────────────────
 
-function DemoBeforeSlot() {
+function MultiAfterSlot() {
   return (
-    <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-amber-100 via-yellow-200 to-amber-300 dark:from-amber-900/60 dark:via-yellow-800/50 dark:to-amber-700/40">
-      <div className="relative w-4/5 h-4/5 rounded border-2 border-amber-300/60 overflow-hidden">
-        {/* Simulated glare patch */}
-        <div className="absolute inset-0 bg-gradient-to-br from-white/80 via-white/20 to-transparent" />
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 opacity-40">
-          <div className="w-3/4 h-2 rounded bg-amber-600" />
-          <div className="w-1/2 h-2 rounded bg-amber-600" />
-          <div className="w-2/3 h-2 rounded bg-amber-500" />
-        </div>
-        <p className="absolute bottom-2 left-0 right-0 text-center text-xs text-amber-700 font-medium opacity-70">
-          Yellowed · Glare
-        </p>
-      </div>
-    </div>
-  )
-}
-
-function DemoAfterSlot() {
-  return (
-    <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-stone-50 via-orange-50 to-amber-50 dark:from-stone-800 dark:via-stone-700 dark:to-stone-800">
-      <div className="relative w-4/5 h-4/5 rounded border-2 border-stone-200/60 overflow-hidden shadow-md">
-        <div className="absolute inset-0 bg-gradient-to-br from-orange-100/30 via-transparent to-amber-50/20" />
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 opacity-40">
-          <div className="w-3/4 h-2 rounded bg-stone-500" />
-          <div className="w-1/2 h-2 rounded bg-stone-400" />
-          <div className="w-2/3 h-2 rounded bg-stone-500" />
-        </div>
-        <p className="absolute bottom-2 left-0 right-0 text-center text-xs text-stone-600 font-medium opacity-70">
-          Restored · Crisp
-        </p>
-      </div>
-    </div>
-  )
-}
-
-function DemoMultiBeforeSlot() {
-  return (
-    <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-amber-100 via-yellow-200 to-amber-200 dark:from-amber-900/60 dark:via-yellow-800/50 dark:to-amber-700/40 p-6">
-      <div className="relative w-full h-full rounded border-2 border-amber-300/60 bg-amber-50/50 dark:bg-amber-900/30 overflow-hidden">
-        {/* Glare overlay */}
-        <div className="absolute inset-0 bg-gradient-to-tr from-white/50 via-white/10 to-transparent pointer-events-none" />
-        {/* Three photo placeholders arranged like an album page */}
-        <div className="absolute inset-3 grid grid-cols-2 gap-2">
-          <div className="rounded bg-amber-300/40 border border-amber-400/30" />
-          <div className="rounded bg-amber-300/40 border border-amber-400/30" />
-          <div className="col-span-2 rounded bg-amber-300/40 border border-amber-400/30" />
-        </div>
-        <p className="absolute bottom-2 left-0 right-0 text-center text-xs text-amber-700 font-medium opacity-70">
-          Album page · 3 photos
-        </p>
-      </div>
-    </div>
-  )
-}
-
-function DemoMultiAfterSlot() {
-  return (
-    <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-stone-50 via-orange-50 to-amber-50 dark:from-stone-800 dark:via-stone-700 dark:to-stone-800 p-4">
-      <div className="w-full h-full grid grid-cols-2 gap-3">
-        <div className="rounded-lg bg-gradient-to-br from-orange-100 to-amber-100 dark:from-stone-600 dark:to-stone-700 border border-stone-200/50 shadow-sm" />
-        <div className="rounded-lg bg-gradient-to-br from-blue-50 to-stone-100 dark:from-stone-600 dark:to-stone-700 border border-stone-200/50 shadow-sm" />
-        <div className="col-span-2 rounded-lg bg-gradient-to-br from-green-50 to-stone-100 dark:from-stone-600 dark:to-stone-700 border border-stone-200/50 shadow-sm flex items-center justify-center">
-          <p className="text-xs text-stone-400 font-medium">3 individual photos</p>
-        </div>
-      </div>
+    <div className="w-full h-full bg-sa-stone-100 dark:bg-sa-stone-800 p-2 grid grid-rows-3 gap-1.5">
+      {[1, 2, 3].map((n) => (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          key={n}
+          src={`/demo/pair-b-after-${n}.jpg`}
+          alt={`Restored photo ${n}`}
+          className="w-full h-full object-cover rounded-lg"
+          draggable={false}
+        />
+      ))}
     </div>
   )
 }
@@ -355,31 +301,35 @@ export default function HomePage() {
             variants={stagger}
             className="grid md:grid-cols-2 gap-8"
           >
-            {/* Pair A — Single print */}
+            {/* Pair A — Single print quality */}
             <motion.div variants={fadeUp} className="flex flex-col gap-3">
               <BeforeAfterSlider
-                beforeLabel="Original scan"
+                beforeSrc="/demo/pair-a-before.jpg"
+                afterSrc="/demo/pair-a-after.jpg"
+                beforeLabel="Raw extract"
                 afterLabel="Restored"
-                beforeSlot={<DemoBeforeSlot />}
-                afterSlot={<DemoAfterSlot />}
+                beforeAlt="Photo before processing — yellowed, with glare"
+                afterAlt="Photo after processing — glare removed, colors restored"
                 className="h-64 md:h-72"
               />
               <p className="text-xs text-center text-sa-stone-400 dark:text-sa-stone-500">
-                Single print — glare removed, colors restored
+                Glare removed · Colors restored · Real pipeline output
               </p>
             </motion.div>
 
-            {/* Pair B — Album page with 3 photos */}
+            {/* Pair B — Album page → 3 individual photos */}
             <motion.div variants={fadeUp} className="flex flex-col gap-3">
               <BeforeAfterSlider
+                beforeSrc="/demo/pair-b-before.jpg"
                 beforeLabel="Album page"
                 afterLabel="3 photos extracted"
-                beforeSlot={<DemoMultiBeforeSlot />}
-                afterSlot={<DemoMultiAfterSlot />}
+                beforeAlt="Album page photo — 3 prints behind plastic sleeve"
+                afterAlt="Three individually extracted and restored photos"
+                afterSlot={<MultiAfterSlot />}
                 className="h-64 md:h-72"
               />
               <p className="text-xs text-center text-sa-stone-400 dark:text-sa-stone-500">
-                Album page → 3 individual restored photos
+                1 album page → 3 individual restored photos
               </p>
             </motion.div>
           </motion.div>
