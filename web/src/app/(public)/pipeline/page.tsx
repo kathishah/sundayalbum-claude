@@ -7,7 +7,6 @@ import { motion } from 'framer-motion'
 import { isAuthenticated } from '@/lib/auth'
 import { getJob, reprocessJob } from '@/lib/api'
 import type { Job } from '@/lib/types'
-import BeforeAfterSlider from '@/components/BeforeAfterSlider'
 
 // ── Step definitions ──────────────────────────────────────────────────────────
 
@@ -28,8 +27,6 @@ interface PipelineStepDef {
   detail: string
   /** src relative to /demo/pipeline/ — null = no image for this step */
   imageSrc: string | null
-  /** Optional second image to show as a before/after slider */
-  beforeSrc?: string
   configOptions: ConfigOption[]
 }
 
@@ -62,7 +59,6 @@ const STEPS: PipelineStepDef[] = [
     description: 'Warp the page to a flat, top-down view.',
     detail: 'Computes a homography from the detected page corners to a rectangle of equivalent area. The result looks as if you had placed the album flat on a table and photographed it directly overhead.',
     imageSrc: '/demo/pipeline/03_page_warped.jpg',
-    beforeSrc: '/demo/pipeline/02_page_detected.jpg',
     configOptions: [],
   },
   {
@@ -83,7 +79,6 @@ const STEPS: PipelineStepDef[] = [
     description: 'Extract each detected photo as its own crop.',
     detail: 'Applies a per-photo homography to extract a clean rectangular crop from the perspective-corrected page. Each crop enters the per-photo stages independently.',
     imageSrc: '/demo/pipeline/05_raw.jpg',
-    beforeSrc: '/demo/pipeline/04_photo_bounds.jpg',
     configOptions: [],
   },
   {
@@ -94,7 +89,6 @@ const STEPS: PipelineStepDef[] = [
     description: 'Detect and correct rotation using Claude AI.',
     detail: 'Sends the photo to Claude Haiku asking for rotation (0/90/180/270°), flip flag, and a scene description. The scene description is reused by the glare removal model as inpainting context. Runs before glare removal so the model sees a correctly-oriented image.',
     imageSrc: '/demo/pipeline/06_oriented.jpg',
-    beforeSrc: '/demo/pipeline/05_raw.jpg',
     configOptions: [
       {
         key: 'skip_ai_orient',
@@ -113,7 +107,6 @@ const STEPS: PipelineStepDef[] = [
     description: 'Erase glare using AI diffusion inpainting.',
     detail: 'Detects bright saturated highlights and creates a glare mask. OpenAI gpt-image-1 receives the photo, mask, and scene description and reconstructs the masked area using context from surrounding pixels. OpenCV Telea inpainting is available as a fallback.',
     imageSrc: '/demo/pipeline/07_deglared.jpg',
-    beforeSrc: '/demo/pipeline/06_oriented.jpg',
     configOptions: [
       {
         key: 'use_openai',
@@ -132,7 +125,6 @@ const STEPS: PipelineStepDef[] = [
     description: 'Restore natural colours: white balance, deyellow, brightness, sharpen.',
     detail: 'Four stages: (1) white-point stretch, (2) deyellow to remove amber cast, (3) adaptive brightness lift on shadows/midtones, (4) vibrance to recover undersaturated hues. Finished with unsharp-mask sharpening.',
     imageSrc: '/demo/pipeline/08_enhanced.jpg',
-    beforeSrc: '/demo/pipeline/07_deglared.jpg',
     configOptions: [],
   },
 ]
@@ -169,16 +161,7 @@ function StepRow({ step, index, job, onRerun, rerunning }: StepRowProps) {
 
   const imageBlock = (
     <div className="relative rounded-2xl overflow-hidden shadow-md border border-sa-stone-200 dark:border-sa-stone-700 bg-sa-stone-100 dark:bg-sa-stone-800">
-      {step.beforeSrc ? (
-        <BeforeAfterSlider
-          beforeSrc={step.beforeSrc}
-          afterSrc={step.imageSrc ?? undefined}
-          beforeLabel="Before"
-          afterLabel="After"
-          initialPosition={0}
-          className={step.imageSrc?.includes('01_loaded') || step.imageSrc?.includes('02_page') ? 'aspect-[3/4]' : 'aspect-[3/2]'}
-        />
-      ) : step.imageSrc ? (
+      {step.imageSrc ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={step.imageSrc}
