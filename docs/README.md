@@ -24,7 +24,7 @@ Read this first if you're new to the project.
 - Image processing pipeline — steps, execution model, storage abstraction
 - Key technical decisions (why OpenAI for glare, why Hough rotation is disabled, etc.)
 - AWS resource names, environments (dev/prod), CI/CD workflows
-- API key resolution, authentication flow, WebSocket live progress
+- API key resolution, authentication flow, Amazon SES / transactional email, WebSocket live progress
 - Planned / not yet built
 
 Read this first when orienting to the project or making architectural decisions.

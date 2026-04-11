@@ -36,3 +36,4 @@ Development log for Sunday Album. Entries fall into two categories:
 | 2026-04-09 | [dev-branch-strategy](2026-04-09-dev-branch-strategy.md) | Decision: feature → dev → main branch model, dev as staging environment |
 | 2026-04-10 | [public-website-plan](2026-04-10-public-website-plan.md) | Plan: www.sundayalbum.com public site — page structure, pricing, video script, DNS |
 | 2026-04-10 | [public-website](2026-04-10-public-website.md) | Implementation: (public) route group, 5 marketing pages, pipeline page with real images, BeforeAfterSlider, re-run integration |
+| 2026-04-11 | [ses-email-deliverability](2026-04-11-ses-email-deliverability.md) | SES/Gmail via amazonses diagnosis; AWS CLI snapshot; DNS; plan: domain verify, DKIM/SPF/DMARC, production access |

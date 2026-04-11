@@ -1,0 +1,70 @@
+{
+  "Comment": "SES Easy DKIM + SPF + DMARC for sundayalbum.com (us-west-2)",
+  "Changes": [
+    {
+      "Action": "UPSERT",
+      "ResourceRecordSet": {
+        "Name": "qho326dncn5rswt6uyeurqbvl72u6ghm._domainkey.sundayalbum.com.",
+        "Type": "CNAME",
+        "TTL": 1800,
+        "ResourceRecords": [
+          {
+            "Value": "qho326dncn5rswt6uyeurqbvl72u6ghm.dkim.amazonses.com."
+          }
+        ]
+      }
+    },
+    {
+      "Action": "UPSERT",
+      "ResourceRecordSet": {
+        "Name": "zks4dtkib5qwlhaszjxnevddrfhuedte._domainkey.sundayalbum.com.",
+        "Type": "CNAME",
+        "TTL": 1800,
+        "ResourceRecords": [
+          {
+            "Value": "zks4dtkib5qwlhaszjxnevddrfhuedte.dkim.amazonses.com."
+          }
+        ]
+      }
+    },
+    {
+      "Action": "UPSERT",
+      "ResourceRecordSet": {
+        "Name": "cgxvr54ffpp2rjkiiosioqkes2gejark._domainkey.sundayalbum.com.",
+        "Type": "CNAME",
+        "TTL": 1800,
+        "ResourceRecords": [
+          {
+            "Value": "cgxvr54ffpp2rjkiiosioqkes2gejark.dkim.amazonses.com."
+          }
+        ]
+      }
+    },
+    {
+      "Action": "UPSERT",
+      "ResourceRecordSet": {
+        "Name": "sundayalbum.com.",
+        "Type": "TXT",
+        "TTL": 300,
+        "ResourceRecords": [
+          {
+            "Value": "\"v=spf1 include:amazonses.com ~all\""
+          }
+        ]
+      }
+    },
+    {
+      "Action": "UPSERT",
+      "ResourceRecordSet": {
+        "Name": "_dmarc.sundayalbum.com.",
+        "Type": "TXT",
+        "TTL": 300,
+        "ResourceRecords": [
+          {
+            "Value": "\"v=DMARC1; p=none;\""
+          }
+        ]
+      }
+    }
+  ]
+}
