@@ -14,3 +14,11 @@ dist/
 build/
 tmp/
 .DS_Store
+
+# macOS app build artifacts
+mac-app/.build/
+mac-app/SundayAlbum.xcodeproj/project.xcworkspace/
+mac-app/SundayAlbum.xcodeproj/xcuserdata/
+
+# Next.js
+web/tsconfig.tsbuildinfo

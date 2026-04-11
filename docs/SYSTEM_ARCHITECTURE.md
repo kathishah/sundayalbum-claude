@@ -11,14 +11,15 @@
 2. [High-Level Architecture](#high-level-architecture)
 3. [Image Processing Pipeline](#image-processing-pipeline)
 4. [Key Technical Decisions](#key-technical-decisions)
-5. [Web Application (AWS)](#web-application-aws)
-6. [macOS App](#macos-app)
-7. [SDLC — Branch Strategy & Deployments](#sdlc--branch-strategy--deployments)
-8. [API Key Resolution](#api-key-resolution)
-9. [Authentication Flow](#authentication-flow)
-10. [Live Progress (WebSocket)](#live-progress-websocket)
-11. [Domains & DNS](#domains--dns)
-12. [Planned / Not Yet Built](#planned--not-yet-built)
+5. [Public Marketing Site](#public-marketing-site)
+6. [Web Application (AWS)](#web-application-aws)
+7. [macOS App](#macos-app)
+8. [SDLC — Branch Strategy & Deployments](#sdlc--branch-strategy--deployments)
+9. [API Key Resolution](#api-key-resolution)
+10. [Authentication Flow](#authentication-flow)
+11. [Live Progress (WebSocket)](#live-progress-websocket)
+12. [Domains & DNS](#domains--dns)
+13. [Planned / Not Yet Built](#planned--not-yet-built)
 
 ---
 
@@ -34,6 +35,9 @@ Three delivery surfaces share one image processing pipeline:
 | **Python CLI** | Production | `python -m src.cli process ...` |
 | **macOS app** | Production | `mac-app/` — SwiftUI shell over Python CLI |
 | **Web app** | Production (dev + prod) | Next.js → AWS Lambda pipeline |
+
+The web app also serves a public marketing site (no auth required) at `www.sundayalbum.com`
+via the `(public)` Next.js route group. See [Public Marketing Site](#public-marketing-site).
 
 ---
 
@@ -207,6 +211,51 @@ white-point stretch → shadow lift → vibrance saturation. See `journal/2026-0
 - **HEIC (24 MP):** Fast, standard iPhone format. Use for all iteration.
 - **DNG (48 MP ProRAW):** Maximum data for quality validation. 2× slower to process.
 - The pipeline handles both transparently — the loader normalizes to float32 RGB [0, 1].
+
+---
+
+## Public Marketing Site
+
+Served by the same Next.js / App Runner deployment as the authenticated web app — no separate
+infrastructure. A Next.js [route group](https://nextjs.org/docs/app/building-your-application/routing/route-groups)
+`(public)` owns the marketing routes; the `(app)` group owns all authenticated routes.
+
+### Pages
+
+| Route | File | Purpose |
+|-------|------|---------|
+| `/` | `(public)/page.tsx` | Landing — hero animation, demo sliders, pipeline teaser |
+| `/pricing` | `(public)/pricing/page.tsx` | Free Mac app, free web tier, BYOK model |
+| `/download` | `(public)/download/page.tsx` | macOS download + web app CTA |
+| `/about` | `(public)/about/page.tsx` | Project motivation and contact |
+| `/pipeline` | `(public)/pipeline/page.tsx` | Step-by-step pipeline walkthrough with real images; re-run controls for authenticated users |
+
+### Components
+
+| Component | Purpose |
+|-----------|---------|
+| `MarketingNav` | Top nav — logo, page links, environment-aware "Get started" CTA |
+| `MarketingFooter` | Footer with links grouped by category |
+| `BeforeAfterSlider` | Draggable reveal slider used on landing page |
+
+### CTA routing
+
+All CTAs use relative paths (`/login`, `/settings`) so the same build works on every hostname
+(`www.sundayalbum.com`, `app.sundayalbum.com`, `dev.sundayalbum.com`) without environment flags.
+
+### Demo assets
+
+Static images served from `web/public/demo/`:
+- `cave-stage-{0,1,2}.jpg` — hero animation frames (raw → deglared → restored)
+- `pair-a-{before,after}.jpg`, `pair-b-*.jpg` — landing page demo sliders
+- `pipeline/{01–09}*.jpg` — one image per pipeline step from `IMG_1268.HEIC`
+
+### Pipeline page re-run integration
+
+`/pipeline?jobId={id}` loads the job via `GET /jobs/{id}` and exposes per-step config toggles
+and a "Re-run from here" button. Clicking calls `POST /jobs/{id}/reprocess` with
+`{ from_step, config }`. This is the same reprocessing API used by the authenticated web app.
+Only available when `isAuthenticated()` returns `true` and a valid `jobId` is in the URL.
 
 ---
 
@@ -387,7 +436,8 @@ Frontend fallback: polls `GET /jobs/{jobId}` every 3s if WebSocket is unavailabl
 |---|---|---|
 | `dev.sundayalbum.com` | App Runner `sundayalbum-web-dev` | Active |
 | `app.sundayalbum.com` | App Runner `sundayalbum-web-prod` | Active |
-| `sundayalbum.com` | Not yet configured | www / apex routing not set up |
+| `www.sundayalbum.com` | App Runner `sundayalbum-web-prod` (same as above) | DNS cutover pending |
+| `sundayalbum.com` (apex) | Not yet configured | Redirect to `www` not set up |
 
 DNS hosted in Route 53 (`sundayalbum.com` zone ID: `Z0420309YMJDXBAU344P`).
 Domain registered on Namecheap; NS records point to Route 53.
@@ -398,6 +448,7 @@ Domain registered on Namecheap; NS records point to Route 53.
 
 - **Phase 8: Admin tools** — user impersonation panel for debugging user jobs. Designed in `docs/archive/WEB_UI_PLAN_Part4.md`; not implemented.
 - **Phase 9: Production hardening** — CloudFront distribution, per-user concurrency limits, CloudWatch alarms, "delete my data" endpoint.
-- **`www.sundayalbum.com` / apex** — marketing site or redirect; not configured.
+- **`www.sundayalbum.com` DNS** — marketing pages are built; Route 53 CNAME to App Runner not yet applied.
+- **`sundayalbum.com` apex redirect** — naked-domain redirect to `www` not yet configured.
 - **Multi-shot glare compositing** — `src/glare/remover_multi.py` exists but is not integrated. Requires multi-angle test images of the same album page.
 - **Border-based small-angle rotation** — replacement for the disabled Hough-line rotation detector. Should detect the white border of the physical print to determine frame angle.
