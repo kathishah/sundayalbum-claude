@@ -15,6 +15,13 @@ interface BeforeAfterSliderProps {
   beforeSlot?: React.ReactNode
   /** Render slot for 'after' pane when no afterSrc is supplied */
   afterSlot?: React.ReactNode
+  /**
+   * Starting handle position as a percentage (0–100).
+   * 0 = handle at left, showing full "before".
+   * 100 = handle at right, showing full "after".
+   * Defaults to 0.
+   */
+  initialPosition?: number
 }
 
 export default function BeforeAfterSlider({
@@ -27,10 +34,21 @@ export default function BeforeAfterSlider({
   className,
   beforeSlot,
   afterSlot,
+  initialPosition = 0,
 }: BeforeAfterSliderProps) {
-  const [position, setPosition] = useState(40)
+  const [position, setPosition] = useState(initialPosition)
   const containerRef = useRef<HTMLDivElement>(null)
   const isDragging = useRef(false)
+  const hinted = useRef(false)
+
+  // One-time hint: nudge handle right then back to show it's draggable
+  useEffect(() => {
+    if (hinted.current) return
+    hinted.current = true
+    const t1 = setTimeout(() => setPosition(18), 600)
+    const t2 = setTimeout(() => setPosition(initialPosition), 1200)
+    return () => { clearTimeout(t1); clearTimeout(t2) }
+  }, [initialPosition])
 
   const updatePosition = useCallback((clientX: number) => {
     const el = containerRef.current
@@ -58,15 +76,9 @@ export default function BeforeAfterSlider({
   )
 
   useEffect(() => {
-    const onMove = (e: MouseEvent) => {
-      if (isDragging.current) updatePosition(e.clientX)
-    }
-    const onTouchMove = (e: TouchEvent) => {
-      if (isDragging.current) updatePosition(e.touches[0].clientX)
-    }
-    const onUp = () => {
-      isDragging.current = false
-    }
+    const onMove = (e: MouseEvent) => { if (isDragging.current) updatePosition(e.clientX) }
+    const onTouchMove = (e: TouchEvent) => { if (isDragging.current) updatePosition(e.touches[0].clientX) }
+    const onUp = () => { isDragging.current = false }
 
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
@@ -93,8 +105,21 @@ export default function BeforeAfterSlider({
       role="img"
       aria-label={`Before/after comparison: ${beforeLabel} and ${afterLabel}`}
     >
-      {/* After (full width, behind) */}
+      {/* Base layer: "before" — always full width */}
       <div className="w-full h-full">
+        {beforeSrc ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={beforeSrc} alt={beforeAlt} className="w-full h-full object-cover" draggable={false} />
+        ) : (
+          beforeSlot
+        )}
+      </div>
+
+      {/* Overlay: "after" — revealed from left as handle moves right */}
+      <div
+        className="absolute inset-0 overflow-hidden"
+        style={{ clipPath: `inset(0 ${100 - position}% 0 0)` }}
+      >
         {afterSrc ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={afterSrc} alt={afterAlt} className="w-full h-full object-cover" draggable={false} />
@@ -103,33 +128,15 @@ export default function BeforeAfterSlider({
         )}
       </div>
 
-      {/* Before (clipped to left side) */}
-      <div
-        className="absolute inset-0 overflow-hidden"
-        style={{ clipPath: `inset(0 ${100 - position}% 0 0)` }}
-      >
-        {beforeSrc ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={beforeSrc}
-            alt={beforeAlt}
-            className="w-full h-full object-cover"
-            draggable={false}
-          />
-        ) : (
-          beforeSlot
-        )}
-      </div>
-
       {/* Divider line */}
       <div
-        className="absolute inset-y-0 w-0.5 bg-white shadow-[0_0_6px_rgba(0,0,0,0.4)] pointer-events-none"
+        className="absolute inset-y-0 w-0.5 bg-white shadow-[0_0_6px_rgba(0,0,0,0.4)] pointer-events-none transition-[left] duration-[200ms]"
         style={{ left: `${position}%`, transform: 'translateX(-50%)' }}
       />
 
       {/* Handle knob */}
       <div
-        className="absolute top-1/2 w-9 h-9 rounded-full bg-white shadow-[0_2px_12px_rgba(0,0,0,0.35)] flex items-center justify-center pointer-events-none"
+        className="absolute top-1/2 w-9 h-9 rounded-full bg-white shadow-[0_2px_12px_rgba(0,0,0,0.35)] flex items-center justify-center pointer-events-none transition-[left] duration-[200ms]"
         style={{ left: `${position}%`, transform: 'translate(-50%, -50%)' }}
       >
         <svg

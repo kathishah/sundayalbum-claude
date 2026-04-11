@@ -4,6 +4,7 @@ const footerLinks = [
   {
     heading: 'Product',
     links: [
+      { href: '/pipeline', label: 'Pipeline' },
       { href: '/pricing', label: 'Pricing' },
       { href: '/download', label: 'Download for Mac' },
       { href: '/login', label: 'Web App' },
@@ -45,8 +46,6 @@ export default function MarketingFooter() {
                   <li key={link.href}>
                     <Link
                       href={link.href}
-                      target={link.external ? '_blank' : undefined}
-                      rel={link.external ? 'noopener noreferrer' : undefined}
                       className="text-sm text-sa-stone-600 dark:text-sa-stone-400 hover:text-sa-stone-900 dark:hover:text-sa-stone-50 transition-colors duration-[200ms]"
                     >
                       {link.label}

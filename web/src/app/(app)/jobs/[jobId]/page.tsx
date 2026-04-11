@@ -632,6 +632,13 @@ export default function JobDetailPage({ params }: { params: { jobId: string } })
         >
           {job.input_filename}
         </span>
+        <span className="text-sa-stone-300 dark:text-sa-stone-600 ml-auto" aria-hidden="true">·</span>
+        <Link
+          href={`/pipeline?jobId=${job.job_id}`}
+          className="ml-1 text-sa-amber-600 dark:text-sa-amber-400 hover:underline flex-shrink-0"
+        >
+          View in Pipeline
+        </Link>
         <span className="text-sa-stone-300 dark:text-sa-stone-600">/</span>
         <span className="text-sa-stone-900 dark:text-sa-stone-100 font-semibold">{currentLabel}</span>
       </div>

@@ -7,6 +7,7 @@ import clsx from 'clsx'
 import { isAuthenticated } from '@/lib/auth'
 
 const navLinks = [
+  { href: '/pipeline', label: 'Pipeline' },
   { href: '/pricing', label: 'Pricing' },
   { href: '/download', label: 'Download' },
   { href: '/about', label: 'About' },
