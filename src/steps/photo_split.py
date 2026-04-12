@@ -44,7 +44,6 @@ def run(
         Dict with ``photo_count`` (int).
     """
     from src.photo_detection.splitter import split_photos
-    from src.photo_detection.detector import detect_photos
 
     detection_result = storage.read_json(f"debug/{stem}_05_photo_detections.json")
     multi_blob: bool = detection_result.get("multi_blob", False)
@@ -74,25 +73,14 @@ def run(
         )
         return {"photo_count": 1}
 
-    # Rebuild PhotoDetection objects from stored JSON
-    # Re-run detection on the same image to get proper objects for splitter
+    # Reconstruct PhotoDetection objects from the stored detection dicts.
+    # We use the stored bboxes directly (rather than re-running detect_photos)
+    # so that manual boundary overrides written by photo_detect are respected.
     det_dicts = detection_result["detections"]
-
-    # We stored bbox + region_type; reconstruct minimal objects for split_photos
-    # by re-running detect_photos (idempotent on the same image+config)
-    page_detection_json = storage.read_json(f"debug/{stem}_03_page_detection.json")
-    page_was_corrected: bool = not page_detection_json["is_full_frame"]
-
-    detections = detect_photos(
-        page_image,
-        min_area_ratio=config.photo_detect_min_area_ratio,
-        max_count=config.photo_detect_max_count,
-        method=config.photo_detect_method,
-        page_was_corrected=page_was_corrected,
-    )
+    detections = _detections_from_dicts(det_dicts, page_image)
 
     if not detections:
-        logger.warning("photo_split: re-detection returned 0 photos — using full page")
+        logger.warning("photo_split: no valid detections in JSON — using full page")
         storage.write_image(
             f"debug/{stem}_05_photo_01_raw.jpg", page_image, format="jpeg", quality=95
         )
@@ -114,3 +102,60 @@ def run(
     actual_count = len(extracted)
     logger.info("photo_split: extracted %d photo(s)", actual_count)
     return {"photo_count": actual_count}
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _detections_from_dicts(det_dicts: list[dict], page_image: "np.ndarray") -> list:
+    """Reconstruct :class:`PhotoDetection` objects from stored detection dicts.
+
+    Uses bbox corners directly so that manually overridden boundaries are
+    respected without re-running the contour detector.
+
+    Args:
+        det_dicts: List of dicts with at minimum a ``bbox`` key
+                   (``[x1, y1, x2, y2]`` in pixel coordinates).
+        page_image: The page image (used only to compute ``area_ratio``).
+
+    Returns:
+        List of :class:`PhotoDetection` objects.
+    """
+    import numpy as np
+    from src.photo_detection.detector import PhotoDetection
+
+    h, w = page_image.shape[:2]
+    page_area = h * w
+    detections = []
+
+    for d in det_dicts:
+        try:
+            x1, y1, x2, y2 = [int(v) for v in d["bbox"]]
+            # Clamp to image bounds
+            x1, x2 = max(0, x1), min(w, x2)
+            y1, y2 = max(0, y1), min(h, y2)
+            if x2 <= x1 or y2 <= y1:
+                continue
+            corners = np.array([
+                [x1, y1],
+                [x2, y1],
+                [x2, y2],
+                [x1, y2],
+            ], dtype=np.float32)
+            area_ratio = ((x2 - x1) * (y2 - y1)) / max(page_area, 1)
+            # Minimal contour — just the 4 corners reshaped for OpenCV
+            contour = corners.reshape(-1, 1, 2).astype(np.int32)
+            det = PhotoDetection(
+                bbox=(x1, y1, x2, y2),
+                corners=corners,
+                confidence=float(d.get("confidence", 1.0)),
+                orientation=str(d.get("orientation", "unknown")),
+                area_ratio=area_ratio,
+                contour=contour,
+            )
+            detections.append(det)
+        except (KeyError, ValueError, TypeError) as exc:
+            logger.warning("photo_split: skipping malformed detection dict: %s — %s", d, exc)
+
+    return detections

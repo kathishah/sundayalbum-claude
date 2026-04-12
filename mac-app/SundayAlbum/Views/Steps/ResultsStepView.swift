@@ -5,8 +5,14 @@ import AppKit
 struct ResultsStepView: View {
     let job: ProcessingJob
 
-    @State private var selectedIndex: Int = 0
+    @State private var selectedIndex: Int
     @State private var image: NSImage?
+
+    /// `photoIndex` seeds the initial selection so "Photo 2 > Done" opens on photo 2.
+    init(job: ProcessingJob, photoIndex: Int = 0) {
+        self.job = job
+        self._selectedIndex = State(initialValue: photoIndex)
+    }
 
     var photos: [ExtractedPhoto] { job.extractedPhotos }
     var total: Int { photos.count }

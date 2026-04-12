@@ -111,6 +111,99 @@ final class PipelineRunner {
         job.errorMessage = "Cancelled"
     }
 
+    /// Restart the pipeline from the photo_split step onward.
+    ///
+    /// Assumes ``_05_photo_detections.json`` has already been written to the
+    /// debug folder by the caller (e.g. ``PhotoSplitStepView``).  Builds a CLI
+    /// invocation with ``--steps photo_split,...`` so that load, normalize,
+    /// page_detect, and photo_detect are all skipped.
+    func reprocessFromPhotoSplit() {
+        guard let inputURL = job.inputURL else {
+            job.state = .failed
+            job.errorMessage = "No input file URL"
+            return
+        }
+
+        let runtime = RuntimeManager.shared
+        guard let pythonURL = runtime.pythonURL else {
+            job.state = .failed
+            job.errorMessage = "Python runtime not ready."
+            return
+        }
+
+        // Step IDs that come after photo_detect/photo_split
+        let stepsFromSplit = [
+            "photo_split",
+            "ai_orientation",
+            "glare_detect",
+            "keystone_correct",
+            "dewarp",
+            "rotation_correct",
+            "white_balance",
+            "color_restore",
+            "deyellow",
+            "sharpen",
+        ].joined(separator: ",")
+
+        let proc = Process()
+        proc.executableURL = pythonURL
+        var args = [
+            "-m", "src.cli", "process", inputURL.path,
+            "--output", outputDir.path,
+            "--steps", stepsFromSplit,
+        ]
+
+        let s = AppSettings.shared
+        if s.useOpenCVFallback { args.append("--no-openai-glare") }
+        if s.debugOutputEnabled {
+            args += ["--debug", "--debug-dir", s.debugFolder.path]
+        }
+
+        proc.arguments = args
+        proc.currentDirectoryURL = runtime.cliWorkingDirectory
+
+        let secrets = SecretsLoader(projectRoot: runtime.cliWorkingDirectory)
+        var env = secrets.environment()
+        if let extraPath = runtime.extraPythonPath {
+            let existing = env["PYTHONPATH"] ?? ""
+            env["PYTHONPATH"] = existing.isEmpty ? extraPath : "\(extraPath):\(existing)"
+        }
+        proc.environment = env
+
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        proc.standardError = pipe
+
+        pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
+            let lines = text.components(separatedBy: "\n")
+            Task { @MainActor [weak self] in
+                self?.handle(lines: lines)
+            }
+        }
+
+        proc.terminationHandler = { [weak proc] _ in
+            let status = proc?.terminationStatus ?? -1
+            Task { @MainActor [weak self] in
+                self?.handleTermination(exitCode: Int(status))
+            }
+        }
+
+        self.process = proc
+        job.state = .running
+        job.currentStep = .photoSplit
+        job.stepStatus = .running
+        job.extractedPhotos = []
+
+        do {
+            try proc.run()
+        } catch {
+            job.state = .failed
+            job.errorMessage = "Failed to launch Python: \(error.localizedDescription)"
+        }
+    }
+
     // MARK: - Private
 
     private func handle(lines: [String]) {
