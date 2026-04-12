@@ -88,6 +88,7 @@ struct PhotoSplitStepView: View {
                     }
                     .frame(width: geo.size.width, height: geo.size.height)
                     .contentShape(Rectangle())
+                    .coordinateSpace(name: "photoSplitCanvas")
                     .gesture(
                         DragGesture(minimumDistance: 4)
                             .onChanged { v in
@@ -468,7 +469,9 @@ private struct CornerHandle: View {
         .shadow(color: .black.opacity(0.4), radius: 4)
         .position(position)        // .position() moves the hit area; .offset() does NOT
         .gesture(
-            DragGesture(minimumDistance: 0)
+            // coordinateSpace: .named("photoSplitCanvas") ensures v.location is
+            // in the canvas coordinate space, not the handle's 20×20 local frame.
+            DragGesture(minimumDistance: 0, coordinateSpace: .named("photoSplitCanvas"))
                 .onChanged { v in onDrag(v.location) }
         )
     }
