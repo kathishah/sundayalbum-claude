@@ -117,7 +117,11 @@ function AfterSection({ job, height }: AfterSectionProps) {
       className="flex items-center justify-center"
       style={{ height, minWidth: height }}
     >
-      <PipelineProgressWheel completedCount={completedCount} size={height} />
+      <PipelineProgressWheel
+        completedCount={completedCount}
+        size={height}
+        isRunning={job.status === 'processing'}
+      />
     </div>
   )
 }

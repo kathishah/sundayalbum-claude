@@ -189,3 +189,57 @@ Design:
   percentage.
 - Appears/disappears with a slide+fade transition.
 - Works identically for initial processing and reprocessing — one consistent UI path.
+
+---
+
+## Web UI Parity Plan (2026-04-12)
+
+Port all macOS UX improvements to the Next.js web frontend on the same branch.
+Implementation order: lowest-risk first, photo boundary override last.
+
+### Priority 1 — Library card: next-step segment pulse
+**File:** `web/src/components/library/ProgressWheel.tsx`
+
+`ProgressWheel` renders 6 SVG pie segments. Add a `PulsingSegment` sub-component: while
+`job.status === 'processing'`, the segment at index `BACKEND_TO_VISUAL[job.current_step]`
+(= `completedCount`) gets a CSS `@keyframes` fill animation cycling between amber and stone.
+All completed segments stay solid amber; future segments stay stone.
+Mirrors macOS `PulsingPieSegment`.
+
+### Priority 2 — Job detail: active step pulsing in sidebar
+**File:** `web/src/app/(app)/jobs/[jobId]/page.tsx` (StepTree rows)
+
+The step row for the currently-active step (matched by backend step key while
+`job.status === 'processing'`) shows a ripple ring behind its icon using the same CSS
+`@keyframes` as the library card. Thread an `isRunning` boolean into each row.
+
+### Priority 3 — Job detail: processing progress banner
+**File:** `web/src/app/(app)/jobs/[jobId]/page.tsx` (canvas area)
+
+Whenever `job.status === 'processing'`, show a fixed strip at the bottom of the canvas with:
+spinner · "Step X of 6: [step_detail]" · amber progress bar · percentage.
+Slides in/out with CSS transition. Covers both initial processing and reprocessing.
+Mirrors macOS `ProcessingProgressBanner`.
+
+### Priority 4 — Results view: photo index
+**File:** `web/src/components/step-detail/ResultsView.tsx` (or wherever the ResultsView is)
+
+Verify the component receives the selected photo index from the step tree and opens on the
+correct photo. If `selectedIndex` is always initialised to 0, fix it to use the photo index
+passed from the parent — same as macOS `ResultsStepView` fix.
+
+### Priority 5 — Photo boundary override (interactive)
+**Files:** new `PhotoSplitView.tsx` · `web/src/lib/api.ts` · Lambda handler
+
+Backend: expose `_05_photo_detections.json` URL in `debug_urls` map. Handler already writes it;
+just needs the key added to the presigned-URL generation. Accept `forced_detections` in the
+reprocess config and pass `--forced-detections` to the CLI.
+
+Frontend:
+- Load detection JSON from `debug_urls['05_photo_detections']`
+- Render as SVG rects over the debug image
+- 4 corner `<circle>` handles with `onMouseDown` drag (same geometry as macOS `RectCornerHandle`)
+- "Add Region" → click-drag to draw new bbox
+- Delete button per region
+- "Confirm & Re-run" → `reprocessJob(jobId, { from_step: 'photo_detect', config: { forced_detections } })`
+- Swap `DebugImageCanvas` for `PhotoSplitView` in `photo_split` step selection
