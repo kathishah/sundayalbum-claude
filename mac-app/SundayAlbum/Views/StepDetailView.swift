@@ -60,6 +60,13 @@ struct StepDetailView: View {
                 StepCanvas(job: job, selection: selection)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .id(selection)
+                    .overlay(alignment: .bottom) {
+                        if job.state == .running {
+                            ProcessingProgressBanner(job: job)
+                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                        }
+                    }
+                    .animation(.saStandard, value: job.state == .running)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -107,7 +114,8 @@ private struct StepTree: View {
                         isSelected: selection == .preSplit(step),
                         isComplete: job.completedSteps.contains(step),
                         isCurrent: step == job.currentStep,
-                        isAccessible: canAccess(step)
+                        isAccessible: canAccess(step),
+                        isRunning: job.state == .running && step == job.currentStep
                     )
                     .contentShape(Rectangle())
                     .onTapGesture {
@@ -138,7 +146,8 @@ private struct StepTree: View {
                             isSelected: selection == .photo(index: 0, step: step),
                             isComplete: job.completedSteps.contains(step),
                             isCurrent: step == job.currentStep,
-                            isAccessible: canAccess(step)
+                            isAccessible: canAccess(step),
+                            isRunning: job.state == .running && step == job.currentStep
                         )
                         .contentShape(Rectangle())
                         .onTapGesture {
@@ -207,7 +216,8 @@ private struct PhotoBranchGroup: View {
                             isSelected: selection == .photo(index: photoIndex, step: step),
                             isComplete: job.completedSteps.contains(step),
                             isCurrent: step == job.currentStep,
-                            isAccessible: canAccess(step)
+                            isAccessible: canAccess(step),
+                            isRunning: job.state == .running && step == job.currentStep
                         )
                         .contentShape(Rectangle())
                         .onTapGesture {
@@ -247,6 +257,25 @@ private struct PhotoMiniThumb: View {
     }
 }
 
+// MARK: - Pulsing ring (active step indicator)
+
+private struct PulsingRing: View {
+    @State private var animate = false
+
+    var body: some View {
+        Circle()
+            .strokeBorder(Color.saAmber400, lineWidth: 2)
+            .frame(width: 28, height: 28)
+            .scaleEffect(animate ? 1.7 : 0.8)
+            .opacity(animate ? 0 : 0.8)
+            .onAppear {
+                withAnimation(.easeOut(duration: 0.9).repeatForever(autoreverses: false)) {
+                    animate = true
+                }
+            }
+    }
+}
+
 // MARK: - Tree row
 
 private struct TreeRow: View {
@@ -256,10 +285,14 @@ private struct TreeRow: View {
     let isComplete: Bool
     let isCurrent: Bool
     let isAccessible: Bool
+    let isRunning: Bool
 
     var body: some View {
         HStack(spacing: 8) {
             ZStack {
+                if isRunning {
+                    PulsingRing()
+                }
                 Circle()
                     .fill(isSelected ? Color.saAmber500 : Color.clear)
                     .frame(width: 22, height: 22)
@@ -335,7 +368,7 @@ private struct StepCanvas: View {
         case .colorCorrection:
             ColorCorrectionStepView(job: job, photoIndex: idx)
         default:
-            ResultsStepView(job: job)
+            ResultsStepView(job: job, photoIndex: idx)
         }
     }
 }
@@ -468,6 +501,54 @@ struct ReprocessBar: View {
             .padding(.vertical, 14)
         }
         .background(Color.saStone50)
+    }
+}
+
+// MARK: - Processing progress banner (overlay shown while pipeline runs)
+
+private struct ProcessingProgressBanner: View {
+    let job: ProcessingJob
+    private let totalSteps = PipelineStep.allCases.count - 1
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Divider()
+            HStack(spacing: 12) {
+                ProgressView()
+                    .controlSize(.small)
+                    .scaleEffect(0.85)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    let stepNum = min(job.currentStep.rawValue + 1, totalSteps)
+                    let stepLabel = job.currentStepName ?? job.currentStep.description
+                    Text("Step \(stepNum) of \(totalSteps): \(stepLabel)")
+                        .font(.dmSans(12, weight: .semibold))
+                        .foregroundStyle(Color.saTextPrimary)
+                        .lineLimit(1)
+
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(Color.saStone200)
+                            Capsule()
+                                .fill(Color.saAmber500)
+                                .frame(width: geo.size.width * job.progressFraction)
+                                .animation(.saStandard, value: job.progressFraction)
+                        }
+                    }
+                    .frame(height: 3)
+                }
+
+                Spacer()
+
+                Text("\(Int(job.progressFraction * 100))%")
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(Color.saStone500)
+                    .animation(.saStandard, value: job.progressFraction)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+        }
+        .background(.ultraThinMaterial)
     }
 }
 
