@@ -4,11 +4,13 @@
  * PhotoSplitView — interactive photo boundary editor.
  *
  * Displays the `04_photo_boundaries` debug image with an SVG overlay
- * containing four draggable corner handles per detected region.  The user
- * can resize existing regions, draw new ones, or delete unwanted ones, then
- * confirm to reprocess from `photo_detect` with the adjusted bboxes.
+ * containing four independently-draggable corner handles per detected region.
+ * Corners move freely (not constrained to a rectangle), allowing the user to
+ * match keystoned or rotated photo prints. Draw mode creates a new axis-aligned
+ * rectangle which can then be fine-tuned corner by corner.
  *
- * Mirrors macOS PhotoSplitStepView: same geometry, same four-corner approach.
+ * On confirm, sends `corners` (4 × [x, y] in natural px) plus a derived `bbox`
+ * as `forced_detections` to reprocess from `photo_detect`.
  */
 
 import { useState, useRef, useEffect } from 'react'
@@ -17,15 +19,16 @@ import type { Job } from '@/lib/types'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
+type Pt = [number, number]  // [x, y] in natural image pixels
+
 interface Region {
   id: number
-  bbox: [number, number, number, number]  // [x1, y1, x2, y2] in natural px
+  // Corners in clockwise order: [TL, TR, BR, BL]
+  corners: [Pt, Pt, Pt, Pt]
 }
 
-type Corner = 'tl' | 'tr' | 'br' | 'bl'
-
 type DragState =
-  | { type: 'corner'; regionId: number; corner: Corner }
+  | { type: 'corner'; regionId: number; cornerIdx: number }
   | { type: 'draw'; startX: number; startY: number; curX: number; curY: number }
   | null
 
@@ -35,6 +38,23 @@ interface NaturalSize { w: number; h: number }
 
 const COLOURS = ['#f59e0b', '#16a34a', '#3b82f6', '#dc2626', '#9333ea']
 const colour = (idx: number) => COLOURS[idx % COLOURS.length]
+
+/** Returns true if the 4-point quad is convex (all cross products same sign). */
+function isConvex(pts: [Pt, Pt, Pt, Pt]): boolean {
+  const n = pts.length
+  let sign = 0
+  for (let i = 0; i < n; i++) {
+    const a = pts[i]
+    const b = pts[(i + 1) % n]
+    const c = pts[(i + 2) % n]
+    const cross = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0])
+    if (Math.abs(cross) > 1e-9) {
+      if (sign === 0) sign = cross > 0 ? 1 : -1
+      else if ((cross > 0 ? 1 : -1) !== sign) return false
+    }
+  }
+  return true
+}
 
 /** Convert a client-space point to SVG viewport coordinates. */
 function clientToSvg(
@@ -49,6 +69,13 @@ function clientToSvg(
   if (!inv) return { x: clientX, y: clientY }
   const r = pt.matrixTransform(inv)
   return { x: r.x, y: r.y }
+}
+
+/** Derive axis-aligned bbox from free-form corners (for the API payload). */
+function bboxFromCorners(corners: [Pt, Pt, Pt, Pt]): [number, number, number, number] {
+  const xs = corners.map(c => c[0])
+  const ys = corners.map(c => c[1])
+  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]
 }
 
 // ── Component ──────────────────────────────────────────────────────────────────
@@ -73,16 +100,22 @@ export default function PhotoSplitView({ job, onStarted }: PhotoSplitViewProps) 
   const imageUrl      = job.debug_urls?.['04_photo_boundaries']
   const detectionsUrl = job.debug_urls?.['05_photo_detections_json']
 
-  // Load detection JSON on mount
+  // Load detection JSON on mount — prefer corners, fall back to bbox
   useEffect(() => {
     if (!detectionsUrl) return
     fetch(detectionsUrl)
       .then((r) => r.json())
-      .then((data: { detections?: Array<{ bbox: number[] }> }) => {
-        const list = (data.detections ?? []).map((d, i) => ({
-          id: i,
-          bbox: [d.bbox[0], d.bbox[1], d.bbox[2], d.bbox[3]] as [number, number, number, number],
-        }))
+      .then((data: { detections?: Array<{ bbox: number[]; corners?: number[][] }> }) => {
+        const list = (data.detections ?? []).map((d, i) => {
+          let corners: [Pt, Pt, Pt, Pt]
+          if (d.corners && d.corners.length === 4) {
+            corners = d.corners.map(c => [c[0], c[1]] as Pt) as [Pt, Pt, Pt, Pt]
+          } else {
+            const [x1, y1, x2, y2] = d.bbox
+            corners = [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
+          }
+          return { id: i, corners }
+        })
         setRegions(list)
         setNextId(list.length)
       })
@@ -102,7 +135,7 @@ export default function PhotoSplitView({ job, onStarted }: PhotoSplitViewProps) 
     return clientToSvg(svgRef.current, e.clientX, e.clientY)
   }
 
-  // ── SVG-level events (draw mode only) ────────────────────────────────────────
+  // ── SVG-level events (draw mode + corner drag) ───────────────────────────────
 
   function handleSvgMouseDown(e: React.MouseEvent) {
     if (mode !== 'draw') return
@@ -120,17 +153,15 @@ export default function PhotoSplitView({ job, onStarted }: PhotoSplitViewProps) 
     if (drag.type === 'draw') {
       setDrag((d) => d && d.type === 'draw' ? { ...d, curX: pt.x, curY: pt.y } : d)
     } else if (drag.type === 'corner') {
-      const { regionId, corner } = drag
+      const { regionId, cornerIdx } = drag
       setRegions((rs) =>
         rs.map((r) => {
           if (r.id !== regionId) return r
-          let [x1, y1, x2, y2] = r.bbox
-          const MIN = 30  // minimum region size in natural px
-          if (corner === 'tl')      { x1 = Math.min(pt.x, x2 - MIN); y1 = Math.min(pt.y, y2 - MIN) }
-          else if (corner === 'tr') { x2 = Math.max(pt.x, x1 + MIN); y1 = Math.min(pt.y, y2 - MIN) }
-          else if (corner === 'br') { x2 = Math.max(pt.x, x1 + MIN); y2 = Math.max(pt.y, y1 + MIN) }
-          else                      { x1 = Math.min(pt.x, x2 - MIN); y2 = Math.max(pt.y, y1 + MIN) }
-          return { ...r, bbox: [x1, y1, x2, y2] as [number, number, number, number] }
+          const newCorners = r.corners.map((c, i) =>
+            i === cornerIdx ? [pt.x, pt.y] as Pt : c
+          ) as [Pt, Pt, Pt, Pt]
+          // Only apply if the result remains a convex quad
+          return isConvex(newCorners) ? { ...r, corners: newCorners } : r
         }),
       )
     }
@@ -147,7 +178,8 @@ export default function PhotoSplitView({ job, onStarted }: PhotoSplitViewProps) 
         const y2 = Math.max(drag.startY, pt.y)
         if (x2 - x1 > 30 && y2 - y1 > 30) {
           const id = nextId
-          setRegions((rs) => [...rs, { id, bbox: [x1, y1, x2, y2] }])
+          const corners: [Pt, Pt, Pt, Pt] = [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
+          setRegions((rs) => [...rs, { id, corners }])
           setNextId((n) => n + 1)
         }
       }
@@ -158,10 +190,10 @@ export default function PhotoSplitView({ job, onStarted }: PhotoSplitViewProps) 
 
   // ── Corner handle events (edit mode only) ────────────────────────────────────
 
-  function handleCornerDown(e: React.MouseEvent, regionId: number, corner: Corner) {
+  function handleCornerDown(e: React.MouseEvent, regionId: number, cornerIdx: number) {
     e.preventDefault()
     e.stopPropagation()
-    setDrag({ type: 'corner', regionId, corner })
+    setDrag({ type: 'corner', regionId, cornerIdx })
   }
 
   // ── Delete ────────────────────────────────────────────────────────────────────
@@ -180,7 +212,8 @@ export default function PhotoSplitView({ job, onStarted }: PhotoSplitViewProps) 
         from_step: 'photo_detect',
         config: {
           forced_detections: regions.map((r) => ({
-            bbox: r.bbox,
+            bbox: bboxFromCorners(r.corners),
+            corners: r.corners,
             confidence: 1.0,
             region_type: 'photo',
             orientation: 'unknown',
@@ -242,23 +275,20 @@ export default function PhotoSplitView({ job, onStarted }: PhotoSplitViewProps) 
                 {/* Regions — pointer-events disabled during draw mode */}
                 <g style={{ pointerEvents: mode === 'draw' ? 'none' : 'auto' }}>
                   {regions.map((r, idx) => {
-                    const [x1, y1, x2, y2] = r.bbox
                     const c = colour(idx)
-                    const corners: Array<[Corner, number, number]> = [
-                      ['tl', x1, y1], ['tr', x2, y1],
-                      ['br', x2, y2], ['bl', x1, y2],
-                    ]
+                    const [tl, tr, br, bl] = r.corners
+                    const polyPoints = r.corners.map(p => `${p[0]},${p[1]}`).join(' ')
                     return (
                       <g key={r.id}>
-                        {/* Border */}
-                        <rect
-                          x={x1} y={y1} width={x2 - x1} height={y2 - y1}
+                        {/* Polygon border */}
+                        <polygon
+                          points={polyPoints}
                           fill="none" stroke={c} strokeWidth={3}
                           style={{ pointerEvents: 'none' }}
                         />
-                        {/* Label */}
+                        {/* Label — near TL corner */}
                         <text
-                          x={x1 + H * 0.6} y={y1 + H * 1.8}
+                          x={tl[0] + H * 0.6} y={tl[1] + H * 1.8}
                           fontSize={H * 1.5} fontWeight="600"
                           fontFamily="var(--font-dm-sans)"
                           fill="white" stroke={c} strokeWidth={0.4}
@@ -266,29 +296,29 @@ export default function PhotoSplitView({ job, onStarted }: PhotoSplitViewProps) 
                         >
                           Photo {idx + 1}
                         </text>
-                        {/* Delete button (top-right of bbox) */}
+                        {/* Delete button — at TR corner */}
                         <g
                           style={{ cursor: 'pointer' }}
                           onClick={() => deleteRegion(r.id)}
                         >
-                          <circle cx={x2} cy={y1} r={H} fill={c} />
+                          <circle cx={tr[0]} cy={tr[1]} r={H} fill={c} />
                           <text
-                            x={x2} y={y1} fontSize={H * 1.4}
+                            x={tr[0]} y={tr[1]} fontSize={H * 1.4}
                             textAnchor="middle" dominantBaseline="central"
                             fill="white" style={{ pointerEvents: 'none' }}
                           >×</text>
                         </g>
-                        {/* Corner handles */}
-                        {corners.map(([corner, cx, cy]) => (
+                        {/* 4 independent corner handles */}
+                        {r.corners.map((corner, cornerIdx) => (
                           <circle
-                            key={corner}
-                            cx={cx} cy={cy} r={H}
+                            key={cornerIdx}
+                            cx={corner[0]} cy={corner[1]} r={H}
                             fill={c} stroke="white" strokeWidth={2.5}
                             style={{
                               cursor: mode === 'edit' ? 'grab' : 'default',
                               filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.5))',
                             }}
-                            onMouseDown={(e) => mode === 'edit' && handleCornerDown(e, r.id, corner)}
+                            onMouseDown={(e) => mode === 'edit' && handleCornerDown(e, r.id, cornerIdx)}
                           />
                         ))}
                       </g>
@@ -339,7 +369,7 @@ export default function PhotoSplitView({ job, onStarted }: PhotoSplitViewProps) 
           <p className="text-[11px] text-sa-stone-400 dark:text-sa-stone-500 flex-shrink-0">
             {mode === 'draw'
               ? 'Click and drag to draw a new region'
-              : 'Drag corner handles to resize · × to delete'}
+              : 'Drag any corner freely to adjust shape · × to delete'}
           </p>
 
           <div className="flex-1" />

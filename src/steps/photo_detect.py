@@ -46,10 +46,17 @@ def run(
     # config.forced_detections to a list of detection dicts.  Write them
     # directly to the JSON and return without running contour detection.
     if config.forced_detections is not None:
-        # Normalise each dict: ensure required keys have defaults
+        # Normalise each dict: ensure required keys have defaults.
+        # Accept free-form quad corners when present; derive axis-aligned
+        # corners from bbox as a fallback for backward compatibility.
         forced = [
             {
                 "bbox": list(d["bbox"]),
+                "corners": (
+                    [list(c) for c in d["corners"]]
+                    if "corners" in d
+                    else _corners_from_bbox(d["bbox"])
+                ),
                 "confidence": float(d.get("confidence", 1.0)),
                 "region_type": str(d.get("region_type", "photo")),
                 "orientation": str(d.get("orientation", "unknown")),
@@ -118,10 +125,12 @@ def run(
         f"debug/{stem}_04_photo_boundaries.jpg", overlay, format="jpeg", quality=90
     )
 
-    # Serialise detections (bbox, confidence, region_type)
+    # Serialise detections — include quad corners alongside bbox so the
+    # interactive editor can seed from them and photo_split can use them.
     det_list = [
         {
             "bbox": list(d.bbox),
+            "corners": d.corners.tolist(),
             "confidence": float(d.confidence),
             "region_type": getattr(d, "region_type", "photo"),
             "orientation": getattr(d, "orientation", "unknown"),
@@ -139,12 +148,28 @@ def run(
     return result
 
 
+def _corners_from_bbox(bbox: list) -> list[list[float]]:
+    """Derive axis-aligned TL/TR/BR/BL corners from an [x1, y1, x2, y2] bbox.
+
+    Args:
+        bbox: Four-element sequence [x1, y1, x2, y2].
+
+    Returns:
+        List of four [x, y] corner points in clockwise order from top-left.
+    """
+    x1, y1, x2, y2 = bbox
+    return [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
+
+
 def _draw_forced_boundaries(page_image: "np.ndarray", forced: list[dict]) -> "np.ndarray":
-    """Draw coloured bounding boxes for forced detections onto *page_image*.
+    """Draw coloured quad outlines for forced detections onto *page_image*.
+
+    Uses ``corners`` (free-form quad) when present; falls back to ``bbox``
+    (axis-aligned rectangle) for backward compatibility.
 
     Args:
         page_image: Float32 RGB [0, 1] page image.
-        forced: List of detection dicts with ``bbox`` key.
+        forced: List of detection dicts with ``bbox`` and optional ``corners``.
 
     Returns:
         Float32 RGB [0, 1] overlay image.
@@ -161,11 +186,19 @@ def _draw_forced_boundaries(page_image: "np.ndarray", forced: list[dict]) -> "np
     ]
     overlay = (page_image * 255).astype("uint8").copy()
     for i, det in enumerate(forced):
-        x1, y1, x2, y2 = [int(v) for v in det["bbox"]]
         r, g, b = colours[i % len(colours)]
         colour_bgr = (int(b * 255), int(g * 255), int(r * 255))
-        cv2.rectangle(overlay, (x1, y1), (x2, y2), colour_bgr, 3)
+
+        if "corners" in det and len(det["corners"]) == 4:
+            pts = np.array([[int(c[0]), int(c[1])] for c in det["corners"]], dtype=np.int32)
+            cv2.polylines(overlay, [pts], isClosed=True, color=colour_bgr, thickness=3)
+            label_x, label_y = pts[0][0] + 6, pts[0][1] + 24
+        else:
+            x1, y1, x2, y2 = [int(v) for v in det["bbox"]]
+            cv2.rectangle(overlay, (x1, y1), (x2, y2), colour_bgr, 3)
+            label_x, label_y = x1 + 6, y1 + 24
+
         label = f"Photo {i + 1} (forced)"
-        cv2.putText(overlay, label, (x1 + 6, y1 + 24),
+        cv2.putText(overlay, label, (label_x, label_y),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, colour_bgr, 2, cv2.LINE_AA)
     return overlay.astype("float32") / 255.0

@@ -2,9 +2,9 @@ import SwiftUI
 import AppKit
 
 /// Photo split step view — shows detected regions overlaid on the fitted page image.
-/// Each region has 4 draggable corner handles (identical approach to PageDetectionStepView).
-/// "Confirm & Re-run" writes the corrected JSON to the debug folder and
-/// restarts the pipeline from photo_split onward.
+/// Each region has 4 independently-draggable corner handles, allowing the user to
+/// match keystoned or rotated photo prints (not just axis-aligned rectangles).
+/// "Confirm & Re-run" writes the corrected JSON and restarts from photo_split.
 struct PhotoSplitStepView: View {
     let job: ProcessingJob
     @Environment(AppState.self) private var appState
@@ -98,6 +98,7 @@ struct PhotoSplitStepView: View {
                             .onEnded { v in
                                 guard isDrawing, let s = drawStart else { return }
                                 let r = rectFrom(a: s, b: v.location)
+                                // Convert canvas rect to pixel-space corners [TL, TR, BR, BL]
                                 let px = CGRect(
                                     x: (r.minX - origin.x) / scaleX,
                                     y: (r.minY - origin.y) / scaleY,
@@ -168,7 +169,7 @@ struct PhotoSplitStepView: View {
                     .disabled(isRerunning || regions.isEmpty)
                 }
 
-                Text("Drag corner handles to resize a region. Tap \"Add Region\" then draw to create a new one.")
+                Text("Drag any corner handle freely to adjust shape. Tap \"Add Region\" then draw to create a new one.")
                     .font(.dmSans(11))
                     .foregroundStyle(Color.saTextTertiary)
             }
@@ -218,6 +219,23 @@ struct PhotoSplitStepView: View {
         print("[PhotoSplitStepView]   json loaded \(dets.count) detection(s)")
 
         regions = dets.enumerated().compactMap { idx, d in
+            let label = "Photo \(idx + 1)"
+
+            // Prefer corners key (free-form quad) if present
+            if let rawCorners = d["corners"] as? [[Any]], rawCorners.count == 4 {
+                let pts: [CGPoint] = rawCorners.compactMap { arr in
+                    guard arr.count == 2,
+                          let x = (arr[0] as? NSNumber).map({ CGFloat($0.doubleValue) }),
+                          let y = (arr[1] as? NSNumber).map({ CGFloat($0.doubleValue) })
+                    else { return nil }
+                    return CGPoint(x: x, y: y)
+                }
+                if pts.count == 4 {
+                    return EditableRegion(corners: pts, label: label)
+                }
+            }
+
+            // Fall back to bbox (axis-aligned rectangle)
             guard let raw = d["bbox"] as? [Any], raw.count == 4,
                   let x1 = (raw[0] as? NSNumber).map({ CGFloat($0.doubleValue) }),
                   let y1 = (raw[1] as? NSNumber).map({ CGFloat($0.doubleValue) }),
@@ -226,7 +244,7 @@ struct PhotoSplitStepView: View {
             else { return nil }
             return EditableRegion(
                 pixelRect: CGRect(x: x1, y: y1, width: x2 - x1, height: y2 - y1),
-                label: "Photo \(idx + 1)"
+                label: label
             )
         }
     }
@@ -240,13 +258,16 @@ struct PhotoSplitStepView: View {
         defer { isRerunning = false }
 
         let dets: [[String: Any]] = regions.map { r in
-            [
+            let xs = r.corners.map { $0.x }
+            let ys = r.corners.map { $0.y }
+            return [
                 "bbox": [
-                    Int(r.pixelRect.minX.rounded()),
-                    Int(r.pixelRect.minY.rounded()),
-                    Int(r.pixelRect.maxX.rounded()),
-                    Int(r.pixelRect.maxY.rounded()),
+                    Int((xs.min() ?? 0).rounded()),
+                    Int((ys.min() ?? 0).rounded()),
+                    Int((xs.max() ?? 0).rounded()),
+                    Int((ys.max() ?? 0).rounded()),
                 ],
+                "corners": r.corners.map { [Int($0.x.rounded()), Int($0.y.rounded())] },
                 "confidence": 1.0,
                 "region_type": "photo",
                 "orientation": "unknown",
@@ -315,16 +336,29 @@ struct PhotoSplitStepView: View {
 
 struct EditableRegion: Identifiable {
     let id = UUID()
-    var pixelRect: CGRect   // image pixel coordinates
+    /// Corner points in pixel space: [TL, TR, BR, BL] (clockwise from top-left).
+    var corners: [CGPoint]
     var label: String
+
+    /// Initialise from free-form corner points.
+    init(corners: [CGPoint], label: String) {
+        self.corners = corners
+        self.label = label
+    }
+
+    /// Convenience initialiser from an axis-aligned rect (used for drawn regions).
+    init(pixelRect: CGRect, label: String) {
+        self.corners = [
+            CGPoint(x: pixelRect.minX, y: pixelRect.minY),
+            CGPoint(x: pixelRect.maxX, y: pixelRect.minY),
+            CGPoint(x: pixelRect.maxX, y: pixelRect.maxY),
+            CGPoint(x: pixelRect.minX, y: pixelRect.maxY),
+        ]
+        self.label = label
+    }
 }
 
-// MARK: - Region view (border + 4 corner handles)
-//
-// Mirrors PageDetectionStepView's CornerHandle pattern exactly:
-// • Canvas-sized so Path coordinates equal canvas coordinates.
-// • Corner handles use .position() — hit area IS where the dot appears.
-// • DragGesture uses v.location (canvas space) — no base tracking needed.
+// MARK: - Region view (polygon border + 4 independent corner handles)
 
 private struct RegionView: View {
     @Binding var region: EditableRegion
@@ -335,34 +369,34 @@ private struct RegionView: View {
     let colour: Color
     let onDelete: () -> Void
 
-    // Canvas positions of the 4 corners
-    private var posTL: CGPoint { canvasPoint(px: region.pixelRect.minX, py: region.pixelRect.minY) }
-    private var posTR: CGPoint { canvasPoint(px: region.pixelRect.maxX, py: region.pixelRect.minY) }
-    private var posBR: CGPoint { canvasPoint(px: region.pixelRect.maxX, py: region.pixelRect.maxY) }
-    private var posBL: CGPoint { canvasPoint(px: region.pixelRect.minX, py: region.pixelRect.maxY) }
-
-    private func canvasPoint(px: CGFloat, py: CGFloat) -> CGPoint {
-        CGPoint(x: origin.x + px * scaleX, y: origin.y + py * scaleY)
+    private func canvasPoint(from px: CGPoint) -> CGPoint {
+        CGPoint(x: origin.x + px.x * scaleX, y: origin.y + px.y * scaleY)
     }
 
     private func pixelPoint(from canvas: CGPoint) -> CGPoint {
         CGPoint(x: (canvas.x - origin.x) / scaleX, y: (canvas.y - origin.y) / scaleY)
     }
 
+    private var canvasCorners: [CGPoint] {
+        region.corners.map { canvasPoint(from: $0) }
+    }
+
     var body: some View {
+        let cc = canvasCorners
+
         ZStack {
-            // Rectangle border (non-interactive, visual only)
+            // Polygon border
             Path { p in
-                p.move(to: posTL)
-                p.addLine(to: posTR)
-                p.addLine(to: posBR)
-                p.addLine(to: posBL)
+                p.move(to: cc[0])
+                p.addLine(to: cc[1])
+                p.addLine(to: cc[2])
+                p.addLine(to: cc[3])
                 p.closeSubpath()
             }
             .stroke(colour, lineWidth: 2)
             .allowsHitTesting(false)
 
-            // Label + delete button
+            // Label + delete button near TL corner
             HStack(spacing: 4) {
                 Text(region.label)
                     .font(.dmSans(11, weight: .semibold))
@@ -374,65 +408,49 @@ private struct RegionView: View {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 13))
                         .foregroundStyle(colour)
-                        .background(Color.black.opacity(0.01))   // widen tap target
+                        .background(Color.black.opacity(0.01))
                 }
                 .buttonStyle(.plain)
             }
             .padding(4)
-            // Place label just inside the top-left corner
-            .position(x: posTL.x + 52, y: posTL.y + 14)
+            .position(x: cc[0].x + 52, y: cc[0].y + 14)
 
-            // TL handle — dragging changes minX, minY
-            RectCornerHandle(position: posTL, colour: colour) { cp in
-                let p = pixelPoint(from: cp)
-                let newW = region.pixelRect.maxX - p.x
-                let newH = region.pixelRect.maxY - p.y
-                if newW > 20 && newH > 20 {
-                    region.pixelRect = CGRect(x: p.x, y: p.y, width: newW, height: newH)
-                }
-            }
-
-            // TR handle — dragging changes maxX, minY
-            RectCornerHandle(position: posTR, colour: colour) { cp in
-                let p = pixelPoint(from: cp)
-                let newW = p.x - region.pixelRect.minX
-                let newH = region.pixelRect.maxY - p.y
-                if newW > 20 && newH > 20 {
-                    region.pixelRect = CGRect(x: region.pixelRect.minX, y: p.y,
-                                              width: newW, height: newH)
-                }
-            }
-
-            // BR handle — dragging changes maxX, maxY
-            RectCornerHandle(position: posBR, colour: colour) { cp in
-                let p = pixelPoint(from: cp)
-                let newW = p.x - region.pixelRect.minX
-                let newH = p.y - region.pixelRect.minY
-                if newW > 20 && newH > 20 {
-                    region.pixelRect = CGRect(x: region.pixelRect.minX, y: region.pixelRect.minY,
-                                              width: newW, height: newH)
-                }
-            }
-
-            // BL handle — dragging changes minX, maxY
-            RectCornerHandle(position: posBL, colour: colour) { cp in
-                let p = pixelPoint(from: cp)
-                let newW = region.pixelRect.maxX - p.x
-                let newH = p.y - region.pixelRect.minY
-                if newW > 20 && newH > 20 {
-                    region.pixelRect = CGRect(x: p.x, y: region.pixelRect.minY,
-                                              width: newW, height: newH)
+            // 4 independent corner handles
+            ForEach(0..<4, id: \.self) { idx in
+                CornerHandle(position: cc[idx], colour: colour) { canvasPos in
+                    let p = pixelPoint(from: canvasPos)
+                    var newCorners = region.corners
+                    newCorners[idx] = p
+                    if isConvex(newCorners) {
+                        region.corners = newCorners
+                    }
                 }
             }
         }
-        // Canvas-sized so all .position() coordinates are in canvas space
         .frame(width: canvasSize.width, height: canvasSize.height)
+    }
+
+    /// Returns true if the 4-point polygon is convex (all cross products same sign).
+    private func isConvex(_ pts: [CGPoint]) -> Bool {
+        let n = pts.count
+        guard n >= 3 else { return false }
+        var sign: Int = 0
+        for i in 0..<n {
+            let a = pts[i], b = pts[(i + 1) % n], c = pts[(i + 2) % n]
+            let cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x)
+            if abs(cross) > 0.01 {
+                let s = cross > 0 ? 1 : -1
+                if sign == 0 { sign = s }
+                else if s != sign { return false }
+            }
+        }
+        return true
     }
 }
 
-// MARK: - Corner handle (same visual style as PageDetectionStepView.CornerHandle)
+// MARK: - Corner handle
 
-private struct RectCornerHandle: View {
+private struct CornerHandle: View {
     let position: CGPoint
     let colour: Color
     /// Called with the new canvas position while dragging.
