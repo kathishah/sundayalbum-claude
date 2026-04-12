@@ -108,6 +108,7 @@ regressions: `python -m src.cli process test-images/ --output ./output/ --batch 
 | I want to… | Start here |
 |------------|------------|
 | Fix photo detection (wrong count, bad split) | `src/photo_detection/detector.py` + test images above |
+| Manually override detected photo boundaries | Web: Photo Split step → drag handles → "Confirm & Re-run"; macOS: same interactive editor; CLI: `--forced-detections` JSON flag — see `docs/PIPELINE_STEPS.md` → Step 5 |
 | Fix page detection (background in output) | `src/page_detection/detector.py` + `src/page_detection/perspective.py` |
 | Tune color / fade restoration | `src/color/restore.py` — params in `docs/PIPELINE_STEPS.md` → Step 9 |
 | Tune white balance or deyellowing | `src/color/white_balance.py`, `src/color/deyellow.py` |

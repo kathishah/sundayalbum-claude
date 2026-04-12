@@ -1,6 +1,6 @@
 # Sunday Album — Pipeline Steps Reference
 
-**Last updated:** 2026-04-10  
+**Last updated:** 2026-04-12  
 **See also:** `docs/SYSTEM_ARCHITECTURE.md` for the overall architecture and execution model.
 
 Each step is a pure function: `run(storage, stem, config, photo_index?) → dict`.  
@@ -153,9 +153,31 @@ fallback when contour detection produces disproportionate splits.
 For each detected region, computes a homography from the detected corner quadrilateral to a
 rectangular output, then crops via `cv2.warpPerspective`.
 
+### Forced-detection override
+When automatic detection produces wrong results, you can bypass contour detection entirely
+by providing explicit bounding boxes via `config.forced_detections`.
+
+**CLI:** pass a JSON array of detection objects:
+```bash
+python -m src.cli process image.HEIC --output ./output/ \
+  --forced-detections '[{"bbox":[50,80,900,700],"confidence":1.0,"region_type":"photo","orientation":"unknown"}]'
+```
+
+**Web UI:** on the Photo Split step detail, drag the corner handles to adjust detected
+regions (or draw new ones / delete unwanted ones), then click "Confirm & Re-run". The editor
+loads the current detections from `05_photo_detections_json` and posts the adjusted bboxes as
+`forced_detections` to the `photo_detect` reprocess endpoint.
+
+**macOS app:** same interactive boundary editor on the Photo Split step view.
+
+When `forced_detections` is set, the step skips contour detection entirely, writes the
+provided bboxes to `05_photo_detections.json`, and redraws the `04_photo_boundaries.jpg`
+overlay from scratch.
+
 ### Output
-- `photo_detect` writes `debug/{stem}_04_photo_boundaries.jpg` (bounding boxes overlaid) and
-  `debug/{stem}_05_photo_detections.json`
+- `photo_detect` writes `debug/{stem}_04_photo_boundaries.jpg` (bounding boxes overlaid)
+- `photo_detect` writes `debug/{stem}_05_photo_detections.json` (detection list; exposed as
+  the `05_photo_detections_json` debug URL so the interactive editors can seed from it)
 - `photo_split` writes `debug/{stem}_05_photo_NN_raw.jpg` per extracted photo and thumbnails
 
 ### Tunable params
@@ -164,6 +186,7 @@ rectangular output, then crops via `cv2.warpPerspective`.
 | `photo_detect_method` | `"contour"` | Detection method: `"contour"`, `"yolo"`, `"claude"` (only contour is active) |
 | `photo_detect_min_area_ratio` | `0.02` | Minimum photo area as fraction of page; increase to suppress small false positives |
 | `photo_detect_max_count` | `8` | Maximum photos to detect per page |
+| `forced_detections` | `None` | List of `{bbox, confidence, region_type, orientation}` dicts; bypasses contour detection when set |
 
 ---
 
@@ -377,6 +400,7 @@ All debug files use the pattern `debug/{stem}_{NN}_{description}.jpg`. For per-p
 02_page_detected    Page boundary quad overlaid on image
 03_page_warped      After perspective correction (only if correction applied)
 04_photo_boundaries Detected photo bounding boxes overlaid
+05_photo_detections.json  Detection results (bbox, confidence, region_type, orientation)
 05_photo_NN_raw     Extracted photo before orientation
 05b_photo_NN_oriented  After AI orientation correction
 06_photo_NN_glare_mask  OpenCV path only: binary glare mask

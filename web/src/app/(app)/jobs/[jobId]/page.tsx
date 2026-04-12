@@ -5,9 +5,30 @@ import Link from 'next/link'
 import { motion, AnimatePresence } from 'framer-motion'
 import { getJob, reprocessJob } from '@/lib/api'
 import type { Job } from '@/lib/types'
-import { JOB_STEP_TREE, PHOTO_STEP_TREE, POLLING_INTERVAL_MS } from '@/lib/constants'
+import {
+  JOB_STEP_TREE, PHOTO_STEP_TREE, POLLING_INTERVAL_MS,
+  BACKEND_TO_VISUAL, STEP_PROGRESS, STEP_LABELS, TOTAL_VISUAL_STEPS,
+} from '@/lib/constants'
 import GlareRemovalView from '@/components/step-detail/GlareRemovalView'
+import PhotoSplitView from '@/components/step-detail/PhotoSplitView'
 import ResultsView from '@/components/step-detail/ResultsView'
+
+// ── Backend step → tree step key mappings (for running indicators) ─────────────
+
+/** Maps backend step name to the JOB_STEP_TREE stepKey it belongs to */
+const BACKEND_TO_JOB_TREE: Record<string, string> = {
+  load: 'load', normalize: 'load',
+  page_detect: 'page_detect',
+  perspective: 'perspective',
+  photo_detect: 'photo_split', photo_split: 'photo_split',
+}
+
+/** Maps backend step name to the PHOTO_STEP_TREE stepKey it belongs to */
+const BACKEND_TO_PHOTO_TREE: Record<string, string> = {
+  ai_orient: 'ai_orient',
+  glare_remove: 'glare_remove', geometry: 'glare_remove',
+  color_restore: 'color_restore',
+}
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -48,12 +69,14 @@ function TreeRow({
   label,
   active,
   available,
+  isRunning = false,
   indented = false,
   onClick,
 }: {
   label: string
   active: boolean
   available: boolean
+  isRunning?: boolean
   indented?: boolean
   onClick: () => void
 }) {
@@ -71,7 +94,15 @@ function TreeRow({
           : 'border-transparent text-sa-stone-300 dark:text-sa-stone-600 cursor-not-allowed',
       ].join(' ')}
     >
-      {label}
+      <span className="flex items-center justify-between gap-2">
+        <span>{label}</span>
+        {isRunning && (
+          <span className="relative flex h-2 w-2 flex-shrink-0 mr-0.5">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sa-amber-400 opacity-75" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-sa-amber-500" />
+          </span>
+        )}
+      </span>
     </button>
   )
 }
@@ -86,6 +117,9 @@ function StepTree({
   onSelect: (s: StepSelection) => void
 }) {
   const urls = job.debug_urls ?? {}
+  const isProcessing = job.status === 'processing'
+  const activeJobStepKey = isProcessing ? (BACKEND_TO_JOB_TREE[job.current_step] ?? null) : null
+  const activePhotoStepKey = isProcessing ? (BACKEND_TO_PHOTO_TREE[job.current_step] ?? null) : null
 
   const isJobActive = (key: string) =>
     selection.kind === 'job' && selection.stepKey === key
@@ -102,6 +136,7 @@ function StepTree({
           label={label}
           active={isJobActive(stepKey)}
           available={!!urls[debugKey]}
+          isRunning={activeJobStepKey === stepKey}
           onClick={() => onSelect({ kind: 'job', stepKey })}
         />
       ))}
@@ -124,6 +159,7 @@ function StepTree({
                 label={label}
                 active={isPhotoActive(photoIdx, stepKey)}
                 available={!!urls[debugKeyFn(n)]}
+                isRunning={activePhotoStepKey === stepKey}
                 indented={job.photo_count > 1}
                 onClick={() => onSelect({ kind: 'photo', photoIdx, stepKey })}
               />
@@ -602,6 +638,16 @@ export default function JobDetailPage({ params }: { params: { jobId: string } })
       }
     }
 
+    // Photo Split step gets the interactive boundary editor
+    if (selection.kind === 'job' && selection.stepKey === 'photo_split') {
+      return (
+        <PhotoSplitView
+          job={job}
+          onStarted={() => setJob((j) => j ? { ...j, status: 'processing' } : j)}
+        />
+      )
+    }
+
     return <DebugImageCanvas url={getDebugUrl(job, selection)} label={currentLabel} />
   }
 
@@ -609,11 +655,11 @@ export default function JobDetailPage({ params }: { params: { jobId: string } })
     // -mx-4 -my-8 escapes the (app)/layout.tsx's px-4 py-8 on <main>
     // so the step-detail chrome can be flush edge-to-edge within max-w-6xl
     <div className="-mx-4 -my-8 flex flex-col" style={{ minHeight: 'calc(100vh - 56px)' }}>
-      {/* Reprocessing banner */}
+      {/* Processing indicator — lean top strip */}
       {job.status === 'processing' && (
-        <div className="flex items-center gap-2 px-6 py-2.5 bg-sa-amber-50 dark:bg-sa-amber-950/20 border-b border-sa-amber-200 dark:border-sa-amber-900/40 text-[12px] text-sa-amber-700 dark:text-sa-amber-400 flex-shrink-0">
-          <div className="w-3 h-3 rounded-full border-2 border-sa-amber-500 border-t-transparent animate-spin flex-shrink-0" />
-          Reprocessing — results will update automatically when complete.
+        <div className="flex items-center gap-2 px-6 py-2 bg-sa-amber-50 dark:bg-sa-amber-950/20 border-b border-sa-amber-200 dark:border-sa-amber-900/40 text-[11px] text-sa-amber-700 dark:text-sa-amber-400 flex-shrink-0">
+          <div className="w-2.5 h-2.5 rounded-full border-[1.5px] border-sa-amber-500 border-t-transparent animate-spin flex-shrink-0" />
+          Processing — results will update automatically when complete.
         </div>
       )}
 
@@ -659,19 +705,50 @@ export default function JobDetailPage({ params }: { params: { jobId: string } })
           <StepTree job={job} selection={selection} onSelect={setSelection} />
         </div>
 
-        {/* Right canvas — switches between views with a fade */}
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={JSON.stringify(selection)}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-            className="flex-1 flex overflow-auto min-w-0"
-          >
-            {renderCanvas()}
-          </motion.div>
-        </AnimatePresence>
+        {/* Right canvas — relative wrapper for bottom progress overlay */}
+        <div className="flex-1 flex flex-col overflow-hidden relative min-w-0">
+          {/* Canvas — switches between views with a fade */}
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={JSON.stringify(selection)}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+              className="flex-1 flex overflow-auto min-w-0"
+            >
+              {renderCanvas()}
+            </motion.div>
+          </AnimatePresence>
+
+          {/* Bottom progress banner — shown while pipeline is running */}
+          {job.status === 'processing' && (() => {
+            const fraction = STEP_PROGRESS[job.current_step] ?? 0
+            const stepNum = (BACKEND_TO_VISUAL[job.current_step] ?? 0) + 1
+            const stepLabel = job.step_detail || STEP_LABELS[job.current_step] || job.current_step
+            return (
+              <div className="absolute bottom-0 inset-x-0 flex items-center gap-3 px-5 py-3 border-t border-sa-amber-200 dark:border-sa-amber-900/40 bg-white/90 dark:bg-sa-stone-950/90 backdrop-blur-sm">
+                <div className="w-4 h-4 rounded-full border-2 border-sa-amber-500 border-t-transparent animate-spin flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[12px] font-semibold text-sa-stone-700 dark:text-sa-stone-200 truncate">
+                      Step {stepNum} of {TOTAL_VISUAL_STEPS}: {stepLabel}
+                    </span>
+                    <span className="text-[11px] tabular-nums text-sa-stone-400 dark:text-sa-stone-500 flex-shrink-0 ml-3">
+                      {Math.round(fraction * 100)}%
+                    </span>
+                  </div>
+                  <div className="h-0.5 rounded-full bg-sa-stone-200 dark:bg-sa-stone-700 overflow-hidden">
+                    <div
+                      className="h-full bg-sa-amber-500 rounded-full transition-[width] duration-500 ease-out"
+                      style={{ width: `${Math.round(fraction * 100)}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
+        </div>
       </div>
     </div>
   )

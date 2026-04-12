@@ -45,43 +45,43 @@ struct CLIOutputParser {
             return .jobStarted
         }
 
-        // "Load time: 0.234s"
-        if message.hasPrefix("Load time:") {
+        // "load: 0.234s"
+        if message.hasPrefix("load:") {
             return .stepCompleted(name: "Load")
         }
 
-        // "Normalize time: 0.123s"
-        if message.hasPrefix("Normalize time:") {
+        // "normalize: 0.123s"
+        if message.hasPrefix("normalize:") {
             return .stepCompleted(name: "Normalize")
         }
 
-        // "Page detection time: 1.234s"
-        if message.hasPrefix("Page detection time:") {
+        // "page_detect: 1.234s"
+        if message.hasPrefix("page_detect:") {
             return .stepCompleted(name: "Page Detection")
         }
 
-        // "Photo detection time: 0.456s, ..."
-        if message.hasPrefix("Photo detection time:") {
+        // "photo_detect: 0.456s, 1 photo(s)"
+        if message.hasPrefix("photo_detect:") {
             return .stepCompleted(name: "Photo Detection")
         }
 
-        // "AI orientation time: 2.345s ..."
-        if message.hasPrefix("AI orientation time:") {
+        // "ai_orient: 2.345s"
+        if message.hasPrefix("ai_orient:") {
             return .stepCompleted(name: "AI Orientation")
         }
 
-        // "Glare removal time: 5.678s ..."
-        if message.hasPrefix("Glare removal time:") {
+        // "glare: 5.678s"
+        if message.hasPrefix("glare:") {
             return .stepCompleted(name: "Glare Removal")
         }
 
-        // "Geometry correction time: 0.089s ..."
-        if message.hasPrefix("Geometry correction time:") {
+        // "geometry: 0.089s"
+        if message.hasPrefix("geometry:") {
             return .stepCompleted(name: "Geometry")
         }
 
-        // "Color restoration time: 0.345s ..."
-        if message.hasPrefix("Color restoration time:") {
+        // "color_restore: 0.345s"
+        if message.hasPrefix("color_restore:") {
             return .stepCompleted(name: "Color Restoration")
         }
 

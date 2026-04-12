@@ -145,6 +145,19 @@ def main() -> None:
     help='Disable AI orientation correction (Claude Haiku call per photo)',
 )
 @click.option(
+    '--forced-detections', '-F',
+    'forced_detections_json',
+    type=str,
+    default=None,
+    metavar='JSON',
+    help=(
+        'Override photo detection boundaries. Accepts a JSON array of detection dicts, '
+        'each with a "bbox" key ([x1,y1,x2,y2]). '
+        'Use with --steps photo_detect,... to skip re-detection. '
+        'Example: \'[{"bbox":[50,80,620,1100]}]\''
+    ),
+)
+@click.option(
     '--workers', '-j',
     type=click.IntRange(min=1),
     default=1,
@@ -168,6 +181,7 @@ def process(
     no_openai_glare: bool,
     scene_desc: Optional[str],
     no_ai_orientation: bool,
+    forced_detections_json: Optional[str],
     workers: int,
     verbose: bool
 ) -> None:
@@ -228,12 +242,26 @@ def process(
         debug_dir.mkdir(parents=True, exist_ok=True)
         logger.info(f"Debug output will be saved to: {debug_dir}")
 
+    # Parse --forced-detections JSON
+    forced_detections = None
+    if forced_detections_json:
+        import json as _json
+        try:
+            forced_detections = _json.loads(forced_detections_json)
+            if not isinstance(forced_detections, list):
+                logger.error("--forced-detections must be a JSON array")
+                sys.exit(1)
+        except _json.JSONDecodeError as exc:
+            logger.error("--forced-detections: invalid JSON — %s", exc)
+            sys.exit(1)
+
     from src.utils.secrets import load_secrets
     _secrets = load_secrets()
     config = PipelineConfig(
         use_openai_glare_removal=not no_openai_glare,
         use_ai_orientation=not no_ai_orientation,
         forced_scene_description=scene_desc,
+        forced_detections=forced_detections,
         anthropic_api_key=_secrets.anthropic_api_key or "",
         openai_api_key=_secrets.openai_api_key or "",
     )

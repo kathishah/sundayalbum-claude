@@ -192,6 +192,11 @@ class PipelineConfig:
     use_ai_fallback_detection: bool = False
     anthropic_model: str = "claude-sonnet-4-5-20250929"
 
+    # Photo detection override — when set, photo_detect writes these directly to
+    # the detection JSON and skips contour detection entirely.  Each dict must have
+    # at minimum a ``bbox`` key ([x1, y1, x2, y2] in page-image pixel coordinates).
+    forced_detections: Optional[list[dict]] = None
+
     # AI orientation correction — Claude Haiku, one call per photo
     use_ai_orientation: bool = True
     ai_orientation_model: str = "claude-haiku-4-5-20251001"
@@ -401,8 +406,15 @@ class Pipeline:
         # ------------------------------------------------------------------
         # Step 4: photo_detect
         # ------------------------------------------------------------------
-        should_run_photo = steps_filter is None or 'photo_detect' in steps_filter
-        if should_run_photo:
+        # photo_split can be run independently (to re-use existing detection JSON)
+        # by including 'photo_split' in steps_filter without 'photo_detect'.
+        should_run_photo_detect = steps_filter is None or 'photo_detect' in steps_filter
+        should_run_photo_split = (
+            steps_filter is None
+            or 'photo_detect' in steps_filter
+            or 'photo_split' in steps_filter
+        )
+        if should_run_photo_detect:
             step_start = time.time()
             try:
                 photo_detect_result = _photo_detect.run(active_storage, stem, self.config)
@@ -424,7 +436,7 @@ class Pipeline:
         # ------------------------------------------------------------------
         # Step 4b: photo_split
         # ------------------------------------------------------------------
-        if should_run_photo:
+        if should_run_photo_split:
             step_start = time.time()
             try:
                 split_result = _photo_split.run(active_storage, stem, self.config)
@@ -441,7 +453,7 @@ class Pipeline:
                 photo_count = 1
                 self.step_times['photo_split'] = time.time() - step_start
         else:
-            # When steps_filter skips photo steps, assume 1 photo (full page)
+            # When steps_filter skips all photo steps, assume 1 photo (full page)
             photo_count = 1
             if not active_storage.exists(f"debug/{stem}_05_photo_01_raw.jpg"):
                 page_img = active_storage.read_image(f"debug/{stem}_03_page_warped.jpg")
@@ -476,6 +488,7 @@ class Pipeline:
                     self.step_times[f'ai_orient_{photo_idx}'] = time.time() - step_start
                     if photo_idx == 1:
                         steps_completed.append('ai_orientation')
+                        logger.info("ai_orient: %.3fs", self.step_times[f'ai_orient_{photo_idx}'])
                 except Exception as exc:
                     logger.warning("ai_orient[%d] failed: %s", photo_idx, exc)
                     _raw = active_storage.read_image(f"debug/{stem}_05_photo_{idx_str}_raw.jpg")
@@ -504,6 +517,7 @@ class Pipeline:
                     self.step_times[f'glare_{photo_idx}'] = time.time() - step_start
                     if photo_idx == 1:
                         steps_completed.append('glare_detect')
+                        logger.info("glare: %.3fs", self.step_times[f'glare_{photo_idx}'])
                 except Exception as exc:
                     logger.warning("glare_remove[%d] failed: %s", photo_idx, exc)
                     _oriented = active_storage.read_image(
@@ -535,6 +549,7 @@ class Pipeline:
                     self.step_times[f'geometry_{photo_idx}'] = time.time() - step_start
                     if photo_idx == 1:
                         steps_completed.append('geometry')
+                        logger.info("geometry: %.3fs", self.step_times[f'geometry_{photo_idx}'])
                 except Exception as exc:
                     logger.warning("geometry[%d] failed: %s", photo_idx, exc)
                     _deglared = active_storage.read_image(
@@ -566,6 +581,7 @@ class Pipeline:
                     self.step_times[f'color_{photo_idx}'] = time.time() - step_start
                     if photo_idx == 1:
                         steps_completed.append('color_restoration')
+                        logger.info("color_restore: %.3fs", self.step_times[f'color_{photo_idx}'])
                 except Exception as exc:
                     logger.warning("color_restore[%d] failed: %s", photo_idx, exc)
                     _geom = active_storage.read_image(

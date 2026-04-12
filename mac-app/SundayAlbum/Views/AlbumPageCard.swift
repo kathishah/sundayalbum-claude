@@ -257,8 +257,13 @@ struct PipelineProgressWheel: View {
         ZStack {
             // Pie segments — one per step
             ForEach(0..<totalSteps, id: \.self) { i in
-                PieSegment(index: i, total: totalSteps)
-                    .fill(i < completedCount ? Color.saAmber500 : Color.saStone200)
+                if job.state == .running && i == completedCount {
+                    // Next segment pulses to show active processing
+                    PulsingPieSegment(index: i, total: totalSteps)
+                } else {
+                    PieSegment(index: i, total: totalSteps)
+                        .fill(i < completedCount ? Color.saAmber500 : Color.saStone200)
+                }
             }
 
             // Donut hole
@@ -277,6 +282,24 @@ struct PipelineProgressWheel: View {
             }
         }
         .frame(width: size, height: size)
+    }
+}
+
+// MARK: - Pulsing pie segment (active / next step)
+
+private struct PulsingPieSegment: View {
+    let index: Int
+    let total: Int
+    @State private var lit = false
+
+    var body: some View {
+        PieSegment(index: index, total: total)
+            .fill(lit ? Color.saAmber400 : Color.saStone200)
+            .onAppear {
+                withAnimation(.easeInOut(duration: 0.65).repeatForever(autoreverses: true)) {
+                    lit = true
+                }
+            }
     }
 }
 

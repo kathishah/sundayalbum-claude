@@ -5,6 +5,8 @@ import { TOTAL_VISUAL_STEPS } from '@/lib/constants'
 interface PipelineProgressWheelProps {
   completedCount: number
   size?: number
+  /** When true, the next (unfilled) segment pulses amber to indicate active processing */
+  isRunning?: boolean
 }
 
 /** Builds an SVG path string for one pie segment */
@@ -38,6 +40,7 @@ function pieSegmentPath(
 export default function PipelineProgressWheel({
   completedCount,
   size = 88,
+  isRunning = false,
 }: PipelineProgressWheelProps) {
   const total = TOTAL_VISUAL_STEPS
   const clamped = Math.max(0, Math.min(total, completedCount))
@@ -56,17 +59,31 @@ export default function PipelineProgressWheel({
       aria-label={`${clamped} of ${total} steps complete`}
     >
       {/* Pie segments */}
-      {Array.from({ length: total }, (_, i) => (
-        <path
-          key={i}
-          d={pieSegmentPath(i, total, size, 3)}
-          className={
-            i < clamped
-              ? 'fill-sa-amber-500 transition-opacity duration-[200ms]'
-              : 'fill-sa-stone-200 dark:fill-sa-stone-700'
-          }
-        />
-      ))}
+      {Array.from({ length: total }, (_, i) => {
+        const d = pieSegmentPath(i, total, size, 3)
+        const isNext = isRunning && i === clamped
+        return (
+          <g key={i}>
+            {/* Base segment */}
+            <path
+              d={d}
+              className={
+                i < clamped
+                  ? 'fill-sa-amber-500 transition-opacity duration-[200ms]'
+                  : 'fill-sa-stone-200 dark:fill-sa-stone-700'
+              }
+            />
+            {/* Amber overlay on the next-to-fill segment — pulses while processing */}
+            {isNext && (
+              <path
+                d={d}
+                className="fill-sa-amber-400"
+                style={{ animation: 'sa-segment-pulse 1.3s ease-in-out infinite' }}
+              />
+            )}
+          </g>
+        )
+      })}
 
       {/* Donut hole — saCard color to blend with card background */}
       <circle

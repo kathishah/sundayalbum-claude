@@ -42,6 +42,12 @@
   justify-content: safe center; /* stylelint-disable-line declaration-block-no-duplicate-properties */
 }
 
+/* Pulses the next pie segment in PipelineProgressWheel while processing */
+@keyframes sa-segment-pulse {
+  0%, 100% { opacity: 0.08; }
+  50%       { opacity: 1;    }
+}
+
 html {
   font-family: var(--font-dm-sans);
 }
