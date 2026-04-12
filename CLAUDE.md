@@ -102,6 +102,10 @@ python -m src.cli process test-images/IMG_harbor_normal.HEIC --output ./output/ 
 python -m src.cli process test-images/IMG_cave_normal.HEIC --output ./output/ \
   --scene-desc "A cave interior with warm amber light"
 
+# Override detected photo boundaries (bypasses contour detection)
+python -m src.cli process test-images/IMG_three_pics_normal.HEIC --output ./output/ \
+  --forced-detections '[{"bbox":[50,80,900,700],"confidence":1.0,"region_type":"photo","orientation":"unknown"}]'
+
 # Run only specific pipeline steps
 python -m src.cli process test-images/IMG_cave_normal.HEIC --output ./output/ \
   --steps load,normalize,page_detect
