@@ -10,6 +10,7 @@ import {
   BACKEND_TO_VISUAL, STEP_PROGRESS, STEP_LABELS, TOTAL_VISUAL_STEPS,
 } from '@/lib/constants'
 import GlareRemovalView from '@/components/step-detail/GlareRemovalView'
+import PhotoSplitView from '@/components/step-detail/PhotoSplitView'
 import ResultsView from '@/components/step-detail/ResultsView'
 
 // ── Backend step → tree step key mappings (for running indicators) ─────────────
@@ -635,6 +636,16 @@ export default function JobDetailPage({ params }: { params: { jobId: string } })
           />
         )
       }
+    }
+
+    // Photo Split step gets the interactive boundary editor
+    if (selection.kind === 'job' && selection.stepKey === 'photo_split') {
+      return (
+        <PhotoSplitView
+          job={job}
+          onStarted={() => setJob((j) => j ? { ...j, status: 'processing' } : j)}
+        />
+      )
     }
 
     return <DebugImageCanvas url={getDebugUrl(job, selection)} label={currentLabel} />
