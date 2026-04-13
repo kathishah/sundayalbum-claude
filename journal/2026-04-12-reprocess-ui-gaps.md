@@ -5,7 +5,8 @@
 A survey of pipeline step parameters across the CLI, web UI, and macOS app revealed
 that three of the four interactive step views in the macOS app are incomplete, and that
 the web UI has a parameter naming mismatch in the color restoration reprocess call.
-This entry documents what's missing and plans the work to close the gaps.
+This entry documents what's missing, the plan to close the gaps, what was actually
+implemented, and the follow-on work on app state persistence.
 
 ---
 
@@ -30,44 +31,26 @@ Fix: rename the key in the POST payload from `saturation_boost` to
 `photo.sceneDescription` on the model — but no CLI subprocess is triggered.
 `PipelineRunner` has no orientation reprocess entry point.
 
-Fix: add `PipelineRunner.reprocessFromOrientation(stem:photoIndex:rotationDegrees:)`
-that builds:
-```
---steps ai_orientation,glare_detect,...
---forced-rotation <degrees>
-```
-and connect it to the "Apply & Reprocess" button action.
+Fix: add `PipelineRunner.reprocessFromOrientation(rotationDegrees:sceneDescription:)`
+that builds `--steps ai_orientation,...` with `--forced-rotation <degrees>` and connect
+it to the "Apply & Reprocess" button action.
 
 ### Gap 3 — macOS: Glare removal has scene description input but no reprocess button
 
-`GlareRemovalStepView.swift` shows the static OpenAI prompt template and a
-`TextField` for scene description override — matching the web UI — but has no
-"Re-run Glare Removal" button. The `sceneDesc` state is populated and even pre-filled
-from `photo.sceneDescription`, but there is no way to submit it.
+`GlareRemovalStepView.swift` shows the static OpenAI prompt template and a `TextField`
+for scene description override — but has no "Re-run Glare Removal" button.
 
-Fix: add a footer action row (matching the pattern in `OrientationStepView` and the
-web's `GlareRemovalView`) with a "Discard" and a "Re-run Glare Removal" button.
-Add `PipelineRunner.reprocessFromGlare(stem:photoIndex:sceneDescription:)` that
-builds:
-```
---steps glare_detect,...
---scene-desc "<text>"
-```
+Fix: add a footer action row with "Discard" and "Re-run Glare Removal" buttons.
+Add `PipelineRunner.reprocessFromGlare(sceneDescription:)`.
 
 ### Gap 4 — macOS: Color correction "Apply & Reprocess" not wired to CLI
 
 `ColorCorrectionStepView.swift` has Saturation and Sharpness `InlineSlider` controls
-and an "Apply & Reprocess" button, with a `// TODO: wire to reprocess API when CLI
-bridge supports it` comment. The button action body is empty.
+and an "Apply & Reprocess" button with an empty `// TODO` action body.
 
-Fix: add `PipelineRunner.reprocessFromColor(stem:photoIndex:vibranceBoost:sharpenAmount:)`
-that builds:
-```
---steps color_restore
---color-vibrance <v>
---sharpen-amount <s>
-```
-This requires two new CLI flags: `--color-vibrance` and `--sharpen-amount`.
+Fix: add `PipelineRunner.reprocessFromColor(vibranceBoost:sharpenAmount:)` building
+`--steps white_balance,color_restore,deyellow,sharpen` with `--color-vibrance` and
+`--sharpen-amount` flags. Requires two new CLI flags.
 
 ---
 
@@ -94,145 +77,214 @@ Add to `src/cli.py` `process` command:
                          not yet in CLI)
 ```
 
-`--forced-rotation` is also needed for Gap 2 and has been documented as a "hidden gem"
-in the parameter survey. Add it here so both macOS gaps can use it.
+### `PipelineRunner.swift` — three new entry points + testable static methods
 
-Wire all three into `PipelineConfig` construction in the `process()` command handler.
-
-### `PipelineRunner.swift` — three new entry points
+Each entry point is backed by a `nonisolated static` method (e.g. `_colorArgs(...)`)
+so the arg-building logic can be unit-tested without launching a subprocess.
 
 ```swift
-func reprocessFromOrientation(stem: String, photoIndex: Int, rotationDegrees: Int)
-func reprocessFromGlare(stem: String, photoIndex: Int, sceneDescription: String)
-func reprocessFromColor(stem: String, photoIndex: Int, vibranceBoost: Double, sharpenAmount: Double)
+func reprocessFromOrientation(rotationDegrees: Int, sceneDescription: String)
+func reprocessFromGlare(sceneDescription: String)
+func reprocessFromColor(vibranceBoost: Double, sharpenAmount: Double)
 ```
 
-Each builds the correct `--steps` list (covering from the named step through
-`color_restore`) and the relevant override flags, then calls the existing
-`runPipeline(arguments:)` path. `photo_index` maps to the existing `--photo-index`
-mechanism (or equivalent step filter targeting) if per-photo step selection is
-supported; otherwise runs all photos from that step forward (acceptable for now).
-
-**`--steps` lists for each entry point:**
+`--steps` lists:
 
 | Entry point | `--steps` value |
 |---|---|
-| `reprocessFromOrientation` | `ai_orientation,glare_detect,keystone_correct,dewarp,rotation_correct,white_balance,color_restore,deyellow,sharpen` |
-| `reprocessFromGlare` | `glare_detect,keystone_correct,dewarp,rotation_correct,white_balance,color_restore,deyellow,sharpen` |
-| `reprocessFromColor` | `white_balance,color_restore,deyellow,sharpen` |
-
-### `OrientationStepView.swift` — wire button
-
-Replace the `Apply & Reprocess` button action with:
-```swift
-appState.pipelineRunner.reprocessFromOrientation(
-    stem: stem,
-    photoIndex: photoIndex + 1,
-    rotationDegrees: pendingRotation
-)
-```
-Update `isDirty` to include `pendingDescription` so typing a scene description (the
-existing but invisible `pendingDescription` state) also enables the button. Since the
-text field for `pendingDescription` is not rendered in the current UI, add it to the
-footer — matching `GlareRemovalStepView`'s layout (label + `TextField`). This gives
-the user a single place to set both rotation and scene description before reprocessing.
-
-### `GlareRemovalStepView.swift` — add action row
-
-Add an `HStack` footer row beneath the existing prompt display:
-```
-[Discard]  [Re-run Glare Removal]
-```
-"Re-run" calls `reprocessFromGlare(stem:photoIndex:sceneDescription:sceneDesc)`.
-"Discard" resets `sceneDesc` to `photo?.sceneDescription ?? ""`.
-The button is always enabled (reprocessing with no scene override is valid — it just
-uses Claude's auto-detected description).
-
-### `ColorCorrectionStepView.swift` — wire button
-
-Replace the empty `// TODO` action with:
-```swift
-appState.pipelineRunner.reprocessFromColor(
-    stem: stem,
-    photoIndex: photoIndex + 1,
-    vibranceBoost: saturation,   // 0.0–0.5
-    sharpenAmount: sharpness     // 0.0–1.0
-)
-```
+| `reprocessFromOrientation` | `ai_orientation,glare_detect,...,sharpen` |
+| `reprocessFromGlare` | `glare_detect,...,sharpen` |
+| `reprocessFromColor` | `color_restore,...,sharpen` |
 
 ### Web UI: fix `saturation_boost` key (Gap 1)
 
-In `jobs/[jobId]/page.tsx`, `ColorRestoreView.handleApply()`:
+In `jobs/[jobId]/page.tsx`:
 ```ts
 // Before
 config: { saturation_boost: saturation / 100, sharpen_amount: sharpness / 100 }
-
 // After
 config: { color_restore_vibrance_boost: saturation / 100, sharpen_amount: sharpness / 100 }
 ```
 
-No other web changes are needed — the other three web reprocess flows (orientation,
-glare, photo split) are already correctly wired.
-
 ---
 
-## Files Changed
+## Implementation — What Was Built
+
+All four gaps were implemented and shipped on `feature/reprocess-ui-gaps`.
+
+### Files changed
 
 | File | Change |
 |------|--------|
-| `src/cli.py` | Add `--forced-rotation`, `--color-vibrance`, `--sharpen-amount` flags; wire to `PipelineConfig` |
-| `web/src/app/(app)/jobs/[jobId]/page.tsx` | Rename `saturation_boost` → `color_restore_vibrance_boost` in `ColorRestoreView.handleApply()` |
-| `mac-app/.../PipelineRunner.swift` | Add `reprocessFromOrientation()`, `reprocessFromGlare()`, `reprocessFromColor()` |
-| `mac-app/.../OrientationStepView.swift` | Wire "Apply & Reprocess" button; add scene description `TextField` to footer |
-| `mac-app/.../GlareRemovalStepView.swift` | Add "Discard" + "Re-run Glare Removal" footer action row |
-| `mac-app/.../ColorCorrectionStepView.swift` | Wire "Apply & Reprocess" button action |
+| `src/cli.py` | Added `--forced-rotation`, `--color-vibrance`, `--sharpen-amount`; wired to `PipelineConfig` |
+| `web/src/app/(app)/jobs/[jobId]/page.tsx` | Renamed `saturation_boost` → `color_restore_vibrance_boost`; added per-photo reprocess running indicator scoped to the selected photo only |
+| `mac-app/.../PipelineRunner.swift` | Added three reprocess entry points + static `_*Args` methods; `UITEST_MODE` simulation |
+| `mac-app/.../OrientationStepView.swift` | Wired "Apply & Reprocess"; added scene description `TextField`; accessibility identifiers |
+| `mac-app/.../GlareRemovalStepView.swift` | Added "Discard" + "Re-run Glare Removal" footer; `isProcessing` state; accessibility identifiers |
+| `mac-app/.../ColorCorrectionStepView.swift` | Wired "Apply & Reprocess"; `isProcessing` state; accessibility identifiers |
+| `mac-app/.../AlbumPageCard.swift` | Added `job-card-<inputName>` accessibility identifier |
+| `mac-app/.../StepDetailView.swift` | Added `tree-row-<label>` accessibility identifier |
+| `mac-app/project.yml` | Added `SundayAlbumUITests` target; added `Stamp BuildInfo` preBuildScript |
+| `mac-app/.gitignore` | Gitignored `BuildInfo.swift` — generated fresh on every build with PST timestamp |
+| `mac-app/.../PipelineStep.swift` | Fixed `debugImageURL`: flat file layout (`{baseName}_{suffix}`) not subdirectories; `.done` → `14_photo_NN_enhanced.jpg` |
+| `mac-app/.../MockData.swift` | Replaced hardcoded 4-job list with dynamic debug folder scan (same flat-file logic) |
+| `mac-app/.../CLIOutputParser.swift` | Fixed `photo_detect:` → `photo_split:` |
+| `mac-app/.../CLIOutputParserTests.swift` | Corrected 8 tests that used invented log lines; updated to match actual `pipeline.py` output |
+
+### AWS Step Functions fix (prerequisite)
+
+Before the macOS work, a CDK bug was found: `PrepareMap` in the state machine was not
+forwarding `start_from` and `reprocess_photo_index` to the Lambda handlers, so partial
+reprocessing always ran the full pipeline on all photos. Fixed by patching the state
+machine definition directly via `aws stepfunctions update-state-machine`.
 
 ---
 
-## Implementation Order
+## Automated Testing
 
-1. **CLI flags** (`src/cli.py`) — no UI, easy to test, unblocks everything else.
-2. **Web rename** (`jobs/[jobId]/page.tsx`) — one-line fix, ship immediately.
-3. **`PipelineRunner` entry points** — shared foundation for the three macOS views.
-4. **`ColorCorrectionStepView`** — simplest wiring (no new UI, just call the runner).
-5. **`GlareRemovalStepView`** — adds action row UI.
-6. **`OrientationStepView`** — most involved (adds text field + wires two params).
+Two test suites added to `mac-app/`:
+
+### `SundayAlbumTests/PipelineRunnerArgsTests.swift` — 20 Swift Testing unit tests
+
+Exercises the static `_*Args` methods without launching a subprocess:
+- Color: correct steps, no pre-split steps, `--color-vibrance` present (regression guard: `--saturation-boost` must never appear), `--sharpen-amount`, 3-decimal formatting
+- Glare: correct steps, scene-desc conditional on non-empty string
+- Orientation: correct steps, no photo_detect/photo_split, rotation flag omitted at 0°, correct values at 90°/270°
+- Photo split: correct steps including all downstream steps
+
+### `SundayAlbumUITests/ReprocessUITests.swift` — 12 XCUITest UI tests
+
+Launches the app with `MOCK_DATA=1` + `UITEST_MODE=1` (Python subprocess skipped;
+job state transitions in-process):
+
+**T-mac-01 Color Correction (4 tests)**
+- Saturation slider is present
+- "Apply & Reprocess" button hidden when sliders at defaults
+- Button appears after moving slider
+- Clicking button triggers processing state (button disappears)
+
+**T-mac-02 Glare Removal (3 tests)**
+- "Re-run" and "Discard" buttons are always present
+- Scene description field is present
+- Clicking "Re-run" disables the button
+
+**T-mac-03 Orientation (5 tests)**
+- All four rotation buttons (0°/90°/180°/270°) are present
+- Scene description field is present
+- "Apply & Reprocess" hidden at default 0° rotation
+- Button appears after selecting non-zero rotation
+- Clicking button triggers processing state
+
+**Total test counts (all passing):**
+- Unit: 45/45 (`PipelineRunnerArgsTests` 20, `CLIOutputParserTests` 16, `FileImporter` 9)
+- UI: 12/12
+
+### Testing notes
+
+Tree-row labels use `PipelineStep.title` (short form): `"Glare"` not `"Glare Removal"`,
+`"Orient"` not `"Orientation"`. Accessibility element lookup uses
+`descendants(matching: .any)` because SwiftUI VStack/HStack containers register as
+`.group` in the accessibility tree, not `.other`.
 
 ---
 
-## Testing
+## AppState Persistence — Problem Found, Plan Decided
 
-### CLI
+### Problem
+
+`AppState.jobs` is an in-memory array with no serialization. Every app launch starts
+from a blank slate. The only way jobs appear in the library is via `DebugFolderScanner`,
+which was broken in two ways:
+
+1. **Wrong path in production**: used `RuntimeManager.cliWorkingDirectory + "debug"`,
+   which resolves to the app bundle's `Contents/Resources/debug/` — a directory that
+   doesn't exist. Should use `AppSettings.debugFolder`.
+
+2. **Wrong file layout**: expected subdirectories (`debug/IMG_cave_normal/01_loaded.jpg`)
+   but the CLI writes flat files (`debug/IMG_cave_normal_01_loaded.jpg`).
+
+### Decision: Option C — filesystem as source of truth + overrides JSON
+
+The pipeline already writes all meaningful artifacts to disk (debug images, output
+images). The only in-memory state that can't be re-derived from the filesystem is user
+overrides: `rotationOverride` and `sceneDescription` on each `ExtractedPhoto`.
+
+**Architecture:**
+1. On startup, `DebugFolderScanner` scans `AppSettings.debugFolder` (flat-file aware,
+   correct for both dev and production) and reconstructs one `ProcessingJob` per
+   processed input. State is inferred from which step output files exist on disk.
+2. A small `overrides.json` in `~/Library/Application Support/SundayAlbum/` stores only
+   user-set values keyed by `(inputName, photoIndex)`. Applied after scan.
+3. `AppSettings.debugFolder` defaults to `devProjectRoot/debug/` in dev builds and
+   `~/Library/Application Support/SundayAlbum/debug/` in production builds.
+4. The debug folder setting is exposed in the Settings screen so users (and developers)
+   can point it at any folder. Changing the setting triggers a full library reload.
+
+**Why not full serialization (Option A / SwiftData)?**
+The schema is still evolving and the data model is tightly coupled to on-disk artifacts.
+Option C gives robust reinstall behaviour without carrying a full serialization layer.
+Full JSON/SwiftData serialization can be layered on top later once the schema stabilises.
+
+### Files to change (next)
+
+| File | Change |
+|------|--------|
+| `mac-app/.../DebugFolderScanner.swift` | Use `AppSettings.debugFolder`; flat-file layout; infer step from existing files (not just complete jobs) |
+| `mac-app/.../AppSettings.swift` | Default `debugFolder` to `devProjectRoot/debug/` in dev builds |
+| `mac-app/.../AppState.swift` | On `debugFolder` change, re-run scanner and replace `jobs` |
+| `mac-app/.../SettingsView.swift` | Add "Debug folder" folder-picker row with reload-on-change behaviour |
+| `mac-app/.../overrides.json` | New file in Application Support; written on `rotationOverride`/`sceneDescription` change; read on startup after scan |
+
+---
+
+## AppState Persistence — Implemented (Option C)
+
+All five planned files were changed in the follow-on session:
+
+| File | What changed |
+|------|-------------|
+| `Models/ExtractedPhoto.swift` | Added `photoIndex: Int` (1-based, default 1); used as overrides key |
+| `Settings/AppSettings.swift` | `defaultDebugFolder` now returns `devProjectRoot/debug/` in dev builds |
+| `Utils/DebugFolderScanner.swift` | Full rewrite: uses `AppSettings.shared.debugFolder`, flat-file layout, infers job state from which step files exist, sets `photoIndex` on each `ExtractedPhoto` |
+| `Utils/OverridesStore.swift` | **New file**: reads/writes `~/Library/Application Support/SundayAlbum/overrides.json`; key format `"inputName:photoIndex"`; `apply(to:)` called on startup; `update(for:)` called when user commits rotation or scene-desc |
+| `AppState.swift` | Added `reloadJobs()` (rescan + apply overrides + navigate to .library); added `saveOverrides(for:)`; `init` now calls `OverridesStore.apply` after scan |
+| `Settings/SettingsView.swift` | Debug folder row always visible (not gated on `debugOutputEnabled`), with footnote; `FolderPickerRow` gained optional `onChange` callback; callback calls `appState.reloadJobs()` |
+| `SundayAlbumApp.swift` | Settings scene now injects `appState` into environment so SettingsView can call `reloadJobs()` |
+| `Views/Steps/OrientationStepView.swift` | "Apply & Reprocess" calls `appState.saveOverrides(for: photo)` after updating the model |
+| `Views/Steps/GlareRemovalStepView.swift` | "Re-run" writes `sceneDesc` back to `photo.sceneDescription` and calls `appState.saveOverrides(for: p)` |
+| `Mock/MockData.swift` | `withMockData()` now calls `AppState(loadDebugJobs: false)` to prevent double-loading; passes `photoIndex: i` to `ExtractedPhoto` |
+
+**Key bug caught during testing:** `withMockData()` was calling `AppState()` (which
+now correctly scans the debug folder), then appending mock jobs on top — resulting in
+duplicate job cards. Switching to `AppState(loadDebugJobs: false)` fixed it.
+
+---
+
+## Test Runner Rules Added to CLAUDE.md
+
+macOS UI tests (`SundayAlbumUITests`) hijack the screen for ~2 minutes and should
+**never be triggered without explicit user request**. Documented in `CLAUDE.md`:
 
 ```bash
-source .venv/bin/activate
+# Safe — unit tests only, no screen takeover
+xcodebuild test -scheme SundayAlbum -destination 'platform=macOS' \
+  -skip-testing:SundayAlbumUITests
 
-# --forced-rotation: should apply 90° CW without making a Claude API call
-python -m src.cli process test-images/IMG_harbor_normal.HEIC --output ./output/ --debug \
-  --steps ai_orientation,glare_detect,white_balance,color_restore,deyellow,sharpen \
-  --forced-rotation 90
-
-# --color-vibrance + --sharpen-amount: re-run only color steps with custom values
-python -m src.cli process test-images/IMG_harbor_normal.HEIC --output ./output/ --debug \
-  --steps white_balance,color_restore,deyellow,sharpen \
-  --color-vibrance 0.4 --sharpen-amount 0.8
-
-# Confirm vibrance and sharpness are visibly different from defaults
+# Disruptive — only on explicit request
+xcodebuild test -scheme SundayAlbum -destination 'platform=macOS' \
+  -only-testing:SundayAlbumUITests
 ```
 
-### Web UI
+Rule: never use bare `xcodebuild test -scheme SundayAlbum` without a filter flag.
 
-1. Process any image through the full pipeline.
-2. Open Color Restore step, move Saturation slider to 50%.
-3. Click "Apply & Reprocess" — confirm job goes to `processing` and completes.
-4. Verify output is visibly more saturated (previously the slider was a no-op).
+---
 
-### macOS App
+## Manual Verification — Completed
 
-1. Process a job fully so all step views are populated.
-2. **Color correction:** move Saturation slider, click "Apply & Reprocess" — confirm
-   pipeline re-runs from `white_balance` onward.
-3. **Glare removal:** type a scene description, click "Re-run Glare Removal" — confirm
-   CLI is called with `--scene-desc`.
-4. **Orientation:** select 90°, click "Apply & Reprocess" — confirm CLI is called with
-   `--forced-rotation 90` and the oriented image updates.
+All three reprocess flows verified manually against a real image:
+
+- **Color correction**: moved saturation/sharpness sliders → clicked "Apply & Reprocess" → CLI ran with correct `--color-vibrance` and `--sharpen-amount` flags ✓
+- **Glare removal**: typed scene description → clicked "Re-run Glare Removal" → CLI ran with `--scene-desc` passed correctly ✓
+- **Orientation**: selected 90° rotation → clicked "Apply & Reprocess" → CLI ran with `--forced-rotation 90` ✓
+
+All gaps from the original gap inventory are fully closed.

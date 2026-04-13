@@ -96,6 +96,7 @@ private struct OrientationPhotoPanel: View {
                         Button("Apply & Reprocess") {
                             photo.rotationOverride = pendingRotation == 0 ? nil : pendingRotation
                             photo.sceneDescription = pendingDescription.isEmpty ? nil : pendingDescription
+                            appState.saveOverrides(for: photo)
                             isDirty = false
                             let runner = PipelineRunner(job: job)
                             runner.reprocessFromOrientation(

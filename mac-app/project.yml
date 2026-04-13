@@ -7,6 +7,28 @@ options:
   createIntermediateGroups: true
   generateEmptyDirectories: true
 
+schemes:
+  SundayAlbum:
+    build:
+      targets:
+        SundayAlbum: all
+        SundayAlbumTests: [test]
+        SundayAlbumUITests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - name: SundayAlbumTests
+          parallelizable: true
+        - name: SundayAlbumUITests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+
 settings:
   base:
     SWIFT_VERSION: "6.0"

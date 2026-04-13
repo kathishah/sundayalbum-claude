@@ -9,7 +9,8 @@ extension AppState {
     ///   `{baseName}_{stepSuffix}.jpg`
     /// e.g.  `IMG_cave_normal_14_photo_01_enhanced.jpg`
     static func withMockData() -> AppState {
-        let state = AppState()
+        // Skip the automatic debug-folder scan — we'll populate jobs manually below.
+        let state = AppState(loadDebugJobs: false)
 
         // Use the dev project root's debug/ folder when running from Xcode.
         // Falls back to AppSettings.debugFolder (the user-configured path) otherwise.
@@ -115,7 +116,8 @@ extension AppState {
                         imageURL:      imageURL,
                         jobInputURL:   debugDir.appendingPathComponent("\(baseName)_01_loaded.jpg"),
                         jobInputName:  inputName,
-                        jobID:         job.id
+                        jobID:         job.id,
+                        photoIndex:    i
                     ))
                 }
             }

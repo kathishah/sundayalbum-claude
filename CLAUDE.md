@@ -123,21 +123,42 @@ Available step IDs: `load`, `normalize`, `page_detect`, `photo_detect`, `ai_orie
 
 ## Testing
 
+### ⚠️ macOS UI Tests — DISRUPTIVE, requires explicit user permission
+
+macOS UI tests (`SundayAlbumUITests`) **take over the screen**, launch the app visually, and
+run for ~2 minutes. They are extremely disruptive to a working session.
+
+**Rules:**
+- **NEVER run UI tests unless the user explicitly asks** ("run the UI tests", "run all tests
+  including UI tests", "run the full macOS test suite").
+- Verifying a build or checking logic changes → run unit tests only (see below).
+- A passing build (`xcodebuild build`) is sufficient to confirm Swift compiles correctly.
+
 ```bash
-# All tests
-pytest tests/ -v
+# ── Python pipeline tests (non-disruptive) ────────────────────────────────────────
+pytest tests/ -v                            # all Python tests
+pytest tests/test_loader.py -v             # specific suite
+pytest tests/api/ tests/handlers/ -v       # API + Lambda handler tests (moto, ~5s)
 
-# Specific suites
-pytest tests/test_loader.py -v
-pytest tests/test_glare.py -v
-pytest tests/test_photo_detection.py -v
+# ── Swift unit tests only — non-disruptive, no screen takeover ───────────────────
+# Use -skip-testing to exclude the UI test bundle.
+xcodebuild test \
+  -scheme SundayAlbum \
+  -destination 'platform=macOS' \
+  -skip-testing:SundayAlbumUITests
 
-# API + handler tests (moto-backed, no real AWS)
-pytest tests/api/ tests/handlers/ -v   # 36 tests, ~5s
+# ── Swift UI tests — ⚠️ DISRUPTIVE, only run on explicit user request ────────────
+xcodebuild test \
+  -scheme SundayAlbum \
+  -destination 'platform=macOS' \
+  -only-testing:SundayAlbumUITests
 
-# Playwright E2E (requires web/.auth/session.json — see SYSTEM_ARCHITECTURE.md)
+# ── Web E2E (Playwright) — requires web/.auth/session.json ───────────────────────
 cd web && npx playwright test
 ```
+
+**Never use** `xcodebuild test -scheme SundayAlbum` **without a `-skip-testing` or
+`-only-testing` flag** — this runs both unit AND UI tests and will hijack the screen.
 
 ---
 

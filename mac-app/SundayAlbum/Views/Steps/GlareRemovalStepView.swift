@@ -86,6 +86,11 @@ struct GlareRemovalStepView: View {
 
                     Button("Re-run Glare Removal") {
                         isProcessing = true
+                        // Persist the scene description override before launching the runner.
+                        if let p = photo {
+                            p.sceneDescription = sceneDesc.isEmpty ? nil : sceneDesc
+                            appState.saveOverrides(for: p)
+                        }
                         let runner = PipelineRunner(job: job)
                         runner.reprocessFromGlare(sceneDescription: sceneDesc)
                     }
