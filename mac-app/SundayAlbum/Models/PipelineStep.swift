@@ -59,47 +59,46 @@ enum PipelineStep: Int, CaseIterable, Identifiable {
 
     // MARK: - Debug image mapping
 
-    /// Returns the page-level debug image for this step (not per-photo)
+    /// Returns the page-level or single-photo debug image for this step.
+    ///
+    /// Debug files live flat in `AppSettings.debugFolder` with the naming convention:
+    ///   `{baseName}_{stepSuffix}`   e.g. `IMG_cave_normal_07_photo_01_deglared.jpg`
     @MainActor
     func debugImageURL(forInputName inputName: String) -> URL? {
         let baseName = (inputName as NSString).deletingPathExtension
-        let dir = AppSettings.shared.debugFolder
-            .appendingPathComponent(baseName)
-
-        let filename: String
+        let suffix: String
         switch self {
-        case .load:            filename = "01_loaded.jpg"
-        case .pageDetect:      filename = "02_page_detected.jpg"
-        case .photoSplit:      filename = "04_photo_boundaries.jpg"
-        case .orientation:     filename = "05b_photo_01_oriented.jpg"
-        case .glareRemoval:    filename = "07_photo_01_deglared.jpg"
-        case .colorCorrection: filename = "13_photo_01_restored.jpg"
-        case .done:            filename = "15_photo_01_final.jpg"
+        case .load:            suffix = "01_loaded.jpg"
+        case .pageDetect:      suffix = "02_page_detected.jpg"
+        case .photoSplit:      suffix = "04_photo_boundaries.jpg"
+        case .orientation:     suffix = "05b_photo_01_oriented.jpg"
+        case .glareRemoval:    suffix = "07_photo_01_deglared.jpg"
+        case .colorCorrection: suffix = "13_photo_01_restored.jpg"
+        case .done:            suffix = "14_photo_01_enhanced.jpg"
         }
-
-        let url = dir.appendingPathComponent(filename)
+        let url = AppSettings.shared.debugFolder.appendingPathComponent("\(baseName)_\(suffix)")
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
-    /// Returns the per-photo debug image for a given 1-based photo index
+    /// Returns the per-photo debug image for a given 1-based photo index.
     @MainActor
     func debugImageURL(forInputName inputName: String, photoIndex: Int) -> URL? {
         let baseName = (inputName as NSString).deletingPathExtension
-        let dir = AppSettings.shared.debugFolder
-            .appendingPathComponent(baseName)
         let idx = String(format: "%02d", photoIndex)
-
-        let filename: String
         switch self {
         case .load, .pageDetect, .photoSplit:
-            return debugImageURL(forInputName: inputName)   // page-level
-        case .orientation:     filename = "05b_photo_\(idx)_oriented.jpg"
-        case .glareRemoval:    filename = "07_photo_\(idx)_deglared.jpg"
-        case .colorCorrection: filename = "13_photo_\(idx)_restored.jpg"
-        case .done:            filename = "15_photo_\(idx)_final.jpg"
+            return debugImageURL(forInputName: inputName)   // page-level image
+        default: break
         }
-
-        let url = dir.appendingPathComponent(filename)
+        let suffix: String
+        switch self {
+        case .orientation:     suffix = "05b_photo_\(idx)_oriented.jpg"
+        case .glareRemoval:    suffix = "07_photo_\(idx)_deglared.jpg"
+        case .colorCorrection: suffix = "13_photo_\(idx)_restored.jpg"
+        case .done:            suffix = "14_photo_\(idx)_enhanced.jpg"
+        default:               return nil
+        }
+        let url = AppSettings.shared.debugFolder.appendingPathComponent("\(baseName)_\(suffix)")
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 }

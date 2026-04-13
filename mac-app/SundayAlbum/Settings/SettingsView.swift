@@ -3,6 +3,7 @@ import AppKit
 
 struct SettingsView: View {
     @Environment(AppSettings.self) private var settings
+    @Environment(AppState.self)    private var appState
 
     var body: some View {
         @Bindable var settings = settings
@@ -46,15 +47,16 @@ struct SettingsView: View {
                     defaultURL: AppSettings.defaultOutputFolder
                 )
 
-                Toggle("Save debug images at each pipeline step", isOn: $settings.debugOutputEnabled)
+                // The debug folder is the library source: changing it reloads all jobs.
+                FolderPickerRow(
+                    label: "Debug folder",
+                    footnote: "Processed images are loaded from this folder on every launch.",
+                    url: $settings.debugFolder,
+                    defaultURL: AppSettings.defaultDebugFolder,
+                    onChange: { appState.reloadJobs() }
+                )
 
-                if settings.debugOutputEnabled {
-                    FolderPickerRow(
-                        label: "Debug folder",
-                        url: $settings.debugFolder,
-                        defaultURL: AppSettings.defaultDebugFolder
-                    )
-                }
+                Toggle("Save debug images at each pipeline step", isOn: $settings.debugOutputEnabled)
             }
         }
         .formStyle(.grouped)
@@ -180,39 +182,55 @@ private struct KeyStatusBadge: View {
 
 private struct FolderPickerRow: View {
     let label: String
+    var footnote: String? = nil
     @Binding var url: URL
     let defaultURL: URL
+    /// Called after the user picks a new folder or resets to the default.
+    var onChange: (() -> Void)? = nil
 
     var body: some View {
-        HStack(spacing: 8) {
-            Text(label)
-                .font(.dmSans(13))
-                .frame(width: 100, alignment: .leading)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Text(label)
+                    .font(.dmSans(13))
+                    .frame(width: 100, alignment: .leading)
 
-            Text(url.path)
-                .font(.system(.caption, design: .monospaced))
-                .foregroundStyle(Color.saTextSecondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                Text(url.path)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(Color.saTextSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
-            Button("Choose…") {
-                let panel = NSOpenPanel()
-                panel.canChooseFiles = false
-                panel.canChooseDirectories = true
-                panel.canCreateDirectories = true
-                panel.prompt = "Select"
-                if panel.runModal() == .OK, let chosen = panel.url {
-                    url = chosen
+                Button("Choose…") {
+                    let panel = NSOpenPanel()
+                    panel.canChooseFiles = false
+                    panel.canChooseDirectories = true
+                    panel.canCreateDirectories = true
+                    panel.prompt = "Select"
+                    if panel.runModal() == .OK, let chosen = panel.url {
+                        url = chosen
+                        onChange?()
+                    }
                 }
-            }
-            .controlSize(.small)
+                .controlSize(.small)
 
-            if url != defaultURL {
-                Button("Reset") { url = defaultURL }
+                if url != defaultURL {
+                    Button("Reset") {
+                        url = defaultURL
+                        onChange?()
+                    }
                     .controlSize(.small)
                     .buttonStyle(.plain)
                     .foregroundStyle(Color.saTextTertiary)
+                }
+            }
+
+            if let note = footnote {
+                Text(note)
+                    .font(.dmSans(11))
+                    .foregroundStyle(Color.saTextTertiary)
+                    .padding(.leading, 108)
             }
         }
     }

@@ -1,123 +1,158 @@
 import Foundation
 
-/// Scans the project's `debug/` folder at app launch and reconstructs one completed
-/// `ProcessingJob` per subfolder that contains final photo outputs.
+/// Scans the configured debug folder at app launch and reconstructs one `ProcessingJob`
+/// per image that has been at least partially processed.
 ///
-/// Debug folder layout expected:
-///   debug/<stem>/01_loaded.jpg           — before image
-///   debug/<stem>/15_photo_NN_final.jpg   — final output per photo (preferred)
-///   debug/<stem>/14_photo_NN_enhanced.jpg — fallback final output
+/// **Flat file layout** — all files live directly inside the debug folder:
+///   `{baseName}_01_loaded.jpg`                    — input image loaded
+///   `{baseName}_04_photo_boundaries.jpg`          — after photo split
+///   `{baseName}_05b_photo_NN_oriented.jpg`        — after AI orientation (per photo)
+///   `{baseName}_07_photo_NN_deglared.jpg`         — after glare removal (per photo)
+///   `{baseName}_13_photo_NN_restored.jpg`         — after color correction (per photo)
+///   `{baseName}_14_photo_NN_enhanced.jpg`         — final output (per photo)
+///
+/// A job exists for any baseName that has a `_01_loaded.jpg` file. Job state is inferred
+/// from which step files are present on disk — no external metadata required.
+///
+/// The scan root is `AppSettings.shared.debugFolder`, which:
+///   - Dev builds: defaults to `{devProjectRoot}/debug/`
+///   - Prod builds: defaults to `~/Library/Application Support/SundayAlbum/debug/`
+///   - Either: user-configurable in Settings → Storage.
 struct DebugFolderScanner {
-
-    @MainActor private static var debugRoot: URL {
-        RuntimeManager.shared.cliWorkingDirectory.appendingPathComponent("debug")
-    }
-
-    @MainActor private static var testImagesRoot: URL {
-        RuntimeManager.shared.cliWorkingDirectory.appendingPathComponent("test-images")
-    }
 
     // MARK: - Public
 
-    /// Returns one completed `ProcessingJob` for each debug subfolder that has
-    /// at least one final photo output. Folders with no outputs are skipped.
+    /// Returns one `ProcessingJob` for each baseName that has a `_01_loaded.jpg` file,
+    /// sorted alphabetically by baseName.
     @MainActor static func loadJobs() -> [ProcessingJob] {
-        guard let entries = try? FileManager.default.contentsOfDirectory(
-            at: debugRoot,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
-        ) else { return [] }
+        let debugDir = AppSettings.shared.debugFolder
+        let fm = FileManager.default
 
-        return entries
-            .filter { isDirectory($0) }
-            .sorted { $0.lastPathComponent < $1.lastPathComponent }
-            .compactMap { jobFrom(folder: $0) }
+        guard let allFiles = try? fm.contentsOfDirectory(atPath: debugDir.path) else {
+            return []
+        }
+
+        // testImagesDir is used to locate original HEIC/DNG inputs for the "before" thumbnail.
+        let testImagesDir = RuntimeManager.devProjectRoot?
+            .appendingPathComponent("test-images")
+
+        let allFileSet = Set(allFiles)
+
+        let baseNames: [String] = allFiles
+            .compactMap { name -> String? in
+                guard name.hasSuffix("_01_loaded.jpg") else { return nil }
+                return String(name.dropLast("_01_loaded.jpg".count))
+            }
+            .sorted()
+
+        return baseNames.compactMap {
+            jobFrom(
+                baseName: $0,
+                debugDir: debugDir,
+                testImagesDir: testImagesDir,
+                allFileSet: allFileSet,
+                fm: fm
+            )
+        }
     }
 
     // MARK: - Private
 
-    @MainActor private static func jobFrom(folder: URL) -> ProcessingJob? {
-        let stem = folder.lastPathComponent
-        let photoURLs = finalPhotoURLs(in: folder)
-        guard !photoURLs.isEmpty else { return nil }
-
-        // Before image — 01_loaded.jpg in the same debug folder
-        let loadedURL = folder.appendingPathComponent("01_loaded.jpg")
-        let beforeURL: URL? = FileManager.default.fileExists(atPath: loadedURL.path) ? loadedURL : nil
-
-        // Try to locate the original input file in test-images/
-        let foundInput = findInputFile(stem: stem)
-        let inputURL = foundInput ?? beforeURL
-        let inputName = foundInput?.lastPathComponent ?? stem
-
-        let job = ProcessingJob(
-            inputName: inputName,
-            inputURL: inputURL,
-            state: .complete,
-            currentStep: .done,
-            stepStatus: .complete
-        )
-
-        job.extractedPhotos = photoURLs.map { url in
-            ExtractedPhoto(
-                imageURL: url,
-                jobInputURL: beforeURL,
-                jobInputName: inputName,
-                jobID: job.id
-            )
+    @MainActor private static func jobFrom(
+        baseName: String,
+        debugDir: URL,
+        testImagesDir: URL?,
+        allFileSet: Set<String>,
+        fm: FileManager
+    ) -> ProcessingJob? {
+        // Helper: check whether a flat debug file exists.
+        func exists(_ suffix: String) -> Bool {
+            allFileSet.contains("\(baseName)_\(suffix)")
         }
 
-        return job
-    }
+        // ── Determine current step ──────────────────────────────────────────────
+        // Count final per-photo outputs (1-based, sequential).
+        var photoCount = 0
+        while exists("14_photo_\(String(format: "%02d", photoCount + 1))_enhanced.jpg") {
+            photoCount += 1
+        }
 
-    /// Returns the highest-step output URL for each photo index found in the folder.
-    /// Prefers step 15 (final) over step 14 (enhanced) over step 13 (restored).
-    private static func finalPhotoURLs(in folder: URL) -> [URL] {
-        guard let files = try? FileManager.default.contentsOfDirectory(
-            at: folder,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        ) else { return [] }
+        let isDone    = photoCount > 0
+        let hasColor  = exists("13_photo_01_restored.jpg")
+        let hasGlare  = exists("07_photo_01_deglared.jpg")
+        let hasOrient = exists("05b_photo_01_oriented.jpg")
+        let hasSplit  = exists("04_photo_boundaries.jpg")
 
-        // Map: photoIndex → (highestStep, URL)
-        var best: [Int: (step: Int, url: URL)] = [:]
+        let jobState:    JobState
+        let currentStep: PipelineStep
+        let stepStatus:  StepStatus
 
-        for file in files where file.pathExtension.lowercased() == "jpg" {
-            guard let (step, index) = parsePhotoFilename(file.lastPathComponent),
-                  step >= 13 else { continue }
+        if isDone {
+            jobState = .complete; currentStep = .done;            stepStatus = .complete
+        } else if hasColor {
+            jobState = .running;  currentStep = .colorCorrection; stepStatus = .awaitingReview
+        } else if hasGlare {
+            jobState = .running;  currentStep = .glareRemoval;    stepStatus = .awaitingReview
+        } else if hasOrient {
+            jobState = .running;  currentStep = .orientation;     stepStatus = .awaitingReview
+        } else if hasSplit {
+            jobState = .running;  currentStep = .photoSplit;      stepStatus = .awaitingReview
+        } else {
+            jobState = .running;  currentStep = .pageDetect;      stepStatus = .awaitingReview
+        }
 
-            if let existing = best[index] {
-                if step > existing.step { best[index] = (step, file) }
-            } else {
-                best[index] = (step, file)
+        // ── Locate original input file (for "before" thumbnail) ────────────────
+        var inputURL: URL? = nil
+        var inputName = "\(baseName).HEIC"
+        if let testDir = testImagesDir {
+            for ext in ["HEIC", "heic", "DNG", "dng", "JPG", "jpg", "JPEG", "jpeg"] {
+                let candidate = testDir.appendingPathComponent("\(baseName).\(ext)")
+                if fm.fileExists(atPath: candidate.path) {
+                    inputURL = candidate
+                    inputName = "\(baseName).\(ext)"
+                    break
+                }
             }
         }
 
-        return best.keys.sorted().compactMap { best[$0]?.url }
-    }
+        // Fall back to using the loaded debug image as the "input"
+        let loadedURL = debugDir.appendingPathComponent("\(baseName)_01_loaded.jpg")
+        let beforeURL: URL? = fm.fileExists(atPath: loadedURL.path) ? loadedURL : nil
+        if inputURL == nil { inputURL = beforeURL }
 
-    /// Parses filenames like "15_photo_02_final.jpg" → (step: 15, photoIndex: 2).
-    private static func parsePhotoFilename(_ name: String) -> (step: Int, index: Int)? {
-        let parts = name.components(separatedBy: "_")
-        guard parts.count >= 3,
-              let step = Int(parts[0]),
-              parts[1] == "photo",
-              let index = Int(parts[2]) else { return nil }
-        return (step, index)
-    }
+        // ── Build job ──────────────────────────────────────────────────────────
+        let job = ProcessingJob(
+            inputName:   inputName,
+            inputURL:    inputURL,
+            state:       jobState,
+            currentStep: currentStep,
+            stepStatus:  stepStatus
+        )
 
-    /// Looks for `<stem>.<ext>` in test-images/ across all supported extensions.
-    @MainActor private static func findInputFile(stem: String) -> URL? {
-        let exts = ["HEIC", "heic", "DNG", "dng", "JPG", "jpg", "JPEG", "jpeg", "PNG", "png"]
-        for ext in exts {
-            let candidate = testImagesRoot.appendingPathComponent("\(stem).\(ext)")
-            if FileManager.default.fileExists(atPath: candidate.path) { return candidate }
+        // ── Attach extracted photos ────────────────────────────────────────────
+        // Photos are visible once orientation, glare, or final step output is present.
+        if isDone || hasGlare || hasOrient {
+            let count = max(photoCount, 1)
+            for i in 1...count {
+                let idx = String(format: "%02d", i)
+                let imageSuffix: String
+                if isDone        { imageSuffix = "14_photo_\(idx)_enhanced.jpg" }
+                else if hasGlare { imageSuffix = "07_photo_\(idx)_deglared.jpg" }
+                else             { imageSuffix = "05b_photo_\(idx)_oriented.jpg" }
+
+                let imageURL = debugDir.appendingPathComponent("\(baseName)_\(imageSuffix)")
+                guard fm.fileExists(atPath: imageURL.path) else { continue }
+
+                job.extractedPhotos.append(ExtractedPhoto(
+                    imageURL:     imageURL,
+                    jobInputURL:  beforeURL,
+                    jobInputName: inputName,
+                    jobID:        job.id,
+                    photoIndex:   i
+                ))
+            }
         }
-        return nil
-    }
 
-    private static func isDirectory(_ url: URL) -> Bool {
-        var isDir: ObjCBool = false
-        return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue
+        return job
     }
 }

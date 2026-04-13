@@ -66,7 +66,12 @@ final class AppSettings {
     }
 
     static var defaultDebugFolder: URL {
-        appSupportBase.appendingPathComponent("debug")
+        // In dev builds, default to the project's own debug/ folder so the library
+        // is populated automatically without any configuration.
+        if let devRoot = RuntimeManager.devProjectRoot {
+            return devRoot.appendingPathComponent("debug")
+        }
+        return appSupportBase.appendingPathComponent("debug")
     }
 
     private static var appSupportBase: URL {

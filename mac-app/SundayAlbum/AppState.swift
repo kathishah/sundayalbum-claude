@@ -19,7 +19,23 @@ final class AppState {
     init(loadDebugJobs: Bool = true) {
         if loadDebugJobs {
             jobs = DebugFolderScanner.loadJobs()
+            OverridesStore.apply(to: jobs)
         }
+    }
+
+    /// Rescan the debug folder and replace the library with fresh job data.
+    /// Called when the debug folder setting changes or on explicit user request.
+    func reloadJobs() {
+        jobs = DebugFolderScanner.loadJobs()
+        OverridesStore.apply(to: jobs)
+        // Return to library view so stale job detail views don't linger.
+        currentScreen = .library
+    }
+
+    /// Persist overrides for a photo after the user commits a change to
+    /// `rotationOverride` or `sceneDescription`.
+    func saveOverrides(for photo: ExtractedPhoto) {
+        OverridesStore.update(for: photo)
     }
 
     var selectedJob: ProcessingJob? {
