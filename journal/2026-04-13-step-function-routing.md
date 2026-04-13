@@ -401,20 +401,28 @@ def test_reprocess_accepts_all_valid_steps():
 
 ### Layer 2 — State machine ASL tests (CDK synthesis, no AWS)
 
-Test file: `tests/infra/test_state_machine.py`
+Test file: `infra/tests/unit/test_sfn_routing.py` (45 tests)
 
-Uses `aws-cdk-lib` `Template.from_stack()` to assert the synthesized CloudFormation
-template contains the expected structure — no deployment required.
+Uses `aws-cdk-lib` `Template.from_stack()` to synthesize the stack in-process and assert
+the emitted ASL — no deployment required.
 
-| Test | What it asserts |
+Run from the `infra/` directory using the infra venv:
+
+```bash
+cd infra
+JSII_SILENCE_WARNING_UNTESTED_NODE_VERSION=1 .venv/bin/pytest tests/unit/test_sfn_routing.py -v
+# → 45 passed in ~2s
+```
+
+| Test group | What it asserts |
 |---|---|
-| `test_every_pre_split_step_has_a_guard` | Each of the 6 pre-split steps has a `Skip{Step}?` Choice and `{Step}Skipped` Pass state. |
-| `test_every_per_photo_step_has_a_guard` | Each of the 4 per-photo steps inside the Map iterator has a guard. |
-| `test_load_guard_lists_all_later_steps` | `SkipLoad?` Choice enumerates exactly the 9 steps that follow `load`. |
-| `test_color_restore_guard_is_empty` | `color_restore` is last — its Choice has no skip conditions (or is absent). |
-| `test_guard_default_is_task` | For each Choice, `Default` leads to the Task state, not the Pass state. |
-| `test_pass_state_forwards_event` | Each `{Step}Skipped` Pass has no `Result` key (event passes through unmodified). |
-| `test_normalize_guard_does_not_list_load` | Regression: `SkipNormalize?` lists `page_detect`…`color_restore` but NOT `load`. |
+| Existence | All 6 pre-split and 3 per-photo Choice states exist; all Pass (skipped) states exist |
+| Guard wiring | Each Choice's `Default` routes to the correct Task; skip `Next` routes to the correct Pass |
+| No self-skip | A step's own name is never in its guard's skip condition set |
+| Exact conditions | Each guard's `StringEquals` set matches exactly the expected "later steps" |
+| Boundary (pre-split) | `start_from=page_detect` skips load+normalize but not page_detect; `start_from=ai_orient` skips all 6 pre-split guards |
+| Boundary (per-photo) | `start_from=glare_remove` skips ai_orient but not glare_remove; `start_from=color_restore` skips all 3 per-photo guards |
+| Terminal step | `ColorRestore` is a Task with no preceding `SkipColorRestore?` guard |
 
 ### Layer 3 — Playwright E2E tests (against dev environment)
 
@@ -437,21 +445,27 @@ before triggering reprocess. A test fixture creates and fully processes a job us
 existing `web/.auth/session.json` token. If the session file does not exist, these
 tests are skipped (same skip behaviour as current Playwright suite).
 
-### Layer 4 — Manual smoke test (pre-PR to `dev`)
+### Layer 4 — Automated smoke tests (manually triggered, not CI)
 
-After deploying to dev:
+Test file: `web/tests/sfn_smoke.spec.ts` — Playwright tests against the dev environment.
+Run manually after deploying to dev; not wired into CI.
 
-1. **T-sfn-smoke-01**: Reprocess from `page_detect`. In the Step Functions console,
-   confirm the execution graph shows `SkipLoad` and `SkipNormalize` Pass states
-   (grey boxes), not Lambda invocations. Confirm CloudWatch shows no new log entry for
-   `sa-pipeline-load` or `sa-pipeline-normalize`.
+```bash
+cd web
+STAGE=dev TEST_USER_EMAIL=... DEV_FRONTEND_URL=https://dev.sundayalbum.com \
+  DEV_API_URL=https://nodcooz758.execute-api.us-west-2.amazonaws.com \
+  SESSIONS_TABLE=sa-sessions-dev npx playwright test sfn_smoke.spec.ts
+```
 
-2. **T-sfn-smoke-02**: Reprocess with `reprocess_photo_index=2` on a 2-photo job.
-   Confirm only photo 2 per-photo Lambda logs are present. Confirm `finalize` receives
-   `output_keys` for both photos.
+| Test ID | Scenario | What it checks |
+|---|---|---|
+| `T-sfn-smoke-01` | Reprocess from `page_detect` | Execution graph in SFN console shows `SkipLoad` and `SkipNormalize` Pass states (grey); no Lambda log entries for `sa-pipeline-load` or `sa-pipeline-normalize` |
+| `T-sfn-smoke-02` | Single-photo reprocess (`reprocess_photo_index=2`, 2-photo job) | Only photo 2 per-photo Lambda logs appear; `finalize` receives `output_keys` for both photos |
+| `T-sfn-smoke-03` | Invalid `from_step` via API | 400 response with a descriptive error message |
 
-3. **T-sfn-smoke-03**: Submit an invalid `from_step` value via `curl`. Confirm 400
-   response with a clear error message.
+**Implementation note:** each smoke test creates or reuses a completed job in the dev
+environment using the `web/.auth/session-dev.json` token. Tests skip if the session file
+is absent.
 
 ### Layer 5 — Local pipeline regression (CLI + macOS, post-deploy)
 
