@@ -53,6 +53,7 @@ struct SundayAlbumApp: App {
         Settings {
             SettingsView()
                 .environment(appSettings)
+                .environment(appState)
         }
 
         // Help menu additions

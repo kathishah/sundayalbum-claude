@@ -16,10 +16,12 @@ private let kPromptStatic =
 struct GlareRemovalStepView: View {
     let job: ProcessingJob
     let photoIndex: Int   // 0-based
+    @Environment(AppState.self) private var appState
 
     @State private var afterOpacity: Double = 0
     @State private var showGlow = false
     @State private var sceneDesc: String = ""
+    @State private var isProcessing = false
 
     var photo: ExtractedPhoto? { job.extractedPhotos[safe: photoIndex] }
 
@@ -69,6 +71,34 @@ struct GlareRemovalStepView: View {
                     TextField("Leave blank for AI description", text: $sceneDesc)
                         .font(.dmSans(12))
                         .textFieldStyle(.roundedBorder)
+                        .accessibilityIdentifier("field-scene-desc-glare")
+                }
+
+                // ── Action row ──────────────────────────────────────
+                HStack {
+                    Spacer()
+                    Button("Discard") {
+                        sceneDesc = photo?.sceneDescription ?? ""
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .accessibilityIdentifier("btn-discard-glare")
+
+                    Button("Re-run Glare Removal") {
+                        isProcessing = true
+                        // Persist the scene description override before launching the runner.
+                        if let p = photo {
+                            p.sceneDescription = sceneDesc.isEmpty ? nil : sceneDesc
+                            appState.saveOverrides(for: p)
+                        }
+                        let runner = PipelineRunner(job: job)
+                        runner.reprocessFromGlare(sceneDescription: sceneDesc)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color.saAmber500)
+                    .controlSize(.small)
+                    .disabled(isProcessing)
+                    .accessibilityIdentifier("btn-rerun-glare")
                 }
             }
             .padding(16)
@@ -79,6 +109,7 @@ struct GlareRemovalStepView: View {
     private func triggerReveal() {
         afterOpacity = 0
         showGlow = false
+        isProcessing = false
         sceneDesc = photo?.sceneDescription ?? ""
         Task {
             try? await Task.sleep(for: .milliseconds(80))

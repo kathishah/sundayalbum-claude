@@ -6,10 +6,12 @@ import AppKit
 struct ColorCorrectionStepView: View {
     let job: ProcessingJob
     let photoIndex: Int   // 0-based
+    @Environment(AppState.self) private var appState
 
     @State private var image: NSImage?
     @State private var saturation: Double = 0.15
     @State private var sharpness: Double = 0.50
+    @State private var isProcessing = false
 
     var photo: ExtractedPhoto? { job.extractedPhotos[safe: photoIndex] }
 
@@ -56,7 +58,7 @@ struct ColorCorrectionStepView: View {
 
                 Spacer()
 
-                if isDirty {
+                if isDirty && !isProcessing {
                     Button("Discard") {
                         withAnimation(.saStandard) {
                             saturation = defaultSaturation
@@ -67,11 +69,17 @@ struct ColorCorrectionStepView: View {
                     .controlSize(.small)
 
                     Button("Apply & Reprocess") {
-                        // TODO: wire to reprocess API when CLI bridge supports it
+                        isProcessing = true
+                        let runner = PipelineRunner(job: job)
+                        runner.reprocessFromColor(
+                            vibranceBoost: saturation,
+                            sharpenAmount: sharpness
+                        )
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(Color.saAmber500)
                     .controlSize(.small)
+                    .accessibilityIdentifier("btn-reprocess-color")
                 }
             }
             .padding(.horizontal, 20)
@@ -79,6 +87,7 @@ struct ColorCorrectionStepView: View {
             .background(Color.saCard)
         }
         .task(id: photoIndex) {
+            isProcessing = false
             image = nil
             let url = PipelineStep.colorCorrection.debugImageURL(
                 forInputName: job.inputName,
@@ -110,6 +119,7 @@ private struct InlineSlider: View {
             Slider(value: $value, in: range)
                 .tint(Color.saAmber500)
                 .frame(width: 120)
+                .accessibilityIdentifier("slider-\(label.lowercased())")
             Text(String(format: "%+.0f%%", value * 100))
                 .font(.jetbrainsMono(11))
                 .foregroundStyle(Color.saStone400)

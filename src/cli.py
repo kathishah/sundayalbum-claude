@@ -158,6 +158,37 @@ def main() -> None:
     ),
 )
 @click.option(
+    '--forced-rotation',
+    'forced_rotation',
+    type=click.IntRange(min=-360, max=360),
+    default=None,
+    metavar='DEGREES',
+    help=(
+        'Apply this exact rotation (degrees, e.g. 90 / 180 / 270 / -90) '
+        'instead of calling the Claude orientation API. '
+        'Maps to PipelineConfig.forced_rotation_degrees.'
+    ),
+)
+@click.option(
+    '--color-vibrance',
+    'color_vibrance',
+    type=click.FloatRange(min=0.0, max=1.0),
+    default=None,
+    metavar='FLOAT',
+    help=(
+        'color_restore_vibrance_boost override (0.0–1.0, default 0.25). '
+        'Higher values produce more saturated output.'
+    ),
+)
+@click.option(
+    '--sharpen-amount',
+    'sharpen_amount',
+    type=click.FloatRange(min=0.0, max=1.0),
+    default=None,
+    metavar='FLOAT',
+    help='sharpen_amount override (0.0–1.0, default 0.5).',
+)
+@click.option(
     '--workers', '-j',
     type=click.IntRange(min=1),
     default=1,
@@ -182,6 +213,9 @@ def process(
     scene_desc: Optional[str],
     no_ai_orientation: bool,
     forced_detections_json: Optional[str],
+    forced_rotation: Optional[int],
+    color_vibrance: Optional[float],
+    sharpen_amount: Optional[float],
     workers: int,
     verbose: bool
 ) -> None:
@@ -257,7 +291,7 @@ def process(
 
     from src.utils.secrets import load_secrets
     _secrets = load_secrets()
-    config = PipelineConfig(
+    _config_kwargs: dict = dict(
         use_openai_glare_removal=not no_openai_glare,
         use_ai_orientation=not no_ai_orientation,
         forced_scene_description=scene_desc,
@@ -265,6 +299,13 @@ def process(
         anthropic_api_key=_secrets.anthropic_api_key or "",
         openai_api_key=_secrets.openai_api_key or "",
     )
+    if forced_rotation is not None:
+        _config_kwargs["forced_rotation_degrees"] = forced_rotation
+    if color_vibrance is not None:
+        _config_kwargs["color_restore_vibrance_boost"] = color_vibrance
+    if sharpen_amount is not None:
+        _config_kwargs["sharpen_amount"] = sharpen_amount
+    config = PipelineConfig(**_config_kwargs)
 
     def _process_one(input_file: Path) -> Optional[object]:
         """Process a single file and save its outputs. Returns PipelineResult or None on error."""

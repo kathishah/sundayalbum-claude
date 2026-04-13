@@ -347,6 +347,9 @@ def _handle_start(job_id: str, user_hash: str, email: str) -> dict:
                 "start_time": time.time(),
                 "config": {},
                 "user_keys": user_keys,
+                # Always present so PrepareMap and item_selector can safely use .$
+                "start_from": "",
+                "reprocess_photo_index": None,
             }
         )
         try:
