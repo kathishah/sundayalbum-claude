@@ -242,38 +242,89 @@ def test_step_failure_marks_job_failed():
     assert item["error_message"] != ""
 
 
-# ── 32. skip_pre_split when start_from is a later step ───────────────────────
+# ── 32. skip_this_photo: wrong index → skip ──────────────────────────────────
 
 
-def test_skip_pre_split_when_start_from_later():
-    """should_skip_pre_split returns True for 'load' when start_from='ai_orient'."""
-    from handlers.common import should_skip_pre_split
+def test_skip_this_photo_wrong_index():
+    """skip_this_photo returns True when reprocess_photo_index != photo_index."""
+    from handlers.common import skip_this_photo
 
-    event_reprocess = {**make_base_event("u", "j"), "start_from": "ai_orient"}
-    assert should_skip_pre_split(event_reprocess, "load") is True
-    assert should_skip_pre_split(event_reprocess, "normalize") is True
-    assert should_skip_pre_split(event_reprocess, "page_detect") is True
+    event = {**make_base_event("u", "j"), "reprocess_photo_index": 1, "photo_index": 2}
+    assert skip_this_photo(event) is True
 
 
-# ── 33. skip per-photo when index doesn't match ───────────────────────────────
+# ── 33. skip_this_photo: correct index → run ─────────────────────────────────
 
 
-def test_skip_per_photo_wrong_index():
-    """should_skip_per_photo returns True when reprocess_photo_index != photo_index."""
-    from handlers.common import should_skip_per_photo
+def test_skip_this_photo_correct_index():
+    """skip_this_photo returns False when photo_index matches reprocess_photo_index."""
+    from handlers.common import skip_this_photo
 
-    base = make_base_event("u", "j")
-
-    # Photo 2 should be skipped (reprocess_photo_index=1, photo_index=2 in event)
-    event_photo2 = {**base, "start_from": "ai_orient", "reprocess_photo_index": 1, "photo_index": 2}
-    assert should_skip_per_photo(event_photo2, "ai_orient") is True
-
-    # Photo 1 should NOT be skipped
-    event_photo1 = {**base, "start_from": "ai_orient", "reprocess_photo_index": 1, "photo_index": 1}
-    assert should_skip_per_photo(event_photo1, "ai_orient") is False
+    event = {**make_base_event("u", "j"), "reprocess_photo_index": 1, "photo_index": 1}
+    assert skip_this_photo(event) is False
 
 
-# ── 34. finalize marks job complete ──────────────────────────────────────────
+# ── 34. skip_this_photo: no reprocess_photo_index → never skip ───────────────
+
+
+def test_skip_this_photo_no_reprocess_index():
+    """skip_this_photo returns False when reprocess_photo_index is absent (full run)."""
+    from handlers.common import skip_this_photo
+
+    event = {**make_base_event("u", "j"), "photo_index": 1}
+    assert skip_this_photo(event) is False
+
+
+# ── 35. load handler runs even when start_from is set ────────────────────────
+
+
+def test_load_runs_with_start_from():
+    """load.handler ignores start_from — skip routing lives in the state machine."""
+    user_hash, job_id = _ids()
+    create_job_record(user_hash, job_id)
+
+    boto3.client("s3", region_name=REGION).put_object(
+        Bucket=S3_BUCKET,
+        Key=f"{user_hash}/uploads/test.heic",
+        Body=_jpeg_bytes(),
+    )
+
+    mock_meta = MagicMock()
+    mock_meta.original_size = (4, 4)
+    mock_meta.format = "HEIC"
+
+    with patch("src.preprocessing.loader.load_image", return_value=(FAKE_IMAGE, mock_meta)):
+        from handlers import load as load_handler
+        event = {**make_base_event(user_hash, job_id), "start_from": "normalize"}
+        load_handler.handler(event, None)
+
+    item = get_job(user_hash, job_id)
+    # Handler ran fully — did not skip despite start_from being set
+    assert "01_loaded" in item["debug_keys"]
+
+
+# ── 36. ai_orient handler runs even when start_from is set ───────────────────
+
+
+def test_ai_orient_runs_with_start_from():
+    """ai_orient.handler ignores start_from — no skip logic in the handler."""
+    user_hash, job_id = _ids()
+    create_job_record(user_hash, job_id)
+    put_s3_image(user_hash, "debug/test_05_photo_01_raw.jpg")
+
+    with patch(
+        "src.steps.ai_orient.run",
+        return_value={"rotation_degrees": 0, "flip_horizontal": False, "scene_description": "test"},
+    ):
+        from handlers import ai_orient as ai_orient_handler
+        event = {**make_base_event(user_hash, job_id), "photo_index": 1, "start_from": "glare_remove"}
+        ai_orient_handler.handler(event, None)
+
+    item = get_job(user_hash, job_id)
+    assert "05b_photo_01_oriented" in item["debug_keys"]
+
+
+# ── 37. finalize marks job complete ──────────────────────────────────────────
 
 
 def test_finalize_marks_complete():
@@ -303,7 +354,7 @@ def test_finalize_marks_complete():
     assert item["photo_count"] == 1
 
 
-# ── 35. finalize with empty results marks failed ─────────────────────────────
+# ── 38. finalize with empty results marks failed ─────────────────────────────
 
 
 def test_finalize_empty_results_marks_failed():

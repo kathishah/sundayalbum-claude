@@ -316,13 +316,31 @@ class SundayAlbumStack(Stack):
                 comment=comment or task_id,
             )
 
-        load_task        = invoke("Load",        load_fn,         "Decode source image from S3")
-        normalize_task   = invoke("Normalize",   normalize_fn,    "Resize & fix orientation")
-        page_detect_task = invoke("PageDetect",  page_detect_fn,  "Detect album page boundary")
-        perspective_task = invoke("Perspective", perspective_fn,  "Apply perspective correction")
-        photo_detect_task= invoke("PhotoDetect", photo_detect_fn, "Detect individual photo regions")
-        photo_split_task = invoke("PhotoSplit",  photo_split_fn,  "Extract individual photo crops")
+        # ── Task states (no transitions set here) ─────────────────────────────
+        load_task         = invoke("Load",         load_fn,          "Decode source image from S3")
+        normalize_task    = invoke("Normalize",    normalize_fn,     "Resize & fix orientation")
+        page_detect_task  = invoke("PageDetect",   page_detect_fn,   "Detect album page boundary")
+        perspective_task  = invoke("Perspective",  perspective_fn,   "Apply perspective correction")
+        photo_detect_task = invoke("PhotoDetect",  photo_detect_fn,  "Detect individual photo regions")
+        photo_split_task  = invoke("PhotoSplit",   photo_split_fn,   "Extract individual photo crops")
+        ai_orient_task    = invoke("AiOrient",     ai_orient_fn,     "AI orientation correction")
+        glare_remove_task = invoke("GlareRemove",  glare_remove_fn,  "Glare removal")
+        geometry_task     = invoke("Geometry",     geometry_fn,      "Geometry correction")
+        color_restore_task= invoke("ColorRestore", color_restore_fn, "Color restoration")
+        finalize_task     = invoke("Finalize",     finalize_fn,      "Collect results, mark job complete")
 
+        # ── Pass (skipped) states — one per guarded step ──────────────────────
+        load_skipped         = sfn.Pass(self, "LoadSkipped",        comment="Load skipped — reprocessing from later step")
+        normalize_skipped    = sfn.Pass(self, "NormalizeSkipped",   comment="Normalize skipped — reprocessing from later step")
+        page_detect_skipped  = sfn.Pass(self, "PageDetectSkipped",  comment="PageDetect skipped — reprocessing from later step")
+        perspective_skipped  = sfn.Pass(self, "PerspectiveSkipped", comment="Perspective skipped — reprocessing from later step")
+        photo_detect_skipped = sfn.Pass(self, "PhotoDetectSkipped", comment="PhotoDetect skipped — reprocessing from later step")
+        photo_split_skipped  = sfn.Pass(self, "PhotoSplitSkipped",  comment="PhotoSplit skipped — reprocessing from later step")
+        ai_orient_skipped    = sfn.Pass(self, "AiOrientSkipped",    comment="AiOrient skipped — reprocessing from later step")
+        glare_remove_skipped = sfn.Pass(self, "GlareRemoveSkipped", comment="GlareRemove skipped — reprocessing from later step")
+        geometry_skipped     = sfn.Pass(self, "GeometrySkipped",    comment="Geometry skipped — reprocessing from later step")
+
+        # ── PrepareMap Pass — builds photo_indices array for the Map state ────
         prepare_map = sfn.Pass(
             self,
             "PrepareMap",
@@ -341,18 +359,41 @@ class SundayAlbumStack(Stack):
             },
         )
 
-        ai_orient_task    = invoke("AiOrient",    ai_orient_fn,    "AI orientation correction")
-        glare_remove_task = invoke("GlareRemove", glare_remove_fn, "Glare removal")
-        geometry_task     = invoke("Geometry",    geometry_fn,     "Geometry correction")
-        color_restore_task= invoke("ColorRestore",color_restore_fn,"Color restoration")
+        # ── Helper: build OR condition from a list of step name strings ───────
+        def skip_when(*steps: str) -> sfn.Condition:
+            conditions = [sfn.Condition.string_equals("$.start_from", s) for s in steps]
+            return sfn.Condition.or_(*conditions) if len(conditions) > 1 else conditions[0]
 
-        per_photo_chain = (
-            ai_orient_task
-            .next(glare_remove_task)
-            .next(geometry_task)
-            .next(color_restore_task)
+        # ── Per-photo chain (inside Map iterator), wired from end → front ─────
+        # ColorRestore is terminal (no guard — it's last).
+        # Each skipped Pass and its corresponding Task both point to the same
+        # next guard Choice, so the event flows through regardless of branch.
+
+        geometry_skipped.next(color_restore_task)
+        geometry_task.next(color_restore_task)
+        skip_geometry = (
+            sfn.Choice(self, "SkipGeometry?", comment="Skip Geometry if reprocessing from color_restore")
+            .when(skip_when("color_restore"), geometry_skipped)
+            .otherwise(geometry_task)
         )
 
+        glare_remove_skipped.next(skip_geometry)
+        glare_remove_task.next(skip_geometry)
+        skip_glare_remove = (
+            sfn.Choice(self, "SkipGlareRemove?", comment="Skip GlareRemove if reprocessing from geometry or later")
+            .when(skip_when("geometry", "color_restore"), glare_remove_skipped)
+            .otherwise(glare_remove_task)
+        )
+
+        ai_orient_skipped.next(skip_glare_remove)
+        ai_orient_task.next(skip_glare_remove)
+        skip_ai_orient = (
+            sfn.Choice(self, "SkipAiOrient?", comment="Skip AiOrient if reprocessing from glare_remove or later")
+            .when(skip_when("glare_remove", "geometry", "color_restore"), ai_orient_skipped)
+            .otherwise(ai_orient_task)
+        )
+
+        # ── Map state (processes each photo in parallel) ──────────────────────
         process_photos_map = sfn.Map(
             self,
             "ProcessPhotos",
@@ -372,21 +413,61 @@ class SundayAlbumStack(Stack):
             max_concurrency=4,
             result_path="$.photo_results",
         )
-        process_photos_map.item_processor(per_photo_chain)
+        process_photos_map.item_processor(sfn.Chain.start(skip_ai_orient))
+        process_photos_map.next(finalize_task)
 
-        finalize_task = invoke("Finalize", finalize_fn, "Collect results, mark job complete")
+        # ── Pre-split chain, wired from end → front ───────────────────────────
+        prepare_map.next(process_photos_map)
 
-        definition = (
-            load_task
-            .next(normalize_task)
-            .next(page_detect_task)
-            .next(perspective_task)
-            .next(photo_detect_task)
-            .next(photo_split_task)
-            .next(prepare_map)
-            .next(process_photos_map)
-            .next(finalize_task)
+        photo_split_skipped.next(prepare_map)
+        photo_split_task.next(prepare_map)
+        skip_photo_split = (
+            sfn.Choice(self, "SkipPhotoSplit?", comment="Skip PhotoSplit if reprocessing from per-photo step")
+            .when(skip_when("ai_orient", "glare_remove", "geometry", "color_restore"), photo_split_skipped)
+            .otherwise(photo_split_task)
         )
+
+        photo_detect_skipped.next(skip_photo_split)
+        photo_detect_task.next(skip_photo_split)
+        skip_photo_detect = (
+            sfn.Choice(self, "SkipPhotoDetect?", comment="Skip PhotoDetect if reprocessing from photo_split or later")
+            .when(skip_when("photo_split", "ai_orient", "glare_remove", "geometry", "color_restore"), photo_detect_skipped)
+            .otherwise(photo_detect_task)
+        )
+
+        perspective_skipped.next(skip_photo_detect)
+        perspective_task.next(skip_photo_detect)
+        skip_perspective = (
+            sfn.Choice(self, "SkipPerspective?", comment="Skip Perspective if reprocessing from photo_detect or later")
+            .when(skip_when("photo_detect", "photo_split", "ai_orient", "glare_remove", "geometry", "color_restore"), perspective_skipped)
+            .otherwise(perspective_task)
+        )
+
+        page_detect_skipped.next(skip_perspective)
+        page_detect_task.next(skip_perspective)
+        skip_page_detect = (
+            sfn.Choice(self, "SkipPageDetect?", comment="Skip PageDetect if reprocessing from perspective or later")
+            .when(skip_when("perspective", "photo_detect", "photo_split", "ai_orient", "glare_remove", "geometry", "color_restore"), page_detect_skipped)
+            .otherwise(page_detect_task)
+        )
+
+        normalize_skipped.next(skip_page_detect)
+        normalize_task.next(skip_page_detect)
+        skip_normalize = (
+            sfn.Choice(self, "SkipNormalize?", comment="Skip Normalize if reprocessing from page_detect or later")
+            .when(skip_when("page_detect", "perspective", "photo_detect", "photo_split", "ai_orient", "glare_remove", "geometry", "color_restore"), normalize_skipped)
+            .otherwise(normalize_task)
+        )
+
+        load_skipped.next(skip_normalize)
+        load_task.next(skip_normalize)
+        skip_load = (
+            sfn.Choice(self, "SkipLoad?", comment="Skip Load if reprocessing from normalize or later")
+            .when(skip_when("normalize", "page_detect", "perspective", "photo_detect", "photo_split", "ai_orient", "glare_remove", "geometry", "color_restore"), load_skipped)
+            .otherwise(load_task)
+        )
+
+        definition = sfn.Chain.start(skip_load)
 
         sfn_role = iam.Role(
             self,

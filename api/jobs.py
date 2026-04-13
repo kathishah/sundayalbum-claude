@@ -425,8 +425,10 @@ def _handle_reprocess(job_id: str | None, event: dict, user_hash: str) -> dict:
     photo_index = body.get("photo_index")  # optional int
     config_overrides = body.get("config") or {}
 
-    if not from_step or from_step not in _VALID_REPROCESS_STEPS:
-        return bad_request(f"from_step must be one of: {', '.join(_VALID_REPROCESS_STEPS)}")
+    if from_step and from_step not in _VALID_REPROCESS_STEPS:
+        return bad_request(
+            f"Unknown step '{from_step}'. Valid steps: {', '.join(_VALID_REPROCESS_STEPS)}"
+        )
 
     if photo_index is not None:
         try:
