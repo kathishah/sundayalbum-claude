@@ -13,6 +13,7 @@ struct OrientationStepView: View {
         if let photo {
             OrientationPhotoPanel(
                 photo: photo,
+                job: job,
                 inputName: job.inputName,
                 photoIndex: photoIndex + 1
             )
@@ -26,8 +27,10 @@ struct OrientationStepView: View {
 
 private struct OrientationPhotoPanel: View {
     @Bindable var photo: ExtractedPhoto
+    let job: ProcessingJob
     let inputName: String
     let photoIndex: Int
+    @Environment(AppState.self) private var appState
 
     @State private var image: NSImage?
     @State private var pendingRotation: Int = 0
@@ -55,33 +58,54 @@ private struct OrientationPhotoPanel: View {
             Divider()
 
             // ── Controls footer ───────────────────────────────────────
-            HStack(spacing: 16) {
-                Text("Rotate")
-                    .font(.dmSans(12, weight: .semibold))
-                    .foregroundStyle(Color.saTextSecondary)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 16) {
+                    Text("Rotate")
+                        .font(.dmSans(12, weight: .semibold))
+                        .foregroundStyle(Color.saTextSecondary)
 
-                RotationPicker(selected: $pendingRotation)
-                    .onChange(of: pendingRotation) { checkDirty() }
+                    RotationPicker(selected: $pendingRotation)
+                        .onChange(of: pendingRotation) { checkDirty() }
 
-                Spacer()
+                    Spacer()
+                }
+
+                HStack(spacing: 8) {
+                    Text("Scene description")
+                        .font(.dmSans(11))
+                        .foregroundStyle(Color.saTextTertiary)
+                        .frame(width: 110, alignment: .leading)
+                    TextField("Leave blank for AI description", text: $pendingDescription)
+                        .font(.dmSans(12))
+                        .textFieldStyle(.roundedBorder)
+                        .onChange(of: pendingDescription) { checkDirty() }
+                }
 
                 if isDirty {
-                    Button("Discard") {
-                        pendingRotation = photo.rotationOverride ?? 0
-                        pendingDescription = photo.sceneDescription ?? ""
-                        isDirty = false
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
+                    HStack {
+                        Spacer()
+                        Button("Discard") {
+                            pendingRotation = photo.rotationOverride ?? 0
+                            pendingDescription = photo.sceneDescription ?? ""
+                            isDirty = false
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
 
-                    Button("Apply & Reprocess") {
-                        photo.rotationOverride = pendingRotation == 0 ? nil : pendingRotation
-                        photo.sceneDescription = pendingDescription.isEmpty ? nil : pendingDescription
-                        isDirty = false
+                        Button("Apply & Reprocess") {
+                            photo.rotationOverride = pendingRotation == 0 ? nil : pendingRotation
+                            photo.sceneDescription = pendingDescription.isEmpty ? nil : pendingDescription
+                            isDirty = false
+                            let runner = PipelineRunner(job: job)
+                            runner.reprocessFromOrientation(
+                                rotationDegrees: pendingRotation,
+                                sceneDescription: pendingDescription
+                            )
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Color.saAmber500)
+                        .controlSize(.small)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Color.saAmber500)
-                    .controlSize(.small)
                 }
             }
             .padding(.horizontal, 20)

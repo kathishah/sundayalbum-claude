@@ -16,6 +16,7 @@ private let kPromptStatic =
 struct GlareRemovalStepView: View {
     let job: ProcessingJob
     let photoIndex: Int   // 0-based
+    @Environment(AppState.self) private var appState
 
     @State private var afterOpacity: Double = 0
     @State private var showGlow = false
@@ -69,6 +70,24 @@ struct GlareRemovalStepView: View {
                     TextField("Leave blank for AI description", text: $sceneDesc)
                         .font(.dmSans(12))
                         .textFieldStyle(.roundedBorder)
+                }
+
+                // ── Action row ──────────────────────────────────────
+                HStack {
+                    Spacer()
+                    Button("Discard") {
+                        sceneDesc = photo?.sceneDescription ?? ""
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+
+                    Button("Re-run Glare Removal") {
+                        let runner = PipelineRunner(job: job)
+                        runner.reprocessFromGlare(sceneDescription: sceneDesc)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color.saAmber500)
+                    .controlSize(.small)
                 }
             }
             .padding(16)

@@ -118,6 +118,65 @@ final class PipelineRunner {
     /// invocation with ``--steps photo_split,...`` so that load, normalize,
     /// page_detect, and photo_detect are all skipped.
     func reprocessFromPhotoSplit() {
+        let stepsFromSplit = [
+            "photo_split", "ai_orientation", "glare_detect",
+            "keystone_correct", "dewarp", "rotation_correct",
+            "white_balance", "color_restore", "deyellow", "sharpen",
+        ].joined(separator: ",")
+
+        job.extractedPhotos = []
+        _launchReprocess(extraArgs: ["--steps", stepsFromSplit], startingStep: .photoSplit)
+    }
+
+    /// Restart from AI orientation onward, applying an optional rotation override
+    /// and/or scene description for the glare removal prompt.
+    func reprocessFromOrientation(rotationDegrees: Int, sceneDescription: String) {
+        let steps = [
+            "ai_orientation", "glare_detect", "keystone_correct",
+            "dewarp", "rotation_correct", "white_balance",
+            "color_restore", "deyellow", "sharpen",
+        ].joined(separator: ",")
+
+        var extra = ["--steps", steps]
+        if rotationDegrees != 0 { extra += ["--forced-rotation", "\(rotationDegrees)"] }
+        if !sceneDescription.isEmpty { extra += ["--scene-desc", sceneDescription] }
+
+        _launchReprocess(extraArgs: extra, startingStep: .orientation)
+    }
+
+    /// Restart from glare removal onward, using an optional scene description
+    /// override for the OpenAI prompt.
+    func reprocessFromGlare(sceneDescription: String) {
+        let steps = [
+            "glare_detect", "keystone_correct", "dewarp",
+            "rotation_correct", "white_balance", "color_restore",
+            "deyellow", "sharpen",
+        ].joined(separator: ",")
+
+        var extra = ["--steps", steps]
+        if !sceneDescription.isEmpty { extra += ["--scene-desc", sceneDescription] }
+
+        _launchReprocess(extraArgs: extra, startingStep: .glareRemoval)
+    }
+
+    /// Restart from color restoration onward with custom vibrance and sharpness values.
+    func reprocessFromColor(vibranceBoost: Double, sharpenAmount: Double) {
+        let steps = "white_balance,color_restore,deyellow,sharpen"
+        let extra = [
+            "--steps", steps,
+            "--color-vibrance", String(format: "%.3f", vibranceBoost),
+            "--sharpen-amount", String(format: "%.3f", sharpenAmount),
+        ]
+        _launchReprocess(extraArgs: extra, startingStep: .colorCorrection)
+    }
+
+    // MARK: - Private
+
+    /// Shared subprocess launcher for all reprocess entry points.
+    ///
+    /// Builds a `python -m src.cli process <input> --output <dir> [extraArgs]`
+    /// invocation, wires stdout/stderr to the line handler, and starts the process.
+    private func _launchReprocess(extraArgs: [String], startingStep: PipelineStep) {
         guard let inputURL = job.inputURL else {
             job.state = .failed
             job.errorMessage = "No input file URL"
@@ -131,27 +190,8 @@ final class PipelineRunner {
             return
         }
 
-        // Step IDs that come after photo_detect/photo_split
-        let stepsFromSplit = [
-            "photo_split",
-            "ai_orientation",
-            "glare_detect",
-            "keystone_correct",
-            "dewarp",
-            "rotation_correct",
-            "white_balance",
-            "color_restore",
-            "deyellow",
-            "sharpen",
-        ].joined(separator: ",")
-
-        let proc = Process()
-        proc.executableURL = pythonURL
-        var args = [
-            "-m", "src.cli", "process", inputURL.path,
-            "--output", outputDir.path,
-            "--steps", stepsFromSplit,
-        ]
+        var args = ["-m", "src.cli", "process", inputURL.path, "--output", outputDir.path]
+        args += extraArgs
 
         let s = AppSettings.shared
         if s.useOpenCVFallback { args.append("--no-openai-glare") }
@@ -159,6 +199,8 @@ final class PipelineRunner {
             args += ["--debug", "--debug-dir", s.debugFolder.path]
         }
 
+        let proc = Process()
+        proc.executableURL = pythonURL
         proc.arguments = args
         proc.currentDirectoryURL = runtime.cliWorkingDirectory
 
@@ -192,9 +234,8 @@ final class PipelineRunner {
 
         self.process = proc
         job.state = .running
-        job.currentStep = .photoSplit
+        job.currentStep = startingStep
         job.stepStatus = .running
-        job.extractedPhotos = []
 
         do {
             try proc.run()
@@ -203,8 +244,6 @@ final class PipelineRunner {
             job.errorMessage = "Failed to launch Python: \(error.localizedDescription)"
         }
     }
-
-    // MARK: - Private
 
     private func handle(lines: [String]) {
         for line in lines {

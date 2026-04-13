@@ -6,6 +6,7 @@ import AppKit
 struct ColorCorrectionStepView: View {
     let job: ProcessingJob
     let photoIndex: Int   // 0-based
+    @Environment(AppState.self) private var appState
 
     @State private var image: NSImage?
     @State private var saturation: Double = 0.15
@@ -67,7 +68,11 @@ struct ColorCorrectionStepView: View {
                     .controlSize(.small)
 
                     Button("Apply & Reprocess") {
-                        // TODO: wire to reprocess API when CLI bridge supports it
+                        let runner = PipelineRunner(job: job)
+                        runner.reprocessFromColor(
+                            vibranceBoost: saturation,
+                            sharpenAmount: sharpness
+                        )
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(Color.saAmber500)
