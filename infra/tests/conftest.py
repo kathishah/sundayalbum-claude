@@ -1,7 +1,7 @@
 """Shared fixtures for infra CDK tests.
 
 Run from the infra/ directory using the infra venv:
-    cd infra && ../.venv/bin/pytest tests/ -v
+    cd infra && .venv/bin/pytest tests/ -v
 """
 from __future__ import annotations
 
