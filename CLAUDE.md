@@ -103,8 +103,9 @@ python -m src.cli process test-images/IMG_cave_normal.HEIC --output ./output/ \
   --scene-desc "A cave interior with warm amber light"
 
 # Override detected photo boundaries (bypasses contour detection)
+# Use bbox for axis-aligned crops, or add corners for free-form quads (keystoned photos):
 python -m src.cli process test-images/IMG_three_pics_normal.HEIC --output ./output/ \
-  --forced-detections '[{"bbox":[50,80,900,700],"confidence":1.0,"region_type":"photo","orientation":"unknown"}]'
+  --forced-detections '[{"bbox":[50,80,900,700],"corners":[[55,85],[895,78],[905,698],[48,705]],"confidence":1.0,"region_type":"photo","orientation":"unknown"}]'
 
 # Run only specific pipeline steps
 python -m src.cli process test-images/IMG_cave_normal.HEIC --output ./output/ \
@@ -171,6 +172,17 @@ sundayalbum-claude/
 ├── mac-app/             # SwiftUI macOS app
 └── tests/               # pytest suite
 ```
+
+### macOS app builds
+
+```bash
+cd mac-app && bash build-release.sh   # → ~/Desktop/SundayAlbum-1.0-beta1.dmg
+```
+
+`build-release.sh` stamps `mac-app/SundayAlbum/BuildInfo.swift` with the PST build date
+(`yyyy-mm-dd-hh-min`) before compiling. The file is committed with value `"dev"` so IDE
+(Debug) builds show "dev" in the About panel; release builds show the real timestamp.
+Do not edit `BuildInfo.swift` by hand — it is overwritten on every release build.
 
 ---
 

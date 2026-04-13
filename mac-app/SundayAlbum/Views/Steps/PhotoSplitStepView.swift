@@ -2,9 +2,14 @@ import SwiftUI
 import AppKit
 
 /// Photo split step view — shows detected regions overlaid on the fitted page image.
-/// Each region has 4 independently-draggable corner handles, allowing the user to
-/// match keystoned or rotated photo prints (not just axis-aligned rectangles).
-/// "Confirm & Re-run" writes the corrected JSON and restarts from photo_split.
+/// Each region has 4 independently-draggable corner handles.
+///
+/// Architecture mirrors PageDetectionStepView exactly:
+/// • Each CornerHandle is a DIRECT child of the GeometryReader (no wrapper ZStack).
+/// • CornerHandle holds @Binding var pixelPos: CGPoint and updates it directly,
+///   just like PageDetectionStepView.CornerHandle updates @Binding var normalized.
+/// • This keeps gesture state alive across re-renders (SwiftUI updates the binding
+///   in-place instead of recreating the view and its gesture recogniser).
 struct PhotoSplitStepView: View {
     let job: ProcessingJob
     @Environment(AppState.self) private var appState
@@ -27,6 +32,7 @@ struct PhotoSplitStepView: View {
             // ── Image canvas ───────────────────────────────────────────
             ZStack {
                 Color.black
+
                 GeometryReader { geo in
                     let imgSize = pageImage?.size ?? CGSize(width: 1, height: 1)
                     let fitted  = fitSize(imgSize, in: geo.size)
@@ -37,87 +43,137 @@ struct PhotoSplitStepView: View {
                     let scaleX = imgSize.width  > 0 ? fitted.width  / imgSize.width  : 1
                     let scaleY = imgSize.height > 0 ? fitted.height / imgSize.height : 1
 
-                    ZStack(alignment: .topLeading) {
-
-                        // Background image
-                        if let img = pageImage {
-                            Image(nsImage: img)
-                                .resizable()
-                                .frame(width: fitted.width, height: fitted.height)
-                                .position(x: origin.x + fitted.width / 2,
-                                          y: origin.y + fitted.height / 2)
-                        } else if let debugPath = loadDebugPath {
-                            VStack(spacing: 8) {
-                                Image(systemName: "photo.badge.exclamationmark")
-                                    .font(.system(size: 32))
-                                    .foregroundStyle(Color.saTextSecondary)
-                                Text("Could not load image")
-                                    .font(.dmSans(13, weight: .semibold))
-                                    .foregroundStyle(Color.saTextSecondary)
-                                Text(debugPath)
-                                    .font(.system(size: 10, design: .monospaced))
-                                    .foregroundStyle(Color.saTextTertiary)
-                                    .multilineTextAlignment(.center)
-                                    .padding(.horizontal, 20)
-                            }
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    // ── Background image ──────────────────────────────
+                    if let img = pageImage {
+                        Image(nsImage: img)
+                            .resizable()
+                            .frame(width: fitted.width, height: fitted.height)
+                            .position(x: origin.x + fitted.width  / 2,
+                                      y: origin.y + fitted.height / 2)
+                            .allowsHitTesting(false)
+                    } else if let debugPath = loadDebugPath {
+                        VStack(spacing: 8) {
+                            Image(systemName: "photo.badge.exclamationmark")
+                                .font(.system(size: 32))
+                                .foregroundStyle(Color.saTextSecondary)
+                            Text("Could not load image")
+                                .font(.dmSans(13, weight: .semibold))
+                                .foregroundStyle(Color.saTextSecondary)
+                            Text(debugPath)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(Color.saTextTertiary)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 20)
                         }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .allowsHitTesting(false)
+                    }
 
-                        // Region overlays — one per detected/edited region
-                        ForEach($regions) { $region in
-                            RegionView(
-                                region: $region,
-                                canvasSize: geo.size,
+                    // ── Region polygon borders + labels ───────────────
+                    // (non-interactive; handles are separate below)
+                    ForEach(Array(regions.enumerated()), id: \.element.id) { ri, region in
+                        let cc = canvasCorners(of: region, origin: origin,
+                                               scaleX: scaleX, scaleY: scaleY)
+                        let col = palette[ri % palette.count]
+
+                        // Polygon outline
+                        Path { p in
+                            p.move(to: cc[0])
+                            p.addLine(to: cc[1])
+                            p.addLine(to: cc[2])
+                            p.addLine(to: cc[3])
+                            p.closeSubpath()
+                        }
+                        .stroke(col, lineWidth: 2)
+                        .allowsHitTesting(false)
+
+                        // Label + delete button near TL corner
+                        HStack(spacing: 4) {
+                            Text(region.label)
+                                .font(.dmSans(11, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 6).padding(.vertical, 3)
+                                .background(col)
+                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                            Button { removeRegion(id: region.id) } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(col)
+                                    .background(Color.black.opacity(0.01))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(4)
+                        .position(x: cc[0].x + 52, y: cc[0].y + 14)
+                        .allowsHitTesting(!isDrawing)
+                    }
+
+                    // ── Corner handles — direct children of GeometryReader ──
+                    // Mirrors PageDetectionStepView.CornerHandle exactly.
+                    // Each handle has @Binding to its pixel corner and updates
+                    // it directly — no closure, no intermediate wrapper view.
+                    ForEach(regions.indices, id: \.self) { ri in
+                        let col = palette[ri % palette.count]
+                        ForEach(0..<4, id: \.self) { ci in
+                            CornerHandle(
+                                pixelPos: Binding(
+                                    get: { regions[ri].corners[ci] },
+                                    set: { newPx in
+                                        var r = regions[ri]
+                                        r.corners[ci] = newPx
+                                        regions[ri] = r
+                                    }
+                                ),
                                 origin: origin,
                                 scaleX: scaleX,
                                 scaleY: scaleY,
-                                colour: paletteColour(for: region),
-                                onDelete: { removeRegion(id: region.id) }
+                                colour: col
                             )
                             .allowsHitTesting(!isDrawing)
                         }
-
-                        // In-progress draw rectangle
-                        if isDrawing, let s = drawStart, let c = drawCurrent {
-                            let r = rectFrom(a: s, b: c)
-                            Path { p in p.addRect(r) }
-                                .stroke(Color.saAmber500,
-                                        style: StrokeStyle(lineWidth: 2, dash: [6]))
-                                .allowsHitTesting(false)
-                        }
                     }
-                    .frame(width: geo.size.width, height: geo.size.height)
-                    .contentShape(Rectangle())
-                    .coordinateSpace(name: "photoSplitCanvas")
-                    .gesture(
-                        DragGesture(minimumDistance: 4)
-                            .onChanged { v in
-                                guard isDrawing else { return }
-                                if drawStart == nil { drawStart = v.startLocation }
-                                drawCurrent = v.location
-                            }
-                            .onEnded { v in
-                                guard isDrawing, let s = drawStart else { return }
-                                let r = rectFrom(a: s, b: v.location)
-                                // Convert canvas rect to pixel-space corners [TL, TR, BR, BL]
-                                let px = CGRect(
-                                    x: (r.minX - origin.x) / scaleX,
-                                    y: (r.minY - origin.y) / scaleY,
-                                    width:  r.width  / scaleX,
-                                    height: r.height / scaleY
-                                )
-                                if px.width > 10 && px.height > 10 {
-                                    let newRegion = EditableRegion(
-                                        pixelRect: px,
-                                        label: "Photo \(regions.count + 1)"
-                                    )
-                                    regions.append(newRegion)
+
+                    // ── In-progress draw rectangle ────────────────────
+                    if isDrawing, let s = drawStart, let c = drawCurrent {
+                        Path { p in p.addRect(rectFrom(a: s, b: c)) }
+                            .stroke(Color.saAmber500,
+                                    style: StrokeStyle(lineWidth: 2, dash: [6]))
+                            .allowsHitTesting(false)
+                    }
+
+                    // ── Draw gesture (transparent hit layer) ──────────
+                    // allowsHitTesting(isDrawing) ensures this overlay only
+                    // captures gestures when actively drawing — otherwise
+                    // events fall through to the corner handles below.
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .gesture(
+                            DragGesture(minimumDistance: 4)
+                                .onChanged { v in
+                                    if drawStart == nil { drawStart = v.startLocation }
+                                    drawCurrent = v.location
                                 }
-                                drawStart   = nil
-                                drawCurrent = nil
-                                isDrawing   = false
-                            }
-                    )
+                                .onEnded { v in
+                                    guard let s = drawStart else { return }
+                                    let r = rectFrom(a: s, b: v.location)
+                                    let px = CGRect(
+                                        x: (r.minX - origin.x) / scaleX,
+                                        y: (r.minY - origin.y) / scaleY,
+                                        width:  r.width  / scaleX,
+                                        height: r.height / scaleY
+                                    )
+                                    if px.width > 10 && px.height > 10 {
+                                        regions.append(EditableRegion(
+                                            pixelRect: px,
+                                            label: "Photo \(regions.count + 1)"
+                                        ))
+                                    }
+                                    drawStart   = nil
+                                    drawCurrent = nil
+                                    isDrawing   = false
+                                }
+                        )
+                        .allowsHitTesting(isDrawing)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -190,34 +246,22 @@ struct PhotoSplitStepView: View {
         var loaded = false
         for name in ["\(s)_04_photo_boundaries.jpg", "\(s)_03_page_warped.jpg"] {
             let url = debugDir.appendingPathComponent(name)
-            let exists = FileManager.default.fileExists(atPath: url.path)
-            print("[PhotoSplitStepView]   trying \(name) — exists: \(exists)")
-            guard exists else { continue }
+            guard FileManager.default.fileExists(atPath: url.path) else { continue }
             if let data = try? Data(contentsOf: url), let img = NSImage(data: data) {
-                print("[PhotoSplitStepView]   loaded image size: \(img.size)")
                 pageImage = img
                 loadDebugPath = nil
                 loaded = true
                 break
-            } else {
-                print("[PhotoSplitStepView]   FAILED to create NSImage from \(url.path)")
             }
         }
         if !loaded && pageImage == nil {
-            let tried = debugDir.appendingPathComponent("\(s)_04_photo_boundaries.jpg").path
-            print("[PhotoSplitStepView]   image load failed — showing error for \(tried)")
-            loadDebugPath = tried
+            loadDebugPath = debugDir.appendingPathComponent("\(s)_04_photo_boundaries.jpg").path
         }
 
         let jsonURL = debugDir.appendingPathComponent("\(s)_05_photo_detections.json")
-        print("[PhotoSplitStepView]   json path: \(jsonURL.path)")
         guard let data = try? Data(contentsOf: jsonURL),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let dets = root["detections"] as? [[String: Any]] else {
-            print("[PhotoSplitStepView]   json load FAILED")
-            return
-        }
-        print("[PhotoSplitStepView]   json loaded \(dets.count) detection(s)")
+              let dets = root["detections"] as? [[String: Any]] else { return }
 
         regions = dets.enumerated().compactMap { idx, d in
             let label = "Photo \(idx + 1)"
@@ -231,12 +275,10 @@ struct PhotoSplitStepView: View {
                     else { return nil }
                     return CGPoint(x: x, y: y)
                 }
-                if pts.count == 4 {
-                    return EditableRegion(corners: pts, label: label)
-                }
+                if pts.count == 4 { return EditableRegion(corners: pts, label: label) }
             }
 
-            // Fall back to bbox (axis-aligned rectangle)
+            // Fall back to bbox
             guard let raw = d["bbox"] as? [Any], raw.count == 4,
                   let x1 = (raw[0] as? NSNumber).map({ CGFloat($0.doubleValue) }),
                   let y1 = (raw[1] as? NSNumber).map({ CGFloat($0.doubleValue) }),
@@ -284,8 +326,8 @@ struct PhotoSplitStepView: View {
         let jsonURL = debugDir.appendingPathComponent("\(stem)_05_photo_detections.json")
         do {
             try FileManager.default.createDirectory(at: debugDir, withIntermediateDirectories: true)
-            let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted])
-            try data.write(to: jsonURL)
+            let jsonData = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted])
+            try jsonData.write(to: jsonURL)
         } catch {
             errorMessage = "Could not write detections: \(error.localizedDescription)"
             return
@@ -300,6 +342,15 @@ struct PhotoSplitStepView: View {
     private func removeRegion(id: UUID) {
         regions.removeAll { $0.id == id }
         for i in regions.indices { regions[i].label = "Photo \(i + 1)" }
+    }
+
+    private func canvasCorners(of region: EditableRegion,
+                                origin: CGPoint,
+                                scaleX: CGFloat,
+                                scaleY: CGFloat) -> [CGPoint] {
+        region.corners.map {
+            CGPoint(x: origin.x + $0.x * scaleX, y: origin.y + $0.y * scaleY)
+        }
     }
 
     private func effectiveDebugFolder() -> URL {
@@ -328,9 +379,6 @@ struct PhotoSplitStepView: View {
         Color(red: 0.80, green: 0.25, blue: 0.25),
         Color(red: 0.55, green: 0.25, blue: 0.78),
     ]
-    private func paletteColour(for region: EditableRegion) -> Color {
-        palette[abs(region.label.hashValue) % palette.count]
-    }
 }
 
 // MARK: - Region model
@@ -341,13 +389,11 @@ struct EditableRegion: Identifiable {
     var corners: [CGPoint]
     var label: String
 
-    /// Initialise from free-form corner points.
     init(corners: [CGPoint], label: String) {
         self.corners = corners
         self.label = label
     }
 
-    /// Convenience initialiser from an axis-aligned rect (used for drawn regions).
     init(pixelRect: CGRect, label: String) {
         self.corners = [
             CGPoint(x: pixelRect.minX, y: pixelRect.minY),
@@ -359,103 +405,25 @@ struct EditableRegion: Identifiable {
     }
 }
 
-// MARK: - Region view (polygon border + 4 independent corner handles)
+// MARK: - Corner handle
+//
+// Mirrors PageDetectionStepView.CornerHandle exactly:
+// • @Binding var pixelPos: CGPoint — direct binding, updated in onChanged.
+// • .position(canvasPos) — hit area follows the dot.
+// • DragGesture with no coordinateSpace — works correctly because the handle
+//   is a direct child of GeometryReader (same as PageDetectionStepView).
 
-private struct RegionView: View {
-    @Binding var region: EditableRegion
-    let canvasSize: CGSize
+private struct CornerHandle: View {
+    @Binding var pixelPos: CGPoint
     let origin: CGPoint
     let scaleX: CGFloat
     let scaleY: CGFloat
     let colour: Color
-    let onDelete: () -> Void
 
-    private func canvasPoint(from px: CGPoint) -> CGPoint {
-        CGPoint(x: origin.x + px.x * scaleX, y: origin.y + px.y * scaleY)
+    private var canvasPos: CGPoint {
+        CGPoint(x: origin.x + pixelPos.x * scaleX,
+                y: origin.y + pixelPos.y * scaleY)
     }
-
-    private func pixelPoint(from canvas: CGPoint) -> CGPoint {
-        CGPoint(x: (canvas.x - origin.x) / scaleX, y: (canvas.y - origin.y) / scaleY)
-    }
-
-    private var canvasCorners: [CGPoint] {
-        region.corners.map { canvasPoint(from: $0) }
-    }
-
-    var body: some View {
-        let cc = canvasCorners
-
-        ZStack {
-            // Polygon border
-            Path { p in
-                p.move(to: cc[0])
-                p.addLine(to: cc[1])
-                p.addLine(to: cc[2])
-                p.addLine(to: cc[3])
-                p.closeSubpath()
-            }
-            .stroke(colour, lineWidth: 2)
-            .allowsHitTesting(false)
-
-            // Label + delete button near TL corner
-            HStack(spacing: 4) {
-                Text(region.label)
-                    .font(.dmSans(11, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 6).padding(.vertical, 3)
-                    .background(colour)
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
-                Button { onDelete() } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 13))
-                        .foregroundStyle(colour)
-                        .background(Color.black.opacity(0.01))
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(4)
-            .position(x: cc[0].x + 52, y: cc[0].y + 14)
-
-            // 4 independent corner handles
-            ForEach(0..<4, id: \.self) { idx in
-                CornerHandle(position: cc[idx], colour: colour) { canvasPos in
-                    let p = pixelPoint(from: canvasPos)
-                    var newCorners = region.corners
-                    newCorners[idx] = p
-                    if isConvex(newCorners) {
-                        region.corners = newCorners
-                    }
-                }
-            }
-        }
-        .frame(width: canvasSize.width, height: canvasSize.height)
-    }
-
-    /// Returns true if the 4-point polygon is convex (all cross products same sign).
-    private func isConvex(_ pts: [CGPoint]) -> Bool {
-        let n = pts.count
-        guard n >= 3 else { return false }
-        var sign: Int = 0
-        for i in 0..<n {
-            let a = pts[i], b = pts[(i + 1) % n], c = pts[(i + 2) % n]
-            let cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x)
-            if abs(cross) > 0.01 {
-                let s = cross > 0 ? 1 : -1
-                if sign == 0 { sign = s }
-                else if s != sign { return false }
-            }
-        }
-        return true
-    }
-}
-
-// MARK: - Corner handle
-
-private struct CornerHandle: View {
-    let position: CGPoint
-    let colour: Color
-    /// Called with the new canvas position while dragging.
-    let onDrag: (CGPoint) -> Void
 
     var body: some View {
         ZStack {
@@ -467,12 +435,15 @@ private struct CornerHandle: View {
                 .frame(width: 20, height: 20)
         }
         .shadow(color: .black.opacity(0.4), radius: 4)
-        .position(position)        // .position() moves the hit area; .offset() does NOT
+        .position(canvasPos)
         .gesture(
-            // coordinateSpace: .named("photoSplitCanvas") ensures v.location is
-            // in the canvas coordinate space, not the handle's 20×20 local frame.
-            DragGesture(minimumDistance: 0, coordinateSpace: .named("photoSplitCanvas"))
-                .onChanged { v in onDrag(v.location) }
+            DragGesture(minimumDistance: 0)
+                .onChanged { v in
+                    pixelPos = CGPoint(
+                        x: (v.location.x - origin.x) / scaleX,
+                        y: (v.location.y - origin.y) / scaleY
+                    )
+                }
         )
     }
 }

@@ -155,23 +155,38 @@ rectangular output, then crops via `cv2.warpPerspective`.
 
 ### Forced-detection override
 When automatic detection produces wrong results, you can bypass contour detection entirely
-by providing explicit bounding boxes via `config.forced_detections`.
+by providing explicit photo boundaries via `config.forced_detections`.
+
+Each detection object supports two boundary formats:
+- **`bbox`** — axis-aligned bounding box `[x1, y1, x2, y2]` (pixel coordinates)
+- **`corners`** — free-form quadrilateral `[[x1,y1],[x2,y2],[x3,y3],[x4,y4]]` (TL, TR, BR, BL).
+  Use this when photos are rotated or keystoned; `photo_split` applies a full homographic warp
+  (`cv2.getPerspectiveTransform` + `cv2.warpPerspective`) to straighten the quad to a rectangle.
+
+If both keys are present, `corners` takes precedence. If only `bbox` is provided, axis-aligned
+corners are derived from it automatically.
 
 **CLI:** pass a JSON array of detection objects:
 ```bash
+# Axis-aligned bbox
 python -m src.cli process image.HEIC --output ./output/ \
   --forced-detections '[{"bbox":[50,80,900,700],"confidence":1.0,"region_type":"photo","orientation":"unknown"}]'
+
+# Free-form quad (keystoned photo)
+python -m src.cli process image.HEIC --output ./output/ \
+  --forced-detections '[{"bbox":[50,80,900,700],"corners":[[55,85],[895,78],[905,698],[48,705]],"confidence":1.0,"region_type":"photo","orientation":"unknown"}]'
 ```
 
-**Web UI:** on the Photo Split step detail, drag the corner handles to adjust detected
-regions (or draw new ones / delete unwanted ones), then click "Confirm & Re-run". The editor
-loads the current detections from `05_photo_detections_json` and posts the adjusted bboxes as
-`forced_detections` to the `photo_detect` reprocess endpoint.
+**Web UI:** on the Photo Split step detail, drag any of the 4 corner handles freely to form
+a non-rectangular quad (useful for keystoned or rotated prints), draw new regions, or delete
+unwanted ones, then click "Confirm & Re-run". The editor seeds from `05_photo_detections.json`
+and posts both `bbox` and `corners` as `forced_detections`.
 
-**macOS app:** same interactive boundary editor on the Photo Split step view.
+**macOS app:** same interactive boundary editor — each region starts as a rectangle but any
+corner handle can be dragged independently to form a free-form quad.
 
 When `forced_detections` is set, the step skips contour detection entirely, writes the
-provided bboxes to `05_photo_detections.json`, and redraws the `04_photo_boundaries.jpg`
+provided boundaries to `05_photo_detections.json`, and redraws the `04_photo_boundaries.jpg`
 overlay from scratch.
 
 ### Output
@@ -186,7 +201,7 @@ overlay from scratch.
 | `photo_detect_method` | `"contour"` | Detection method: `"contour"`, `"yolo"`, `"claude"` (only contour is active) |
 | `photo_detect_min_area_ratio` | `0.02` | Minimum photo area as fraction of page; increase to suppress small false positives |
 | `photo_detect_max_count` | `8` | Maximum photos to detect per page |
-| `forced_detections` | `None` | List of `{bbox, confidence, region_type, orientation}` dicts; bypasses contour detection when set |
+| `forced_detections` | `None` | List of `{bbox, corners, confidence, region_type, orientation}` dicts; bypasses contour detection when set. `corners` is optional — if present (4×[x,y] TL→TR→BR→BL), a full homographic warp is used; otherwise axis-aligned crop from `bbox`. |
 
 ---
 

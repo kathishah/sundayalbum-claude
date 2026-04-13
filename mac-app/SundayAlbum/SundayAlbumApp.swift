@@ -57,6 +57,13 @@ struct SundayAlbumApp: App {
 
         // Help menu additions
         .commands {
+            CommandGroup(replacing: .appInfo) {
+                Button("About Sunday Album") {
+                    NSApp.orderFrontStandardAboutPanel(options: [
+                        NSApplication.AboutPanelOptionKey.applicationVersion: "1.0 (Built: \(BuildInfo.buildDate))"
+                    ])
+                }
+            }
             CommandGroup(after: .help) {
                 Divider()
                 Button("Uninstall Sunday Album…") {
