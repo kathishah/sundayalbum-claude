@@ -34,6 +34,7 @@
 		A28DF7E4548246B3FC461783 /* DebugFolderScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54B3E56B1271D71F1E84F9C3 /* DebugFolderScanner.swift */; };
 		A628AE9D1A800E98E5E36D30 /* SundayAlbumApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB4099DAE2D726871919696D /* SundayAlbumApp.swift */; };
 		B4A16F5F0919EE4572CCB50A /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F7AAAE450D303F3206E05E /* AppState.swift */; };
+		B4A5E2D4E785C6FCAF845FAD /* BuildInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68A7313597BBDEB00FD10BEF /* BuildInfo.swift */; };
 		B698C274FD8127A44C3D5CCA /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A5720AF7D5DE1A3342FBBE2 /* AppSettings.swift */; };
 		C8E91D42D70A7AAA0749CD02 /* PhotoSplitStepView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E34FB3B4953E05D514C82659 /* PhotoSplitStepView.swift */; };
 		D1F4D266B183442A27B8D832 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 3AC970064BFD826F40DAF9CA /* Assets.xcassets */; };
@@ -80,6 +81,7 @@
 		597DA4F1B2F949A815A5A39D /* ResultsStepView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResultsStepView.swift; sourceTree = "<group>"; };
 		606E7E08C678BF7DA4DD3536 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		6634ACB94D5866C29FF93221 /* SundayAlbumTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SundayAlbumTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		68A7313597BBDEB00FD10BEF /* BuildInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BuildInfo.swift; sourceTree = "<group>"; };
 		8B552C81C5F831AAFD9A6765 /* SetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupView.swift; sourceTree = "<group>"; };
 		8CCB27D3578562B5F42B1398 /* SettingsStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStorage.swift; sourceTree = "<group>"; };
 		90E743B8B6D472B7F1E4EB6B /* ExportActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportActions.swift; sourceTree = "<group>"; };
@@ -119,6 +121,7 @@
 			children = (
 				E4F7AAAE450D303F3206E05E /* AppState.swift */,
 				3AC970064BFD826F40DAF9CA /* Assets.xcassets */,
+				68A7313597BBDEB00FD10BEF /* BuildInfo.swift */,
 				AB4099DAE2D726871919696D /* SundayAlbumApp.swift */,
 				16E2641257C82D28ACA7A52F /* Bridge */,
 				50D39EDBF711FFE739EDD009 /* Mock */,
@@ -376,6 +379,7 @@
 				3DFF96B49A9FC0731954B014 /* AlbumPageCard.swift in Sources */,
 				B698C274FD8127A44C3D5CCA /* AppSettings.swift in Sources */,
 				B4A16F5F0919EE4572CCB50A /* AppState.swift in Sources */,
+				B4A5E2D4E785C6FCAF845FAD /* BuildInfo.swift in Sources */,
 				FBBE4450E48D61344DAD0B35 /* CLIOutputParser.swift in Sources */,
 				E7CD06CA98837A261522EF47 /* ColorCorrectionStepView.swift in Sources */,
 				5217F5361FB61670584F604C /* ComparisonView.swift in Sources */,

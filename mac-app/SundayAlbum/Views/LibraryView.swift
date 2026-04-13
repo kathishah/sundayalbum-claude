@@ -95,6 +95,12 @@ struct LibraryView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.saBackground)
+        .overlay(alignment: .bottomTrailing) {
+            Text("build \(BuildInfo.buildDate)")
+                .font(.system(size: 10, weight: .regular, design: .monospaced))
+                .foregroundStyle(Color.secondary.opacity(0.5))
+                .padding(8)
+        }
         // Drop target — active even when grid is populated (not just on DropZoneView)
         .onDrop(of: [UTType.fileURL], isTargeted: $isDropTargeted) { providers in
             handleDrop(providers)

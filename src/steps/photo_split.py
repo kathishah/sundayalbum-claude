@@ -111,12 +111,15 @@ def run(
 def _detections_from_dicts(det_dicts: list[dict], page_image: "np.ndarray") -> list:
     """Reconstruct :class:`PhotoDetection` objects from stored detection dicts.
 
-    Uses bbox corners directly so that manually overridden boundaries are
-    respected without re-running the contour detector.
+    Prefers the ``corners`` key (free-form quadrilateral) when present so that
+    keystoned or rotated user-adjusted regions are extracted via a full
+    perspective warp rather than an axis-aligned crop.  Falls back to deriving
+    axis-aligned corners from ``bbox`` for backward compatibility.
 
     Args:
         det_dicts: List of dicts with at minimum a ``bbox`` key
-                   (``[x1, y1, x2, y2]`` in pixel coordinates).
+                   (``[x1, y1, x2, y2]`` in pixel coordinates) and an
+                   optional ``corners`` key ([[x,y] × 4, TL/TR/BR/BL order).
         page_image: The page image (used only to compute ``area_ratio``).
 
     Returns:
@@ -131,20 +134,29 @@ def _detections_from_dicts(det_dicts: list[dict], page_image: "np.ndarray") -> l
 
     for d in det_dicts:
         try:
-            x1, y1, x2, y2 = [int(v) for v in d["bbox"]]
-            # Clamp to image bounds
-            x1, x2 = max(0, x1), min(w, x2)
-            y1, y2 = max(0, y1), min(h, y2)
+            if "corners" in d and len(d["corners"]) == 4:
+                # Free-form quad: use as-is, clamped to image bounds.
+                corners = np.array(d["corners"], dtype=np.float32)
+                corners[:, 0] = np.clip(corners[:, 0], 0, w)
+                corners[:, 1] = np.clip(corners[:, 1], 0, h)
+                # Derive a bounding bbox from the quad for area_ratio / PhotoDetection.
+                x1 = int(corners[:, 0].min())
+                y1 = int(corners[:, 1].min())
+                x2 = int(corners[:, 0].max())
+                y2 = int(corners[:, 1].max())
+            else:
+                # Axis-aligned bbox fallback (old format or auto-detection without corners).
+                x1, y1, x2, y2 = [int(v) for v in d["bbox"]]
+                x1, x2 = max(0, x1), min(w, x2)
+                y1, y2 = max(0, y1), min(h, y2)
+                corners = np.array(
+                    [[x1, y1], [x2, y1], [x2, y2], [x1, y2]], dtype=np.float32
+                )
+
             if x2 <= x1 or y2 <= y1:
                 continue
-            corners = np.array([
-                [x1, y1],
-                [x2, y1],
-                [x2, y2],
-                [x1, y2],
-            ], dtype=np.float32)
+
             area_ratio = ((x2 - x1) * (y2 - y1)) / max(page_area, 1)
-            # Minimal contour — just the 4 corners reshaped for OpenCV
             contour = corners.reshape(-1, 1, 2).astype(np.int32)
             det = PhotoDetection(
                 bbox=(x1, y1, x2, y2),
