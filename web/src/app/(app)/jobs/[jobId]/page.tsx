@@ -111,10 +111,12 @@ function StepTree({
   job,
   selection,
   onSelect,
+  reprocessingPhotoIdx,
 }: {
   job: Job
   selection: StepSelection
   onSelect: (s: StepSelection) => void
+  reprocessingPhotoIdx: number | null
 }) {
   const urls = job.debug_urls ?? {}
   const isProcessing = job.status === 'processing'
@@ -159,7 +161,7 @@ function StepTree({
                 label={label}
                 active={isPhotoActive(photoIdx, stepKey)}
                 available={!!urls[debugKeyFn(n)]}
-                isRunning={activePhotoStepKey === stepKey}
+                isRunning={activePhotoStepKey === stepKey && (reprocessingPhotoIdx === null || reprocessingPhotoIdx === photoIdx)}
                 indented={job.photo_count > 1}
                 onClick={() => onSelect({ kind: 'photo', photoIdx, stepKey })}
               />
@@ -537,6 +539,8 @@ export default function JobDetailPage({ params }: { params: { jobId: string } })
   const [loading, setLoading] = useState(true)
   const [fetchError, setFetchError] = useState<string | null>(null)
   const [selection, setSelection] = useState<StepSelection>({ kind: 'job', stepKey: 'load' })
+  // Tracks which photo index triggered a reprocess so only that photo shows the running indicator
+  const [reprocessingPhotoIdx, setReprocessingPhotoIdx] = useState<number | null>(null)
 
   useEffect(() => {
     getJob(params.jobId)
@@ -571,7 +575,10 @@ export default function JobDetailPage({ params }: { params: { jobId: string } })
     if (!job || job.status !== 'processing') return
     const id = setInterval(() => {
       getJob(params.jobId)
-        .then(setJob)
+        .then((j) => {
+          setJob(j)
+          if (j.status !== 'processing') setReprocessingPhotoIdx(null)
+        })
         .catch(() => { /* keep polling */ })
     }, POLLING_INTERVAL_MS)
     return () => clearInterval(id)
@@ -614,7 +621,7 @@ export default function JobDetailPage({ params }: { params: { jobId: string } })
             afterUrl={job.debug_urls?.[`07_photo_${n}_deglared`]}
             photoIdx={selection.photoIdx}
             jobId={job.job_id}
-            onStarted={() => setJob((j) => j ? { ...j, status: 'processing' } : j)}
+            onStarted={() => { setReprocessingPhotoIdx(selection.photoIdx); setJob((j) => j ? { ...j, status: 'processing' } : j) }}
           />
         )
       }
@@ -623,7 +630,7 @@ export default function JobDetailPage({ params }: { params: { jobId: string } })
           <OrientationView
             job={job}
             photoIdx={selection.photoIdx}
-            onStarted={() => setJob((j) => j ? { ...j, status: 'processing' } : j)}
+            onStarted={() => { setReprocessingPhotoIdx(selection.photoIdx); setJob((j) => j ? { ...j, status: 'processing' } : j) }}
           />
         )
       }
@@ -632,7 +639,7 @@ export default function JobDetailPage({ params }: { params: { jobId: string } })
           <ColorRestoreView
             job={job}
             photoIdx={selection.photoIdx}
-            onStarted={() => setJob((j) => j ? { ...j, status: 'processing' } : j)}
+            onStarted={() => { setReprocessingPhotoIdx(selection.photoIdx); setJob((j) => j ? { ...j, status: 'processing' } : j) }}
           />
         )
       }
@@ -702,7 +709,7 @@ export default function JobDetailPage({ params }: { params: { jobId: string } })
       <div className="flex flex-1 overflow-hidden">
         {/* Left sidebar — 196px, independently scrollable */}
         <div className="border-r border-sa-stone-200 dark:border-sa-stone-800 overflow-y-auto flex-shrink-0">
-          <StepTree job={job} selection={selection} onSelect={setSelection} />
+          <StepTree job={job} selection={selection} onSelect={setSelection} reprocessingPhotoIdx={reprocessingPhotoIdx} />
         </div>
 
         {/* Right canvas — relative wrapper for bottom progress overlay */}
