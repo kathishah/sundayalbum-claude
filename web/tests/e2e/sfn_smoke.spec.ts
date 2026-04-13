@@ -19,6 +19,7 @@
  */
 
 import fs from 'fs'
+import path from 'path'
 import { test, expect } from '@playwright/test'
 import {
   SFNClient,
@@ -27,6 +28,9 @@ import {
   type HistoryEvent,
 } from '@aws-sdk/client-sfn'
 import { COMPLETED_JOB_FILE, AUTH_FILE } from '../../playwright.config'
+
+// Fixture that reliably produces 2 photos through the pipeline
+const FIXTURE_2UP = path.join(__dirname, 'fixtures', 'test_photo_2up.jpg')
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -80,6 +84,46 @@ async function waitForIdle(token: string, jobId: string, timeoutMs = REPROCESS_T
     await new Promise((res) => setTimeout(res, POLL_INTERVAL_MS))
   }
   throw new Error(`Job ${jobId} did not reach idle state within ${timeoutMs / 1000}s`)
+}
+
+/**
+ * Upload a file, start the pipeline, and poll until complete.
+ * Returns the completed job_id.
+ */
+async function uploadAndProcess(token: string, fixturePath: string): Promise<string> {
+  const filename  = path.basename(fixturePath)
+  const fileBytes = fs.readFileSync(fixturePath)
+  const fileSize  = fileBytes.length
+
+  const createResp = await fetch(`${API_URL}/jobs`, {
+    method: 'POST',
+    headers: authed(token),
+    body: JSON.stringify({ filename, file_size: fileSize }),
+  })
+  if (!createResp.ok) throw new Error(`createJob failed: ${createResp.status}`)
+  const { job_id, upload_url } = await createResp.json()
+
+  const uploadResp = await fetch(upload_url, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'image/jpeg' },
+    body: fileBytes,
+  })
+  if (!uploadResp.ok) throw new Error(`S3 upload failed: ${uploadResp.status}`)
+
+  const startResp = await fetch(`${API_URL}/jobs/${job_id}/start`, {
+    method: 'POST',
+    headers: authed(token),
+  })
+  if (!startResp.ok) throw new Error(`startJob failed: ${startResp.status}`)
+
+  const deadline = Date.now() + REPROCESS_TIMEOUT
+  while (Date.now() < deadline) {
+    await new Promise((res) => setTimeout(res, POLL_INTERVAL_MS))
+    const { status } = await getJobStatus(token, job_id)
+    if (status === 'complete') return job_id
+    if (status === 'failed')  throw new Error(`Pipeline failed for job ${job_id}`)
+  }
+  throw new Error(`Pipeline timed out for job ${job_id}`)
 }
 
 /**
@@ -205,22 +249,22 @@ test('T-sfn-smoke-01: reprocess from page_detect routes Load and Normalize to Pa
 // ── T-sfn-smoke-02 ─────────────────────────────────────────────────────────────
 
 test('T-sfn-smoke-02: single-photo reprocess only invokes per-photo Lambdas for the target photo', async () => {
-  test.setTimeout(5 * 60 * 1000)  // reprocess can take up to ~4 min
+  test.setTimeout(10 * 60 * 1000)  // upload + full pipeline + reprocess can take ~8 min
   const token = readToken()!
-  const jobId = readCompletedJobId()!
+  const sfn   = new SFNClient({ region: REGION })
 
-  // Only meaningful for multi-photo jobs
-  const { photo_count } = await getJobStatus(token, jobId)
-  if (!photo_count || photo_count < 2) {
-    test.skip(true, `Job ${jobId} has ${photo_count ?? 0} photo(s) — need ≥2 for this test`)
-  }
+  // Upload the 2-photo fixture and wait for it to complete.
+  // We use a dedicated fixture (not the shared completed-job-dev.json) so this
+  // test is self-contained and doesn't affect the other tests' job state.
+  console.log('[T-sfn-smoke-02] Uploading 2-photo fixture and processing...')
+  const jobId = await uploadAndProcess(token, FIXTURE_2UP)
+  console.log(`[T-sfn-smoke-02] Job ${jobId} complete with 2 photos`)
 
-  const sfn = new SFNClient({ region: REGION })
-
-  // Reprocess only photo index 0 (first photo), starting from ai_orient
+  // Reprocess only photo index 1 (second photo) starting from ai_orient.
+  // Photo index 0 should not trigger any per-photo Lambda.
   await reprocessAndWait(token, jobId, {
     from_step: 'ai_orient',
-    photo_index: 0,
+    photo_index: 1,
   })
 
   const execArn = await findExecutionArn(sfn, jobId)
@@ -239,7 +283,7 @@ test('T-sfn-smoke-02: single-photo reprocess only invokes per-photo Lambdas for 
   const tasks = taskStateNames(events)
   expect(tasks).toContain('AiOrient')
 
-  // Confirm finalize ran (job reached completion)
+  // Finalize must have run (job reached completion)
   expect(tasks).toContain('Finalize')
 })
 
