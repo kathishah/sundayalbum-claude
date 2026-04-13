@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 from handlers.common import (
-    fail_job, make_config, make_storage, should_skip_per_photo, update_step, write_thumbnail,
+    fail_job, make_config, make_storage, update_step, write_thumbnail,
 )
 import src.steps.glare_remove as step
 
@@ -14,9 +14,6 @@ logger.setLevel(logging.INFO)
 def handler(event: dict, context: Any) -> dict:
     user_hash, job_id, stem = event["user_hash"], event["job_id"], event["stem"]
     photo_index: int = int(event["photo_index"])
-    if should_skip_per_photo(event, "glare_remove"):
-        logger.info("glare_remove[%d]: skipping (start_from=%s)", photo_index, event.get("start_from"))
-        return event
     update_step(user_hash, job_id, "glare_remove", f"Removing glare from photo {photo_index}")
     storage = make_storage(user_hash)
     config = make_config(event.get("config"), user_keys=event.get("user_keys"))

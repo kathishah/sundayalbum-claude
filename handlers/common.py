@@ -224,50 +224,16 @@ def finalize_job(
 
 # ── Reprocess skip helpers ────────────────────────────────────────────────────
 
-PRE_SPLIT_STEP_ORDER = [
-    "load", "normalize", "page_detect", "perspective", "photo_detect", "photo_split"
-]
-PER_PHOTO_STEP_ORDER = ["ai_orient", "glare_remove", "geometry", "color_restore"]
+def skip_this_photo(event: dict) -> bool:
+    """Return True if this photo iteration should be skipped.
 
-
-def should_skip_pre_split(event: dict, my_step: str) -> bool:
-    """Return True if this pre-split handler should pass through without running.
-
-    Called at the top of each pre-split handler when reprocessing from a later step.
+    Only relevant when reprocess_photo_index targets a single photo.
+    Has no knowledge of step order — that decision lives in the state machine.
     """
-    start_from = event.get("start_from", "")
-    if not start_from:
-        return False
-    # If start_from is a per-photo step, skip all pre-split steps
-    if start_from in PER_PHOTO_STEP_ORDER:
-        return True
-    # If start_from is a pre-split step, skip steps that come before it
-    if start_from in PRE_SPLIT_STEP_ORDER and my_step in PRE_SPLIT_STEP_ORDER:
-        return PRE_SPLIT_STEP_ORDER.index(my_step) < PRE_SPLIT_STEP_ORDER.index(start_from)
-    return False
-
-
-def should_skip_per_photo(event: dict, my_step: str) -> bool:
-    """Return True if this per-photo handler should pass through without running.
-
-    True when:
-    - start_from is set and this step comes earlier in the per-photo order, OR
-    - reprocess_photo_index is set and this photo_index does not match it.
-    """
-    start_from = event.get("start_from", "")
-    reprocess_photo_index = event.get("reprocess_photo_index")
-    photo_index = event.get("photo_index")
-
-    # Skip if this step is before start_from in the per-photo order
-    if start_from and start_from in PER_PHOTO_STEP_ORDER and my_step in PER_PHOTO_STEP_ORDER:
-        if PER_PHOTO_STEP_ORDER.index(my_step) < PER_PHOTO_STEP_ORDER.index(start_from):
-            return True
-
-    # Skip if this photo is not the one being reprocessed
-    if reprocess_photo_index is not None and photo_index is not None:
-        if int(photo_index) != int(reprocess_photo_index):
-            return True
-
+    reprocess_idx = event.get("reprocess_photo_index")
+    photo_idx = event.get("photo_index")
+    if reprocess_idx is not None and photo_idx is not None:
+        return int(photo_idx) != int(reprocess_idx)
     return False
 
 

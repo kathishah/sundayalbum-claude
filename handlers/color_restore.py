@@ -4,7 +4,7 @@ import logging
 from typing import Any
 from handlers.common import (
     fail_job, get_existing_output_key, make_config, make_storage,
-    should_skip_per_photo, update_step, write_thumbnail,
+    skip_this_photo, update_step, write_thumbnail,
 )
 import src.steps.color_restore as step
 
@@ -16,7 +16,7 @@ def handler(event: dict, context: Any) -> dict:
     user_hash, job_id, stem = event["user_hash"], event["job_id"], event["stem"]
     photo_index: int = int(event["photo_index"])
 
-    if should_skip_per_photo(event, "color_restore"):
+    if skip_this_photo(event):
         logger.info("color_restore[%d]: skipping (start_from=%s)", photo_index, event.get("start_from"))
         idx = f"{photo_index:02d}"
         output_key = (
