@@ -11,6 +11,7 @@ struct ColorCorrectionStepView: View {
     @State private var image: NSImage?
     @State private var saturation: Double = 0.15
     @State private var sharpness: Double = 0.50
+    @State private var isProcessing = false
 
     var photo: ExtractedPhoto? { job.extractedPhotos[safe: photoIndex] }
 
@@ -57,7 +58,7 @@ struct ColorCorrectionStepView: View {
 
                 Spacer()
 
-                if isDirty {
+                if isDirty && !isProcessing {
                     Button("Discard") {
                         withAnimation(.saStandard) {
                             saturation = defaultSaturation
@@ -68,6 +69,7 @@ struct ColorCorrectionStepView: View {
                     .controlSize(.small)
 
                     Button("Apply & Reprocess") {
+                        isProcessing = true
                         let runner = PipelineRunner(job: job)
                         runner.reprocessFromColor(
                             vibranceBoost: saturation,
@@ -85,6 +87,7 @@ struct ColorCorrectionStepView: View {
             .background(Color.saCard)
         }
         .task(id: photoIndex) {
+            isProcessing = false
             image = nil
             let url = PipelineStep.colorCorrection.debugImageURL(
                 forInputName: job.inputName,

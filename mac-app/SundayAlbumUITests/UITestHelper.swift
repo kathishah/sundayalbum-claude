@@ -22,7 +22,7 @@ extension XCUIApplication {
     /// `inputName` is the exact job.inputName string (e.g. "IMG_cave_normal.HEIC").
     @discardableResult
     func openJob(inputName: String, timeout: TimeInterval = 10) -> Bool {
-        let card = otherElements["job-card-\(inputName)"]
+        let card = anyDescendant(identifier: "job-card-\(inputName)")
         guard card.waitForExistence(timeout: timeout) else { return false }
         card.doubleClick()
         return true
@@ -31,11 +31,19 @@ extension XCUIApplication {
     /// Click a row in the step tree by its label (e.g. "Color Correction").
     @discardableResult
     func selectTreeRow(label: String, timeout: TimeInterval = 5) -> Bool {
-        let row = otherElements["tree-row-\(label)"]
-            .firstMatch
+        let row = anyDescendant(identifier: "tree-row-\(label)")
         guard row.waitForExistence(timeout: timeout) else { return false }
         row.click()
         return true
+    }
+
+    /// Find the first descendant with a matching accessibility identifier,
+    /// regardless of element type.  SwiftUI VStack/HStack containers register
+    /// as .group in the accessibility tree, so `otherElements[id]` misses them.
+    func anyDescendant(identifier: String) -> XCUIElement {
+        descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier == %@", identifier))
+            .firstMatch
     }
 }
 

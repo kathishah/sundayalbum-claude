@@ -72,6 +72,7 @@ struct AlbumPageCard: View {
         }
         .animation(.saStandard, value: isHovered)
         .onHover { isHovered = $0 }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("job-card-\(job.inputName)")
         .task { beforeImage = job.loadBeforeImage() }
     }

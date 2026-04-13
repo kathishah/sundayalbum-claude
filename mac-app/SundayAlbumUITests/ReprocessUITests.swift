@@ -11,9 +11,14 @@ import XCTest
 // straight to Color Correction (StepDetailView.startSelection returns
 // .photo(index:0, step:.colorCorrection) when currentStep == .done).
 //
+// Tree-row labels use PipelineStep.title (short form):
+//   "Orient"  — orientation step
+//   "Glare"   — glare removal step
+//   "Color"   — color correction step
+//
 // Accessibility identifiers used (set in each step view):
 //   • job-card-<inputName>          AlbumPageCard
-//   • tree-row-<label>              StepDetailView TreeRow
+//   • tree-row-<label>              StepDetailView TreeRow  (label = step.title)
 //   • slider-saturation             InlineSlider inside ColorCorrectionStepView
 //   • btn-reprocess-color           ColorCorrectionStepView "Apply & Reprocess"
 //   • btn-rerun-glare               GlareRemovalStepView "Re-run Glare Removal"
@@ -75,10 +80,7 @@ final class ReprocessUITests: XCTestCase {
         btn.click()
 
         // In UITEST_MODE the job transitions to .running immediately.
-        // The ProcessingProgressBanner appears at the bottom of the canvas.
-        // We verify this by checking that the "Apply & Reprocess" button is
-        // gone (view changes when job is running) or a progress indicator appears.
-        // Simplest proxy: the button disappears since the job is now processing.
+        // The button hides (isProcessing = true suppresses the isDirty panel).
         let progressIndicator = app.progressIndicators.firstMatch
         XCTAssertTrue(
             progressIndicator.waitForExistence(timeout: 3) || !btn.exists,
@@ -87,10 +89,11 @@ final class ReprocessUITests: XCTestCase {
     }
 
     // ── T-mac-02: Glare Removal controls ──────────────────────────────────────
+    // Tree-row label for glare removal is "Glare" (PipelineStep.glareRemoval.title)
 
     func testGlareRemovalActionRowExists() throws {
-        XCTAssertTrue(app.selectTreeRow(label: "Glare Removal"),
-                      "Glare Removal should be accessible for the complete cave job")
+        XCTAssertTrue(app.selectTreeRow(label: "Glare"),
+                      "Glare Removal row should be accessible for the complete cave job")
 
         assertExists(app.buttons["btn-rerun-glare"],
                      "Re-run Glare Removal button should always be visible")
@@ -99,13 +102,13 @@ final class ReprocessUITests: XCTestCase {
     }
 
     func testGlareSceneDescFieldExists() throws {
-        XCTAssertTrue(app.selectTreeRow(label: "Glare Removal"))
+        XCTAssertTrue(app.selectTreeRow(label: "Glare"))
         assertExists(app.textFields["field-scene-desc-glare"],
                      "Scene description text field should be visible")
     }
 
     func testGlareRerunButtonTriggersProcessing() throws {
-        XCTAssertTrue(app.selectTreeRow(label: "Glare Removal"))
+        XCTAssertTrue(app.selectTreeRow(label: "Glare"))
         let btn = app.buttons["btn-rerun-glare"]
         assertExists(btn)
         btn.click()
@@ -118,10 +121,11 @@ final class ReprocessUITests: XCTestCase {
     }
 
     // ── T-mac-03: Orientation controls ────────────────────────────────────────
+    // Tree-row label for orientation is "Orient" (PipelineStep.orientation.title)
 
     func testOrientationRotationPickerExists() throws {
-        XCTAssertTrue(app.selectTreeRow(label: "Orientation"),
-                      "Orientation should be accessible for the complete cave job")
+        XCTAssertTrue(app.selectTreeRow(label: "Orient"),
+                      "Orient row should be accessible for the complete cave job")
 
         // All four rotation options should be visible
         for degrees in [0, 90, 180, 270] {
@@ -131,13 +135,13 @@ final class ReprocessUITests: XCTestCase {
     }
 
     func testOrientationSceneDescFieldExists() throws {
-        XCTAssertTrue(app.selectTreeRow(label: "Orientation"))
+        XCTAssertTrue(app.selectTreeRow(label: "Orient"))
         assertExists(app.textFields["field-scene-desc-orientation"],
                      "Scene description field should be visible in Orientation view")
     }
 
     func testOrientationReprocessButtonHiddenByDefault() throws {
-        XCTAssertTrue(app.selectTreeRow(label: "Orientation"))
+        XCTAssertTrue(app.selectTreeRow(label: "Orient"))
         // isDirty is false until user picks a non-zero rotation
         let btn = app.buttons["btn-reprocess-orientation"]
         XCTAssertFalse(btn.waitForExistence(timeout: 2),
@@ -145,7 +149,7 @@ final class ReprocessUITests: XCTestCase {
     }
 
     func testOrientationReprocessButtonAppearsAfterRotationPick() throws {
-        XCTAssertTrue(app.selectTreeRow(label: "Orientation"))
+        XCTAssertTrue(app.selectTreeRow(label: "Orient"))
         app.buttons["btn-rotation-90"].click()
 
         let btn = app.buttons["btn-reprocess-orientation"]
@@ -154,7 +158,7 @@ final class ReprocessUITests: XCTestCase {
     }
 
     func testOrientationReprocessButtonTriggersProcessing() throws {
-        XCTAssertTrue(app.selectTreeRow(label: "Orientation"))
+        XCTAssertTrue(app.selectTreeRow(label: "Orient"))
         app.buttons["btn-rotation-90"].click()
 
         let btn = app.buttons["btn-reprocess-orientation"]

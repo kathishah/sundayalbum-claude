@@ -326,6 +326,7 @@ private struct TreeRow: View {
         .padding(.vertical, 5)
         .background(isSelected ? Color.saAmber500.opacity(0.10) : Color.clear)
         .opacity(isAccessible ? 1.0 : 0.35)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("tree-row-\(label)")
     }
 }
