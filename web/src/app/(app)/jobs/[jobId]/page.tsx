@@ -347,7 +347,7 @@ function ColorRestoreView({
         from_step: 'color_restore',
         photo_index: photoIdx,
         config: {
-          saturation_boost: saturation / 100,
+          color_restore_vibrance_boost: saturation / 100,
           sharpen_amount: sharpness / 100,
         },
       })

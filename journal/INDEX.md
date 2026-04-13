@@ -38,3 +38,4 @@ Development log for Sunday Album. Entries fall into two categories:
 | 2026-04-10 | [public-website](2026-04-10-public-website.md) | Implementation: (public) route group, 5 marketing pages, pipeline page with real images, BeforeAfterSlider, re-run integration |
 | 2026-04-11 | [ses-email-deliverability](2026-04-11-ses-email-deliverability.md) | SES/Gmail via amazonses diagnosis; AWS CLI snapshot; DNS; plan: domain verify, DKIM/SPF/DMARC, production access |
 | 2026-04-12 | [photo-boundary-override](2026-04-12-photo-boundary-override.md) | Plan: user-editable photo detection regions + reprocess from photo_split; fixes photo_split re-detection bug |
+| 2026-04-12 | [reprocess-ui-gaps](2026-04-12-reprocess-ui-gaps.md) | Plan: fill reprocess gaps — 3 unwired macOS step views, web saturation_boost naming mismatch, new CLI flags |
