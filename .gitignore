@@ -25,3 +25,4 @@ mac-app/SundayAlbum.xcodeproj/xcuserdata/
 
 # Next.js
 web/tsconfig.tsbuildinfo
+mac-app/SundayAlbum/BuildInfo.swift
