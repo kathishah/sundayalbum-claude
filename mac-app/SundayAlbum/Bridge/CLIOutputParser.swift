@@ -60,8 +60,8 @@ struct CLIOutputParser {
             return .stepCompleted(name: "Page Detection")
         }
 
-        // "photo_detect: 0.456s, 1 photo(s)"
-        if message.hasPrefix("photo_detect:") {
+        // "photo_split: 0.678s, 3 photo(s)"
+        if message.hasPrefix("photo_split:") {
             return .stepCompleted(name: "Photo Detection")
         }
 

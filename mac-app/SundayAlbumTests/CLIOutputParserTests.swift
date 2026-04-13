@@ -14,42 +14,42 @@ struct CLIOutputParserTests {
     // MARK: - stepCompleted
 
     @Test func parsesLoadTime() {
-        let line = "14:23:02 - src.pipeline - INFO - Load time: 0.234s"
+        let line = "14:23:02 - src.pipeline - INFO - load: 0.234s"
         #expect(CLIOutputParser.parse(line: line) == .stepCompleted(name: "Load"))
     }
 
     @Test func parsesNormalizeTime() {
-        let line = "14:23:02 - src.pipeline - INFO - Normalize time: 0.123s"
+        let line = "14:23:02 - src.pipeline - INFO - normalize: 0.123s"
         #expect(CLIOutputParser.parse(line: line) == .stepCompleted(name: "Normalize"))
     }
 
     @Test func parsesPageDetectionTime() {
-        let line = "14:23:03 - src.pipeline - INFO - Page detection time: 1.456s"
+        let line = "14:23:03 - src.pipeline - INFO - page_detect: 1.456s"
         #expect(CLIOutputParser.parse(line: line) == .stepCompleted(name: "Page Detection"))
     }
 
-    @Test func parsesPhotoDetectionTime() {
-        let line = "14:23:04 - src.pipeline - INFO - Photo detection time: 0.678s, 3 photos found"
+    @Test func parsesPhotoSplitTime() {
+        let line = "14:23:04 - src.pipeline - INFO - photo_split: 0.678s, 3 photo(s)"
         #expect(CLIOutputParser.parse(line: line) == .stepCompleted(name: "Photo Detection"))
     }
 
     @Test func parsesAIOrientationTime() {
-        let line = "14:23:06 - src.pipeline - INFO - AI orientation time: 2.345s (rotation=0°)"
+        let line = "14:23:06 - src.pipeline - INFO - ai_orient: 2.345s"
         #expect(CLIOutputParser.parse(line: line) == .stepCompleted(name: "AI Orientation"))
     }
 
     @Test func parsesGlareRemovalTime() {
-        let line = "14:23:12 - src.pipeline - INFO - Glare removal time: 5.678s (openai)"
+        let line = "14:23:12 - src.pipeline - INFO - glare: 5.678s"
         #expect(CLIOutputParser.parse(line: line) == .stepCompleted(name: "Glare Removal"))
     }
 
     @Test func parsesGeometryCorrectionTime() {
-        let line = "14:23:12 - src.pipeline - INFO - Geometry correction time: 0.089s (no-op)"
+        let line = "14:23:12 - src.pipeline - INFO - geometry: 0.089s"
         #expect(CLIOutputParser.parse(line: line) == .stepCompleted(name: "Geometry"))
     }
 
     @Test func parsesColorRestorationTime() {
-        let line = "14:23:13 - src.pipeline - INFO - Color restoration time: 0.345s"
+        let line = "14:23:13 - src.pipeline - INFO - color_restore: 0.345s"
         #expect(CLIOutputParser.parse(line: line) == .stepCompleted(name: "Color Restoration"))
     }
 
