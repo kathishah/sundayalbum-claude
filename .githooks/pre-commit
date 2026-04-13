@@ -66,9 +66,11 @@ else
   : "${DEV_FRONTEND_URL:=https://dev.sundayalbum.com}"
   : "${DEV_API_URL:=https://nodcooz758.execute-api.us-west-2.amazonaws.com}"
   : "${SESSIONS_TABLE:=sa-sessions-dev}"
+  : "${TEST_USER_EMAIL:=chintan@reachto.me}"
 
   (cd "$REPO_ROOT/web" && \
     STAGE=dev \
+    TEST_USER_EMAIL="$TEST_USER_EMAIL" \
     DEV_FRONTEND_URL="$DEV_FRONTEND_URL" \
     DEV_API_URL="$DEV_API_URL" \
     SESSIONS_TABLE="$SESSIONS_TABLE" \

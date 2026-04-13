@@ -369,6 +369,45 @@ def test_reprocess_valid_step():
     assert "execution_arn" in data
 
 
+# ── 20a. reprocess input always includes reprocess_photo_index ───────────────
+
+
+def test_reprocess_sfn_input_always_has_reprocess_photo_index():
+    """SFN start input always contains reprocess_photo_index (None when not targeted).
+
+    PrepareMap and the Map item_selector both use '$.reprocess_photo_index' via
+    JSONPath — the field must exist in the event even for a full reprocess,
+    otherwise Step Functions raises States.Runtime.
+    """
+    _, user_hash, token = _auth()
+    job_id = str(uuid.uuid4())
+    insert_job(user_hash, job_id, status="complete", extra={"input_stem": "test", "photo_count": 1})
+
+    event = make_event(
+        "POST /jobs/reprocess",
+        body={"from_step": "page_detect"},   # no photo_index → reprocess_photo_index must be None
+        path_params={"jobId": job_id},
+        token=token,
+    )
+    resp = jobs_module.handler(event, None)
+    assert resp["statusCode"] == 200
+
+    # Retrieve the SFN execution input and assert reprocess_photo_index is present
+    sfn = boto3.client("stepfunctions", region_name=REGION)
+    executions = sfn.list_executions(
+        stateMachineArn=f"arn:aws:states:{REGION}:123456789012:stateMachine:sa-pipeline-test"
+    )["executions"]
+    assert executions, "No SFN execution was started"
+    last = sorted(executions, key=lambda e: e["startDate"], reverse=True)[0]
+    execution = sfn.describe_execution(executionArn=last["executionArn"])
+    sfn_input = json.loads(execution["input"])
+
+    assert "reprocess_photo_index" in sfn_input, (
+        "reprocess_photo_index must always be present in SFN input — PrepareMap uses $.reprocess_photo_index"
+    )
+    assert sfn_input["reprocess_photo_index"] is None
+
+
 # ── 20. reprocess invalid step ───────────────────────────────────────────────
 
 
