@@ -64,3 +64,20 @@ targets:
         CODE_SIGN_IDENTITY: "-"
         CODE_SIGNING_REQUIRED: NO
         SWIFT_STRICT_CONCURRENCY: targeted
+
+  SundayAlbumUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: SundayAlbumUITests
+    dependencies:
+      - target: SundayAlbum
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.sundayalbum.mac.uitests
+        MACOSX_DEPLOYMENT_TARGET: "26.0"
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGNING_REQUIRED: NO
+        SWIFT_STRICT_CONCURRENCY: targeted

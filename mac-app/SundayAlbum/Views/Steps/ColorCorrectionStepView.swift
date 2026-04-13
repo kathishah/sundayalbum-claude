@@ -77,6 +77,7 @@ struct ColorCorrectionStepView: View {
                     .buttonStyle(.borderedProminent)
                     .tint(Color.saAmber500)
                     .controlSize(.small)
+                    .accessibilityIdentifier("btn-reprocess-color")
                 }
             }
             .padding(.horizontal, 20)
@@ -115,6 +116,7 @@ private struct InlineSlider: View {
             Slider(value: $value, in: range)
                 .tint(Color.saAmber500)
                 .frame(width: 120)
+                .accessibilityIdentifier("slider-\(label.lowercased())")
             Text(String(format: "%+.0f%%", value * 100))
                 .font(.jetbrainsMono(11))
                 .foregroundStyle(Color.saStone400)

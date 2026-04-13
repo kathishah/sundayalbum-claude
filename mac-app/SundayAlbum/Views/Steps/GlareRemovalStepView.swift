@@ -70,6 +70,7 @@ struct GlareRemovalStepView: View {
                     TextField("Leave blank for AI description", text: $sceneDesc)
                         .font(.dmSans(12))
                         .textFieldStyle(.roundedBorder)
+                        .accessibilityIdentifier("field-scene-desc-glare")
                 }
 
                 // ── Action row ──────────────────────────────────────
@@ -80,6 +81,7 @@ struct GlareRemovalStepView: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    .accessibilityIdentifier("btn-discard-glare")
 
                     Button("Re-run Glare Removal") {
                         let runner = PipelineRunner(job: job)
@@ -88,6 +90,7 @@ struct GlareRemovalStepView: View {
                     .buttonStyle(.borderedProminent)
                     .tint(Color.saAmber500)
                     .controlSize(.small)
+                    .accessibilityIdentifier("btn-rerun-glare")
                 }
             }
             .padding(16)

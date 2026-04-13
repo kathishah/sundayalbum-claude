@@ -79,6 +79,7 @@ private struct OrientationPhotoPanel: View {
                         .font(.dmSans(12))
                         .textFieldStyle(.roundedBorder)
                         .onChange(of: pendingDescription) { checkDirty() }
+                        .accessibilityIdentifier("field-scene-desc-orientation")
                 }
 
                 if isDirty {
@@ -105,6 +106,7 @@ private struct OrientationPhotoPanel: View {
                         .buttonStyle(.borderedProminent)
                         .tint(Color.saAmber500)
                         .controlSize(.small)
+                        .accessibilityIdentifier("btn-reprocess-orientation")
                     }
                 }
             }
@@ -169,6 +171,7 @@ private struct RotationPicker: View {
                     }
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("btn-rotation-\(opt.degrees)")
             }
         }
     }

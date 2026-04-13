@@ -118,56 +118,69 @@ final class PipelineRunner {
     /// invocation with ``--steps photo_split,...`` so that load, normalize,
     /// page_detect, and photo_detect are all skipped.
     func reprocessFromPhotoSplit() {
-        let stepsFromSplit = [
-            "photo_split", "ai_orientation", "glare_detect",
-            "keystone_correct", "dewarp", "rotation_correct",
-            "white_balance", "color_restore", "deyellow", "sharpen",
-        ].joined(separator: ",")
-
         job.extractedPhotos = []
-        _launchReprocess(extraArgs: ["--steps", stepsFromSplit], startingStep: .photoSplit)
+        _launchReprocess(extraArgs: PipelineRunner._photoSplitArgs(), startingStep: .photoSplit)
     }
 
     /// Restart from AI orientation onward, applying an optional rotation override
     /// and/or scene description for the glare removal prompt.
     func reprocessFromOrientation(rotationDegrees: Int, sceneDescription: String) {
-        let steps = [
-            "ai_orientation", "glare_detect", "keystone_correct",
-            "dewarp", "rotation_correct", "white_balance",
-            "color_restore", "deyellow", "sharpen",
-        ].joined(separator: ",")
-
-        var extra = ["--steps", steps]
-        if rotationDegrees != 0 { extra += ["--forced-rotation", "\(rotationDegrees)"] }
-        if !sceneDescription.isEmpty { extra += ["--scene-desc", sceneDescription] }
-
-        _launchReprocess(extraArgs: extra, startingStep: .orientation)
+        _launchReprocess(
+            extraArgs: PipelineRunner._orientationArgs(rotationDegrees: rotationDegrees, sceneDescription: sceneDescription),
+            startingStep: .orientation
+        )
     }
 
     /// Restart from glare removal onward, using an optional scene description
     /// override for the OpenAI prompt.
     func reprocessFromGlare(sceneDescription: String) {
-        let steps = [
-            "glare_detect", "keystone_correct", "dewarp",
-            "rotation_correct", "white_balance", "color_restore",
-            "deyellow", "sharpen",
-        ].joined(separator: ",")
-
-        var extra = ["--steps", steps]
-        if !sceneDescription.isEmpty { extra += ["--scene-desc", sceneDescription] }
-
-        _launchReprocess(extraArgs: extra, startingStep: .glareRemoval)
+        _launchReprocess(
+            extraArgs: PipelineRunner._glareArgs(sceneDescription: sceneDescription),
+            startingStep: .glareRemoval
+        )
     }
 
     /// Restart from color restoration onward with custom vibrance and sharpness values.
     func reprocessFromColor(vibranceBoost: Double, sharpenAmount: Double) {
-        let steps = "white_balance,color_restore,deyellow,sharpen"
-        let extra = [
-            "--steps", steps,
-            "--color-vibrance", String(format: "%.3f", vibranceBoost),
-            "--sharpen-amount", String(format: "%.3f", sharpenAmount),
-        ]
-        _launchReprocess(extraArgs: extra, startingStep: .colorCorrection)
+        _launchReprocess(
+            extraArgs: PipelineRunner._colorArgs(vibranceBoost: vibranceBoost, sharpenAmount: sharpenAmount),
+            startingStep: .colorCorrection
+        )
+    }
+
+    // MARK: - Testable arg builders
+    // `nonisolated` so unit tests can call them synchronously without @MainActor.
+
+    nonisolated static func _photoSplitArgs() -> [String] {
+        let steps = ["photo_split", "ai_orientation", "glare_detect",
+                     "keystone_correct", "dewarp", "rotation_correct",
+                     "white_balance", "color_restore", "deyellow", "sharpen"].joined(separator: ",")
+        return ["--steps", steps]
+    }
+
+    nonisolated static func _orientationArgs(rotationDegrees: Int, sceneDescription: String) -> [String] {
+        let steps = ["ai_orientation", "glare_detect", "keystone_correct",
+                     "dewarp", "rotation_correct", "white_balance",
+                     "color_restore", "deyellow", "sharpen"].joined(separator: ",")
+        var args = ["--steps", steps]
+        if rotationDegrees != 0 { args += ["--forced-rotation", "\(rotationDegrees)"] }
+        if !sceneDescription.isEmpty { args += ["--scene-desc", sceneDescription] }
+        return args
+    }
+
+    nonisolated static func _glareArgs(sceneDescription: String) -> [String] {
+        let steps = ["glare_detect", "keystone_correct", "dewarp",
+                     "rotation_correct", "white_balance", "color_restore",
+                     "deyellow", "sharpen"].joined(separator: ",")
+        var args = ["--steps", steps]
+        if !sceneDescription.isEmpty { args += ["--scene-desc", sceneDescription] }
+        return args
+    }
+
+    nonisolated static func _colorArgs(vibranceBoost: Double, sharpenAmount: Double) -> [String] {
+        ["--steps", "white_balance,color_restore,deyellow,sharpen",
+         "--color-vibrance", String(format: "%.3f", vibranceBoost),
+         "--sharpen-amount", String(format: "%.3f", sharpenAmount)]
     }
 
     // MARK: - Private
@@ -177,6 +190,17 @@ final class PipelineRunner {
     /// Builds a `python -m src.cli process <input> --output <dir> [extraArgs]`
     /// invocation, wires stdout/stderr to the line handler, and starts the process.
     private func _launchReprocess(extraArgs: [String], startingStep: PipelineStep) {
+        // In UI-test mode skip the actual subprocess so tests run without Python.
+        // The job transitions to .running; tests can assert on that state change.
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["UITEST_MODE"] == "1" {
+            job.state = .running
+            job.currentStep = startingStep
+            job.stepStatus = .running
+            return
+        }
+        #endif
+
         guard let inputURL = job.inputURL else {
             job.state = .failed
             job.errorMessage = "No input file URL"
