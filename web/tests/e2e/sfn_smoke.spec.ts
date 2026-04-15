@@ -23,7 +23,7 @@ import path from 'path'
 import { test, expect } from '@playwright/test'
 import {
   SFNClient,
-  ListExecutionsCommand,
+  DescribeExecutionCommand,
   GetExecutionHistoryCommand,
   type HistoryEvent,
 } from '@aws-sdk/client-sfn'
@@ -128,13 +128,14 @@ async function uploadAndProcess(token: string, fixturePath: string): Promise<str
 
 /**
  * Trigger a reprocess and wait for the job to return to 'complete'.
- * Returns the job_id (unchanged) once polling confirms completion.
+ * Returns { jobId, executionArn } — the ARN is taken directly from the API
+ * response so callers don't need to search for it by name (which is racy).
  */
 async function reprocessAndWait(
   token: string,
   jobId: string,
   body: Record<string, unknown>,
-): Promise<string> {
+): Promise<{ jobId: string; executionArn: string }> {
   const r = await fetch(`${API_URL}/jobs/${jobId}/reprocess`, {
     method: 'POST',
     headers: authed(token),
@@ -143,30 +144,35 @@ async function reprocessAndWait(
   if (!r.ok) {
     throw new Error(`reprocess failed (${r.status}): ${await r.text()}`)
   }
+  const { execution_arn: executionArn } = await r.json() as { execution_arn: string }
+  if (!executionArn) throw new Error('reprocess response missing execution_arn')
 
   const deadline = Date.now() + REPROCESS_TIMEOUT
   while (Date.now() < deadline) {
     await new Promise((res) => setTimeout(res, POLL_INTERVAL_MS))
     const { status } = await getJobStatus(token, jobId)
-    if (status === 'complete') return jobId
+    if (status === 'complete') return { jobId, executionArn }
     if (status === 'failed')  throw new Error(`Reprocess failed for job ${jobId}`)
   }
   throw new Error(`Reprocess timed out after ${REPROCESS_TIMEOUT / 1000}s`)
 }
 
 /**
- * Find the most recent SFN execution that contains the given job_id in its name.
- * Returns its execution ARN.
+ * Poll a specific execution ARN until it reaches SUCCEEDED status.
+ * This avoids the race condition where DynamoDB reports the job as 'complete'
+ * before SFN has indexed the execution as SUCCEEDED in its list API.
  */
-async function findExecutionArn(sfn: SFNClient, jobId: string): Promise<string> {
-  const resp = await sfn.send(new ListExecutionsCommand({
-    stateMachineArn: STATE_MACHINE,
-    statusFilter: 'SUCCEEDED',
-    maxResults: 20,
-  }))
-  const match = (resp.executions ?? []).find((e) => e.name?.includes(jobId))
-  if (!match?.executionArn) throw new Error(`No succeeded execution found for job ${jobId}`)
-  return match.executionArn
+async function waitForExecutionSucceeded(sfn: SFNClient, executionArn: string): Promise<void> {
+  const deadline = Date.now() + REPROCESS_TIMEOUT
+  while (Date.now() < deadline) {
+    const { status } = await sfn.send(new DescribeExecutionCommand({ executionArn }))
+    if (status === 'SUCCEEDED') return
+    if (status === 'FAILED' || status === 'ABORTED' || status === 'TIMED_OUT') {
+      throw new Error(`SFN execution ${executionArn} ended with status: ${status}`)
+    }
+    await new Promise((res) => setTimeout(res, POLL_INTERVAL_MS))
+  }
+  throw new Error(`SFN execution ${executionArn} did not SUCCEED within timeout`)
 }
 
 /**
@@ -227,10 +233,10 @@ test('T-sfn-smoke-01: reprocess from page_detect routes Load and Normalize to Pa
   const jobId = readCompletedJobId()!
   const sfn   = new SFNClient({ region: REGION })
 
-  await reprocessAndWait(token, jobId, { from_step: 'page_detect' })
+  const { executionArn } = await reprocessAndWait(token, jobId, { from_step: 'page_detect' })
+  await waitForExecutionSucceeded(sfn, executionArn)
 
-  const execArn = await findExecutionArn(sfn, jobId)
-  const events  = await getHistory(sfn, execArn)
+  const events  = await getHistory(sfn, executionArn)
   const tasks   = taskStateNames(events)
   const passes  = passStateNames(events)
 
@@ -262,13 +268,13 @@ test('T-sfn-smoke-02: single-photo reprocess only invokes per-photo Lambdas for 
 
   // Reprocess only photo index 1 (second photo) starting from ai_orient.
   // Photo index 0 should not trigger any per-photo Lambda.
-  await reprocessAndWait(token, jobId, {
+  const { executionArn } = await reprocessAndWait(token, jobId, {
     from_step: 'ai_orient',
     photo_index: 1,
   })
+  await waitForExecutionSucceeded(sfn, executionArn)
 
-  const execArn = await findExecutionArn(sfn, jobId)
-  const events  = await getHistory(sfn, execArn)
+  const events  = await getHistory(sfn, executionArn)
 
   // All pre-split steps should be skipped (start_from=ai_orient)
   const passes = passStateNames(events)
