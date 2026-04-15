@@ -27,7 +27,16 @@ export default function TermsPage() {
               Agreement
             </h2>
             <p className="text-sm">
-              Sunday Album is operated by <strong>ArjunTech LLC</strong>. By using the Sunday
+              Sunday Album is operated by{' '}
+              <a
+                href="https://arjuntech.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sa-amber-600 dark:text-sa-amber-400 hover:underline"
+              >
+                ArjunTech LLC
+              </a>
+              . By using the Sunday
               Album website, web app, or Mac app, you agree to these Terms of Use. If you do not
               agree, do not use the service.
             </p>

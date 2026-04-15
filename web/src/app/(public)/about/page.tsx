@@ -106,7 +106,15 @@ export default function AboutPage() {
           </h2>
           <p className="text-sm text-sa-stone-500 dark:text-sa-stone-400 leading-relaxed mb-4">
             Sunday Album is a product of{' '}
-            <strong className="text-sa-stone-700 dark:text-sa-stone-200">ArjunTech LLC</strong> —
+            <a
+              href="https://arjuntech.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-semibold text-sa-stone-700 dark:text-sa-stone-200 hover:text-sa-amber-600 dark:hover:text-sa-amber-400 transition-colors duration-[200ms]"
+            >
+              ArjunTech LLC
+            </a>{' '}
+            —
             a small, independent software company building tools for everyday life. We make things
             we&apos;d use ourselves: practical, well-crafted software that solves real problems
             without unnecessary complexity.

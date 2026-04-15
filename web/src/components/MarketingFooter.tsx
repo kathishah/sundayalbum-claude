@@ -69,7 +69,16 @@ export default function MarketingFooter() {
             © {new Date().getFullYear()} ArjunTech LLC. All rights reserved.
           </p>
           <p className="text-xs text-sa-stone-400 dark:text-sa-stone-600">
-            Sunday Album is a product of ArjunTech LLC.
+            Sunday Album is a product of{' '}
+            <a
+              href="https://arjuntech.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-sa-stone-900 dark:hover:text-sa-stone-400 transition-colors duration-[200ms]"
+            >
+              ArjunTech LLC
+            </a>
+            .
           </p>
         </div>
       </div>

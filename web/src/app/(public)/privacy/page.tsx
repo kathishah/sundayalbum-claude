@@ -27,7 +27,16 @@ export default function PrivacyPage() {
               Who we are
             </h2>
             <p className="text-sm">
-              Sunday Album is a product of <strong>ArjunTech LLC</strong>. References to
+              Sunday Album is a product of{' '}
+              <a
+                href="https://arjuntech.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sa-amber-600 dark:text-sa-amber-400 hover:underline"
+              >
+                ArjunTech LLC
+              </a>
+              . References to
               &ldquo;we,&rdquo; &ldquo;us,&rdquo; or &ldquo;our&rdquo; in this policy refer to
               ArjunTech LLC. You can reach us at{' '}
               <a
