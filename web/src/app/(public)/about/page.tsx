@@ -99,6 +99,54 @@ export default function AboutPage() {
           </p>
         </div>
 
+        {/* ArjunTech */}
+        <div className="mb-16">
+          <h2 className="font-display text-xl font-bold text-sa-stone-900 dark:text-sa-stone-50 mb-4">
+            Made by ArjunTech LLC
+          </h2>
+          <p className="text-sm text-sa-stone-500 dark:text-sa-stone-400 leading-relaxed mb-4">
+            Sunday Album is a product of{' '}
+            <strong className="text-sa-stone-700 dark:text-sa-stone-200">ArjunTech LLC</strong> —
+            a small, independent software company building tools for everyday life. We make things
+            we&apos;d use ourselves: practical, well-crafted software that solves real problems
+            without unnecessary complexity.
+          </p>
+          <p className="text-sm text-sa-stone-500 dark:text-sa-stone-400 leading-relaxed">
+            Built by Chintan &mdash;{' '}
+            <a
+              href="mailto:chintan@arjuntech.com"
+              className="text-sa-amber-600 dark:text-sa-amber-400 hover:underline"
+            >
+              chintan@arjuntech.com
+            </a>
+          </p>
+        </div>
+
+        {/* Other products */}
+        <div className="mb-16">
+          <h2 className="font-display text-xl font-bold text-sa-stone-900 dark:text-sa-stone-50 mb-4">
+            Other ArjunTech products
+          </h2>
+          <a
+            href="https://www.delicioustrades.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex flex-col gap-1.5 p-5 rounded-2xl border border-sa-stone-100 dark:border-sa-stone-800 hover:border-sa-amber-300 dark:hover:border-sa-amber-700 hover:bg-sa-stone-50 dark:hover:bg-sa-stone-900 transition-colors duration-[200ms] group"
+          >
+            <span className="font-display font-bold text-sa-stone-900 dark:text-sa-stone-50 group-hover:text-sa-amber-600 dark:group-hover:text-sa-amber-400 transition-colors duration-[200ms]">
+              Delicious Trades
+            </span>
+            <span className="text-sm text-sa-stone-500 dark:text-sa-stone-400 leading-relaxed">
+              A learning platform for people who want to understand investing before putting real
+              money on the line. Chart reading, options basics, paper trading — designed for
+              beginners who want to go slow and get it right.
+            </span>
+            <span className="text-xs text-sa-amber-600 dark:text-sa-amber-400 mt-1">
+              delicioustrades.com →
+            </span>
+          </a>
+        </div>
+
         {/* Contact / CTA */}
         <div className="p-6 rounded-2xl bg-sa-amber-50 dark:bg-sa-amber-950/30 border border-sa-amber-200 dark:border-sa-amber-800">
           <h2 className="font-display text-xl font-bold text-sa-stone-900 dark:text-sa-stone-50 mb-2">
