@@ -16,6 +16,13 @@ const footerLinks = [
       { href: '/about', label: 'About' },
     ],
   },
+  {
+    heading: 'Legal',
+    links: [
+      { href: '/privacy', label: 'Privacy Policy' },
+      { href: '/terms', label: 'Terms of Use' },
+    ],
+  },
 ]
 
 export default function MarketingFooter() {
@@ -59,10 +66,19 @@ export default function MarketingFooter() {
 
         <div className="border-t border-sa-stone-100 dark:border-sa-stone-800 pt-6 flex flex-col sm:flex-row items-center justify-between gap-3">
           <p className="text-xs text-sa-stone-400 dark:text-sa-stone-600">
-            © {new Date().getFullYear()} Sunday Album. All rights reserved.
+            © {new Date().getFullYear()} ArjunTech LLC. All rights reserved.
           </p>
           <p className="text-xs text-sa-stone-400 dark:text-sa-stone-600">
-            Made with care for family memories.
+            Sunday Album is a product of{' '}
+            <a
+              href="https://arjuntech.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-sa-stone-900 dark:hover:text-sa-stone-400 transition-colors duration-[200ms]"
+            >
+              ArjunTech LLC
+            </a>
+            .
           </p>
         </div>
       </div>

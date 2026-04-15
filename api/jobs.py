@@ -425,8 +425,10 @@ def _handle_reprocess(job_id: str | None, event: dict, user_hash: str) -> dict:
     photo_index = body.get("photo_index")  # optional int
     config_overrides = body.get("config") or {}
 
-    if not from_step or from_step not in _VALID_REPROCESS_STEPS:
-        return bad_request(f"from_step must be one of: {', '.join(_VALID_REPROCESS_STEPS)}")
+    if from_step and from_step not in _VALID_REPROCESS_STEPS:
+        return bad_request(
+            f"Unknown step '{from_step}'. Valid steps: {', '.join(_VALID_REPROCESS_STEPS)}"
+        )
 
     if photo_index is not None:
         try:
@@ -455,9 +457,9 @@ def _handle_reprocess(job_id: str | None, event: dict, user_hash: str) -> dict:
         "start_from": from_step,
         # photo_count is needed by PrepareMap when photo_split is skipped
         "photo_count": int(item.get("photo_count", 1)),
+        # Always present so PrepareMap and Map item_selector can safely use .$
+        "reprocess_photo_index": photo_index,  # None when not targeting a single photo
     }
-    if photo_index is not None:
-        execution_input["reprocess_photo_index"] = photo_index
 
     execution_name = f"{job_id}-r{int(time.time())}"
     try:
